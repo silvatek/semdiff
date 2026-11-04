@@ -1,21 +1,21 @@
 use std::fs;
 use std::process::ExitCode;
 
-use crate::{Args, Differences};
-
-pub(crate) fn write_output(args: &Args, differences: &Differences) -> ExitCode {
-    let document = semdiff_document(
-        env!("CARGO_PKG_VERSION"),
-        &utc_timestamp(),
-        &differences.renames,
-    );
-    if let Err(error) = fs::write(&args.output, document) {
-        eprintln!("cannot write {}: {error}", args.output);
+pub(crate) fn write_output(
+    output: &str,
+    left: &str,
+    right: &str,
+    paths: &[String],
+    renames: &[(String, String)],
+) -> ExitCode {
+    let document = semdiff_document(env!("CARGO_PKG_VERSION"), &utc_timestamp(), renames);
+    if let Err(error) = fs::write(output, document) {
+        eprintln!("cannot write {output}: {error}");
         return ExitCode::from(1);
     }
     println!("Semdiff {}", env!("CARGO_PKG_VERSION"));
-    println!("Comparing {} and {}", args.left, args.right);
-    for path in &differences.paths {
+    println!("Comparing {left} and {right}");
+    for path in paths {
         println!("{path}");
     }
     ExitCode::SUCCESS

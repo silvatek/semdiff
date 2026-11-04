@@ -9,19 +9,14 @@ use std::process::ExitCode;
 
 fn main() -> ExitCode {
     let args = parse_args();
-    let differences = find_differences(&args);
-    output::write_output(&args, &differences)
+    let (paths, renames) = find_differences(&args.left, &args.right);
+    output::write_output(&args.output, &args.left, &args.right, &paths, &renames)
 }
 
 struct Args {
     left: String,
     right: String,
     output: String,
-}
-
-struct Differences {
-    paths: Vec<String>,
-    renames: Vec<(String, String)>,
 }
 
 fn parse_args() -> Args {
@@ -38,14 +33,14 @@ fn parse_args() -> Args {
     }
 }
 
-fn find_differences(args: &Args) -> Differences {
-    let paths = paired_files(&args.left, &args.right).unwrap_or_else(|message| {
+fn find_differences(left: &str, right: &str) -> (Vec<String>, Vec<(String, String)>) {
+    let paths = paired_files(left, right).unwrap_or_else(|message| {
         exit_with_message(message);
     });
-    let renames = rename::file_renames(&args.left, &args.right).unwrap_or_else(|message| {
+    let renames = rename::file_renames(left, right).unwrap_or_else(|message| {
         exit_with_message(message);
     });
-    Differences { paths, renames }
+    (paths, renames)
 }
 
 fn exit_with_message(message: String) -> ! {
