@@ -1,15 +1,10 @@
-/// Code identifiers in a Rust source.
-///
-/// Keywords are not identifiers, and neither are names written in comments or strings.
-pub(super) fn identifiers(source: &str) -> Vec<String> {
-    scan(source, None).0
-}
+use super::{Span, SpanKind};
 
-/// Rust source with one code identifier renamed.
+/// Classified spans in a Rust source.
 ///
-/// A keyword is left unchanged, as are comments and strings.
-pub(super) fn rename_identifier(source: &str, from: &str, to: &str) -> String {
-    scan(source, Some((from, to))).1
+/// A keyword is not an identifier, and a name inside a comment or string is not one either.
+pub(super) fn spans(source: &str) -> Vec<Span> {
+    scan(source)
 }
 
 const KEYWORDS: &[&str] = &[
@@ -24,76 +19,85 @@ fn is_keyword(name: &str) -> bool {
     KEYWORDS.binary_search(&name).is_ok()
 }
 
-fn scan(source: &str, rename: Option<(&str, &str)>) -> (Vec<String>, String) {
+fn scan(source: &str) -> Vec<Span> {
     let mut index = 0;
-    let mut found = Vec::new();
-    let mut output = String::new();
+    let mut spans = Vec::new();
     while index < source.len() {
         if source[index..].starts_with("//") {
-            copy_line_comment(source, &mut index, &mut output);
+            let start = index;
+            skip_line_comment(source, &mut index);
+            spans.push(Span {
+                start,
+                end: index,
+                kind: SpanKind::Comment,
+            });
             continue;
         }
         if source[index..].starts_with("/*") {
-            copy_block_comment(source, &mut index, &mut output);
+            let start = index;
+            skip_block_comment(source, &mut index);
+            spans.push(Span {
+                start,
+                end: index,
+                kind: SpanKind::Comment,
+            });
             continue;
         }
         if peek(source, index) == Some('\'') {
-            copy_char_or_lifetime(source, &mut index, &mut output);
+            let start = index;
+            if skip_char_or_lifetime(source, &mut index) {
+                spans.push(Span {
+                    start,
+                    end: index,
+                    kind: SpanKind::String,
+                });
+            }
             continue;
         }
         if peek(source, index) == Some('"') {
-            copy_cooked_string(source, &mut index, &mut output);
+            let start = index;
+            skip_cooked_string(source, &mut index);
+            spans.push(Span {
+                start,
+                end: index,
+                kind: SpanKind::String,
+            });
             continue;
         }
         if matches!(peek(source, index), Some(character) if is_ident_start(character)) {
             let start = index;
             let ident = read_ident(source, &mut index);
-            if take_literal(source, &mut index, &mut output, &ident, start) {
+            if skip_literal(source, &mut index, &ident) {
+                spans.push(Span {
+                    start,
+                    end: index,
+                    kind: SpanKind::String,
+                });
                 continue;
             }
-            record_ident(&mut found, &mut output, &ident, rename);
+            spans.push(Span {
+                start,
+                end: index,
+                kind: if is_keyword(&ident) {
+                    SpanKind::Keyword
+                } else {
+                    SpanKind::Identifier
+                },
+            });
             continue;
         }
-        copy_one(source, &mut index, &mut output);
+        let _ = eat(source, &mut index);
     }
-    (found, output)
+    spans
 }
 
-fn record_ident(
-    identifiers: &mut Vec<String>,
-    output: &mut String,
-    ident: &str,
-    rename: Option<(&str, &str)>,
-) {
-    if is_keyword(ident) {
-        output.push_str(ident);
-        return;
-    }
-    identifiers.push(ident.to_string());
-    if let Some((from, to)) = rename {
-        if ident == from {
-            output.push_str(to);
-            return;
-        }
-    }
-    output.push_str(ident);
-}
-
-fn take_literal(
-    source: &str,
-    index: &mut usize,
-    output: &mut String,
-    ident: &str,
-    ident_start: usize,
-) -> bool {
-    let after_ident = *index;
+fn skip_literal(source: &str, index: &mut usize, ident: &str) -> bool {
     if ident == "r" && matches!(peek(source, *index), Some('"' | '#')) {
         let mut cursor = *index;
         let hashes = count_hashes(source, &mut cursor);
         if peek(source, cursor) == Some('"') {
-            output.push_str(&source[ident_start..cursor]);
             *index = cursor;
-            copy_raw_string(source, index, output, hashes);
+            skip_raw_string(source, index, hashes);
             return true;
         }
         return false;
@@ -102,31 +106,27 @@ fn take_literal(
         let mut cursor = *index;
         let hashes = count_hashes(source, &mut cursor);
         if peek(source, cursor) == Some('"') {
-            output.push_str(&source[ident_start..cursor]);
             *index = cursor;
-            copy_raw_string(source, index, output, hashes);
+            skip_raw_string(source, index, hashes);
             return true;
         }
         return false;
     }
     if matches!(ident, "b" | "c") {
         if peek(source, *index) == Some('"') {
-            output.push_str(&source[ident_start..after_ident]);
-            copy_cooked_string(source, index, output);
+            skip_cooked_string(source, index);
             return true;
         }
         if peek(source, *index) == Some('\'') {
-            output.push_str(&source[ident_start..after_ident]);
-            copy_char_or_lifetime(source, index, output);
+            let _ = skip_char_or_lifetime(source, index);
             return true;
         }
         if source[*index..].starts_with("r\"") || source[*index..].starts_with("r#") {
             let mut cursor = *index + 1;
             let hashes = count_hashes(source, &mut cursor);
             if peek(source, cursor) == Some('"') {
-                output.push_str(&source[ident_start..cursor]);
                 *index = cursor;
-                copy_raw_string(source, index, output, hashes);
+                skip_raw_string(source, index, hashes);
                 return true;
             }
         }
@@ -134,18 +134,16 @@ fn take_literal(
     false
 }
 
-fn copy_line_comment(source: &str, index: &mut usize, output: &mut String) {
+fn skip_line_comment(source: &str, index: &mut usize) {
     while *index < source.len() {
-        let character = peek(source, *index);
-        copy_one(source, index, output);
+        let character = eat(source, index);
         if character == Some('\n') {
             break;
         }
     }
 }
 
-fn copy_block_comment(source: &str, index: &mut usize, output: &mut String) {
-    let start = *index;
+fn skip_block_comment(source: &str, index: &mut usize) {
     *index += 2;
     let mut depth = 1;
     while *index < source.len() && depth > 0 {
@@ -159,11 +157,9 @@ fn copy_block_comment(source: &str, index: &mut usize, output: &mut String) {
             let _ = eat(source, index);
         }
     }
-    output.push_str(&source[start..*index]);
 }
 
-fn copy_cooked_string(source: &str, index: &mut usize, output: &mut String) {
-    let start = *index;
+fn skip_cooked_string(source: &str, index: &mut usize) {
     let _ = eat(source, index);
     while *index < source.len() {
         match peek(source, *index) {
@@ -181,11 +177,9 @@ fn copy_cooked_string(source: &str, index: &mut usize, output: &mut String) {
             None => break,
         }
     }
-    output.push_str(&source[start..*index]);
 }
 
-fn copy_raw_string(source: &str, index: &mut usize, output: &mut String, hashes: usize) {
-    let start = *index;
+fn skip_raw_string(source: &str, index: &mut usize, hashes: usize) {
     let _ = eat(source, index);
     let marker = "#".repeat(hashes);
     while *index < source.len() {
@@ -195,11 +189,9 @@ fn copy_raw_string(source: &str, index: &mut usize, output: &mut String, hashes:
         }
         let _ = eat(source, index);
     }
-    output.push_str(&source[start..*index]);
 }
 
-fn copy_char_or_lifetime(source: &str, index: &mut usize, output: &mut String) {
-    let start = *index;
+fn skip_char_or_lifetime(source: &str, index: &mut usize) -> bool {
     let _ = eat(source, index);
     if peek(source, *index) == Some('\\') {
         let _ = eat(source, index);
@@ -219,16 +211,16 @@ fn copy_char_or_lifetime(source: &str, index: &mut usize, output: &mut String) {
         if peek(source, *index) == Some('\'') {
             let _ = eat(source, index);
         }
-        output.push_str(&source[start..*index]);
-        return;
+        return true;
     }
     if matches!(peek(source, *index), Some(character) if is_ident_start(character)) {
         let name = read_ident(source, index);
         if name.chars().count() == 1 && peek(source, *index) == Some('\'') {
             let _ = eat(source, index);
+            return true;
         }
     }
-    output.push_str(&source[start..*index]);
+    false
 }
 
 fn count_hashes(source: &str, index: &mut usize) -> usize {
@@ -251,12 +243,6 @@ fn read_ident(source: &str, index: &mut usize) -> String {
     source[start..*index].to_string()
 }
 
-fn copy_one(source: &str, index: &mut usize, output: &mut String) {
-    let start = *index;
-    let _ = eat(source, index);
-    output.push_str(&source[start..*index]);
-}
-
 fn eat(source: &str, index: &mut usize) -> Option<char> {
     let character = peek(source, *index)?;
     *index += character.len_utf8();
@@ -277,7 +263,16 @@ fn is_ident_continue(character: char) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use super::{identifiers, is_keyword, rename_identifier, KEYWORDS};
+    use super::super::SpanKind;
+    use super::{is_keyword, spans, KEYWORDS};
+
+    fn identifier_names(source: &str) -> Vec<&str> {
+        spans(source)
+            .into_iter()
+            .filter(|span| span.kind == SpanKind::Identifier)
+            .map(|span| &source[span.start..span.end])
+            .collect()
+    }
 
     #[test]
     fn keywords_are_not_identifiers() {
@@ -286,9 +281,10 @@ mod tests {
         assert_eq!(KEYWORDS, sorted.as_slice());
         assert!(is_keyword("fn"));
         assert!(!is_keyword("fibonacci"));
-
-        let names = identifiers("fn fibonacci() { let n = fibonacci; }\n");
-        assert_eq!(names, ["fibonacci", "n", "fibonacci"]);
+        assert_eq!(
+            identifier_names("fn fibonacci() { let n = fibonacci; }\n"),
+            ["fibonacci", "n", "fibonacci"]
+        );
     }
 
     #[test]
@@ -302,9 +298,9 @@ mod tests {
             "    fibonacci()\n",
             "}\n",
         );
-        let names: Vec<_> = identifiers(source)
+        let names: Vec<_> = identifier_names(source)
             .into_iter()
-            .filter(|name| name == "fibonacci")
+            .filter(|name| *name == "fibonacci")
             .collect();
         assert_eq!(names, ["fibonacci", "fibonacci"]);
     }
@@ -318,7 +314,7 @@ mod tests {
             "    println!(\"{n}: {}\", fibonacci(n));\n",
             "}\n",
         );
-        let renamed = rename_identifier(source, "fibonacci", "fib");
+        let renamed = replace_identifiers(source, "fibonacci", "fib");
         assert_eq!(
             renamed,
             concat!(
@@ -330,8 +326,22 @@ mod tests {
             )
         );
         assert_eq!(
-            rename_identifier("fn fibonacci() {}\n", "fn", "function"),
+            replace_identifiers("fn fibonacci() {}\n", "fn", "function"),
             "fn fibonacci() {}\n"
         );
+    }
+
+    fn replace_identifiers(source: &str, from: &str, to: &str) -> String {
+        let mut renamed = String::new();
+        let mut cursor = 0;
+        for span in spans(source) {
+            if span.kind == SpanKind::Identifier && &source[span.start..span.end] == from {
+                renamed.push_str(&source[cursor..span.start]);
+                renamed.push_str(to);
+                cursor = span.end;
+            }
+        }
+        renamed.push_str(&source[cursor..]);
+        renamed
     }
 }
