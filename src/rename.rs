@@ -1,4 +1,4 @@
-use std::collections::{BTreeSet, HashMap};
+use std::collections::HashMap;
 use std::fs;
 use std::io::Read;
 use std::path::Path;
@@ -7,52 +7,51 @@ use sha2::{Digest, Sha256};
 
 const HASH_BUFFER_SIZE: usize = 8 * 1024;
 
-/// Files whose names changed while their contents stayed the same.
+/// File renames among the files that exist on only one side.
 ///
-/// A match is reported only when one unpaired file on each side has that content, so
-/// identical copies are not paired by guesswork.
-pub(crate) fn file_renames(sources: &crate::Sources) -> Result<Vec<(String, String)>, String> {
-    let left_path = Path::new(&sources.left);
-    let right_path = Path::new(&sources.right);
-    let left_root = crate::source_base(left_path);
-    let right_root = crate::source_base(right_path);
-    let left_files = crate::collect_files(left_path)?;
-    let right_files = crate::collect_files(right_path)?;
-    let left_names: BTreeSet<_> = left_files.iter().cloned().collect();
-    let right_names: BTreeSet<_> = right_files.iter().cloned().collect();
-
-    let mut left_only = HashMap::<[u8; 32], Vec<String>>::new();
-    for path in left_files
-        .into_iter()
-        .filter(|path| !right_names.contains(path))
-    {
-        left_only
-            .entry(file_hash(left_root, &path)?)
+/// A hash identifies the content. One file on the left and one file on the right with
+/// the same hash are a rename, so identical copies are not paired by guesswork.
+pub(crate) fn find_renames(
+    sources: &crate::Sources,
+    left_only: &[String],
+    right_only: &[String],
+) -> Result<Vec<crate::semdif::Change>, String> {
+    let left_root = crate::source_base(Path::new(&sources.left));
+    let right_root = crate::source_base(Path::new(&sources.right));
+    let mut left_hashes = HashMap::<[u8; 32], Vec<&String>>::new();
+    for path in left_only {
+        left_hashes
+            .entry(file_hash(left_root, path)?)
             .or_default()
             .push(path);
     }
-    let mut right_only = HashMap::<[u8; 32], Vec<String>>::new();
-    for path in right_files
-        .into_iter()
-        .filter(|path| !left_names.contains(path))
-    {
-        right_only
-            .entry(file_hash(right_root, &path)?)
+    let mut right_hashes = HashMap::<[u8; 32], Vec<&String>>::new();
+    for path in right_only {
+        right_hashes
+            .entry(file_hash(right_root, path)?)
             .or_default()
             .push(path);
     }
 
     let mut renames = Vec::new();
-    for (hash, from_paths) in left_only {
-        let Some(to_paths) = right_only.get(&hash) else {
+    for (hash, from_paths) in left_hashes {
+        let Some(to_paths) = right_hashes.get(&hash) else {
             continue;
         };
         if from_paths.len() == 1 && to_paths.len() == 1 {
-            renames.push((from_paths[0].clone(), to_paths[0].clone()));
+            renames.push(crate::semdif::Change::FileRenamed {
+                from: from_paths[0].clone(),
+                to: to_paths[0].clone(),
+            });
         }
     }
-    renames.sort();
+    renames.sort_by(|left, right| rename_paths(left).cmp(&rename_paths(right)));
     Ok(renames)
+}
+
+fn rename_paths(change: &crate::semdif::Change) -> (&str, &str) {
+    let crate::semdif::Change::FileRenamed { from, to } = change;
+    (from, to)
 }
 
 /// A content identity for one file.

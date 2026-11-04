@@ -32,13 +32,14 @@ pub(crate) fn write_output(
 ///
 /// The header is always present. Renames are included only when some were found, so an
 /// unchanged pair does not gain an empty change list.
-fn semdif_document(version: &str, timestamp: &str, renames: &[(String, String)]) -> String {
+fn semdif_document(version: &str, timestamp: &str, renames: &[Change]) -> String {
     let mut document = header_document(version, timestamp);
     if renames.is_empty() {
         return document;
     }
     document.push_str("changes:\n");
-    for (from, to) in renames {
+    for rename in renames {
+        let Change::FileRenamed { from, to } = rename;
         document.push_str("  - scope: \".\"\n");
         document.push_str("    type: file-renamed\n");
         document.push_str("    details:\n");
