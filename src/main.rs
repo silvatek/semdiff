@@ -31,8 +31,8 @@ struct Differences {
 /// The shared files and file changes between the two sources.
 ///
 /// The two file lists are split once, so a later step does not search the trees again.
-/// Files that exist on only one side may be a rename or a deletion. Files that exist
-/// on both sides are paired and can be compared in place.
+/// Files that exist on only one side may be a rename, a deletion, or an addition.
+/// Files that exist on both sides are paired and can be compared in place.
 fn find_differences(sources: &Sources) -> Differences {
     let left_files = collect_files(Path::new(&sources.left)).unwrap_or_else(|message| {
         exit_with_message(message);
