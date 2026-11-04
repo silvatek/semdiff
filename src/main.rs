@@ -56,7 +56,7 @@ fn parse_args() -> Args {
     }
 }
 
-/// The shared files, renames, and added `///` comments between the two sources.
+/// The shared files, renames, and added line comments between the two sources.
 ///
 /// Later steps use this result instead of searching the trees again.
 fn find_differences(sources: &Sources) -> Differences {

@@ -159,7 +159,7 @@ fn records_an_added_rust_line_comment() {
     fs::write(left.join("src/main.rs"), "fn fibonacci() {}\n/// Shared.\n").unwrap();
     fs::write(
         right.join("src/main.rs"),
-        "/// Returns the nth Fibonacci number.\nfn fib() {}\n/// Shared.\n    /// Inner detail.\n",
+        "/// Returns the nth Fibonacci number.\n// Keep this.\nfn fib() {} // trailing\n/// Shared.\n    /// Inner detail.\n",
     )
     .unwrap();
     fs::write(left.join("notes.txt"), "").unwrap();
@@ -185,7 +185,12 @@ fn records_an_added_rust_line_comment() {
             "  - scope: \"src/main.rs\"\n",
             "    type: line-comment-added\n",
             "    details:\n",
-            "      line: 4\n",
+            "      line: 2\n",
+            "      text: \"// Keep this.\"\n",
+            "  - scope: \"src/main.rs\"\n",
+            "    type: line-comment-added\n",
+            "    details:\n",
+            "      line: 5\n",
             "      text: \"    /// Inner detail.\"\n",
         )
     );

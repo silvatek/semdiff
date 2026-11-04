@@ -3,16 +3,16 @@ use std::fs::File;
 use std::io::{BufRead, BufReader};
 use std::path::Path;
 
-/// A `///` comment that is present in the right-hand source and not the left.
+/// A line comment that is present in the right-hand source and not the left.
 pub(crate) struct AddedLineComment {
     pub scope: String,
     pub line: usize,
     pub text: String,
 }
 
-/// Rust `///` comments added in paired Rust files.
+/// Rust line comments added in paired Rust files.
 ///
-/// Documentation can appear without the file itself being new, so those lines are
+/// A comment line can appear without the file itself being new, so those lines are
 /// reported on their own. A line counts as added only when the right-hand file has
 /// more copies of that comment than the left.
 pub(crate) fn added_line_comments(
@@ -38,13 +38,13 @@ fn added_comments_in_file(
     right_lines: &[String],
 ) -> Vec<AddedLineComment> {
     let mut remaining = HashMap::<&str, usize>::new();
-    for line in left_lines.iter().filter(|line| is_line_doc_comment(line)) {
+    for line in left_lines.iter().filter(|line| is_line_comment(line)) {
         *remaining.entry(line).or_default() += 1;
     }
 
     let mut added = Vec::new();
     for (index, line) in right_lines.iter().enumerate() {
-        if !is_line_doc_comment(line) {
+        if !is_line_comment(line) {
             continue;
         }
         let count = remaining.get(line.as_str()).copied().unwrap_or(0);
@@ -61,11 +61,12 @@ fn added_comments_in_file(
     added
 }
 
-/// Whether a line is a Rust `///` documentation comment.
+/// Whether a line is a Rust line comment.
 ///
-/// Other edits in a paired file are outside this check.
-fn is_line_doc_comment(line: &str) -> bool {
-    line.trim_start().starts_with("///")
+/// Ordinary `//` comments and the `///` and `//!` doc forms are all line comments, so an
+/// added doc comment is still reported. Other edits in a paired file are outside this check.
+fn is_line_comment(line: &str) -> bool {
+    line.trim_start().starts_with("//")
 }
 
 /// The text lines of one source file.
