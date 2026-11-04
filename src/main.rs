@@ -10,7 +10,7 @@ use std::process::ExitCode;
 
 const USAGE: &str = "\
 Usage: semdiff <left> <right> <output>
-       semdiff --apply <directory> <semdif>
+       semdiff --apply <semdif> <directory>
 ";
 
 /// Compares two sources, or applies renames from a semdif file to one directory.
@@ -22,13 +22,13 @@ fn main() -> ExitCode {
             let differences = find_differences(&args.sources);
             output::write_output(&args.output, &args.sources, &differences)
         }
-        Command::Apply { source, patch } => apply::apply(&source, &patch),
+        Command::Apply { patch, source } => apply::apply(&patch, &source),
     }
 }
 
 enum Command {
     Compare(Args),
-    Apply { source: String, patch: String },
+    Apply { patch: String, source: String },
 }
 
 struct Args {
@@ -119,18 +119,18 @@ where
     let mut args = args.into_iter();
     let first = args.next().ok_or(CliError::Usage)?;
     if first == "--apply" {
-        let source = args.next().ok_or(CliError::Usage)?;
         let patch = args.next().ok_or(CliError::Usage)?;
+        let source = args.next().ok_or(CliError::Usage)?;
         if args.next().is_some() {
             return Err(CliError::Usage);
-        }
-        if !Path::new(&source).is_dir() {
-            return Err(CliError::NotDirectory(source));
         }
         if !Path::new(&patch).is_file() {
             return Err(CliError::NotFile(patch));
         }
-        return Ok(Command::Apply { source, patch });
+        if !Path::new(&source).is_dir() {
+            return Err(CliError::NotDirectory(source));
+        }
+        return Ok(Command::Apply { patch, source });
     }
     let left = first;
     let right = args.next().ok_or(CliError::Usage)?;

@@ -157,7 +157,7 @@ fn requires_an_output_path() {
     assert_eq!(output.status.code(), Some(2));
     assert_eq!(
         stderr,
-        "Usage: semdiff <left> <right> <output>\n       semdiff --apply <directory> <semdif>\n"
+        "Usage: semdiff <left> <right> <output>\n       semdiff --apply <semdif> <directory>\n"
     );
 }
 
@@ -186,7 +186,7 @@ fn applies_a_rename_inside_a_directory() {
     let edited_path = edited.to_str().unwrap();
     let output_path = output_path.to_str().unwrap();
     let compared = run(&[left, right, output_path]);
-    let applied = run(&["--apply", edited_path, output_path]);
+    let applied = run(&["--apply", output_path, edited_path]);
 
     assert!(compared.status.success());
     assert!(
@@ -218,7 +218,7 @@ fn rejects_apply_to_a_file() {
 
     let file = file.to_str().unwrap();
     let patch = patch.to_str().unwrap();
-    let output = run(&["--apply", file, patch]);
+    let output = run(&["--apply", patch, file]);
     let stderr = String::from_utf8(output.stderr).expect("stderr was not utf-8");
 
     assert_eq!(output.status.code(), Some(1));
@@ -236,7 +236,7 @@ fn rejects_a_missing_semdif_file() {
 
     let source = source.to_str().unwrap();
     let patch_arg = patch.to_str().unwrap();
-    let output = run(&["--apply", source, patch_arg]);
+    let output = run(&["--apply", patch_arg, source]);
     let stderr = String::from_utf8(output.stderr).expect("stderr was not utf-8");
 
     assert_eq!(output.status.code(), Some(1));
@@ -269,7 +269,7 @@ changes:
 
     let source = source.to_str().unwrap();
     let patch = patch.to_str().unwrap();
-    let output = run(&["--apply", source, patch]);
+    let output = run(&["--apply", patch, source]);
     let stderr = String::from_utf8(output.stderr).expect("stderr was not utf-8");
 
     assert_eq!(output.status.code(), Some(1));

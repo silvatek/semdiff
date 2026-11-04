@@ -7,8 +7,8 @@ use std::process::ExitCode;
 /// The semdif file is the record of what moved, so the same renames can be replayed
 /// on another copy of that directory. A rename is the only change that can be applied.
 /// A problem is reported on stderr.
-pub(crate) fn apply(source: &str, patch: &str) -> ExitCode {
-    match apply_renames(Path::new(source), Path::new(patch)) {
+pub(crate) fn apply(patch: &str, source: &str) -> ExitCode {
+    match apply_renames(Path::new(patch), Path::new(source)) {
         Ok(()) => ExitCode::SUCCESS,
         Err(message) => {
             eprintln!("{message}");
@@ -17,7 +17,7 @@ pub(crate) fn apply(source: &str, patch: &str) -> ExitCode {
     }
 }
 
-fn apply_renames(source: &Path, patch: &Path) -> Result<(), String> {
+fn apply_renames(patch: &Path, source: &Path) -> Result<(), String> {
     let document = fs::read_to_string(patch)
         .map_err(|error| format!("cannot read {}: {error}", patch.display()))?;
     for rename in renames(&document)? {
