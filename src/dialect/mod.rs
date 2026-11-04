@@ -1,12 +1,36 @@
+mod rust;
+
 /// A language semdiff knows how to read.
 ///
-/// Extensions select its files, and the line-comment test selects its comment lines, so
-/// another language can be added without changing the comparison.
+/// Extensions select its files. The line-comment test and the span reader select which
+/// lines and tokens that language contributes, so another language can be added without
+/// changing the comparison.
 pub(crate) struct Dialect {
     /// Extensions that identify this dialect, including the leading dot.
     pub extensions: &'static [&'static str],
     /// Whether one line is a single-line comment in this dialect.
     pub is_line_comment: fn(&str) -> bool,
+    /// The keywords, identifiers, comments, and strings in a source.
+    ///
+    /// Absent when this dialect cannot classify those spans yet.
+    pub spans: Option<fn(&str) -> Vec<Span>>,
+}
+
+/// What a dialect calls one span of source text.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum SpanKind {
+    Identifier,
+    Keyword,
+    Comment,
+    String,
+}
+
+/// A classified span, in byte offsets of the source it came from.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct Span {
+    pub start: usize,
+    pub end: usize,
+    pub kind: SpanKind,
 }
 
 /// The Rust dialect.
@@ -15,6 +39,7 @@ pub(crate) struct Dialect {
 pub(crate) static RUST: Dialect = Dialect {
     extensions: &[".rs"],
     is_line_comment: rust_line_comment,
+    spans: Some(rust::spans),
 };
 
 /// The Python dialect.
@@ -23,6 +48,7 @@ pub(crate) static RUST: Dialect = Dialect {
 pub(crate) static PYTHON: Dialect = Dialect {
     extensions: &[".py"],
     is_line_comment: python_line_comment,
+    spans: None,
 };
 
 /// The dialect for a paired file, when semdiff knows that language.

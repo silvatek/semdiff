@@ -3,6 +3,7 @@ mod args;
 mod comment;
 mod rename;
 mod semdif;
+mod symbol;
 
 use std::fs;
 use std::process::Command;
