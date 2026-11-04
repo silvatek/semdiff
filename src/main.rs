@@ -1,79 +1,34 @@
 mod apply;
+mod args;
 mod comment;
 mod dialect;
 mod rename;
 mod semdif;
 
+pub(crate) use args::Sources;
+
 use std::collections::BTreeSet;
-use std::env;
 use std::fs;
 use std::path::Path;
 use std::process::ExitCode;
-
-const USAGE: &str = "\
-Usage: semdiff <left> <right> <output>
-       semdiff --apply <source> <semdif>
-";
 
 /// Compares two sources, or applies a semdif file to one source.
 ///
 /// Argument errors stop the command before any comparison or edit starts.
 fn main() -> ExitCode {
-    match parse_args() {
-        Command::Compare(args) => {
+    match args::parse_args() {
+        args::Command::Compare(args) => {
             let differences = find_differences(&args.sources);
             semdif::write_output(&args.output, &args.sources, &differences)
         }
-        Command::Apply { source, patch } => apply::apply(&source, &patch),
+        args::Command::Apply { source, patch } => apply::apply(&source, &patch),
     }
-}
-
-enum Command {
-    Compare(Args),
-    Apply { source: String, patch: String },
-}
-
-struct Args {
-    sources: Sources,
-    output: String,
-}
-
-struct Sources {
-    left: String,
-    right: String,
 }
 
 struct Differences {
     paths: Vec<String>,
     renames: Vec<(String, String)>,
     added_comments: Vec<comment::AddedLineComment>,
-}
-
-/// The requested command, either a comparison or an apply.
-///
-/// A source may be a file or a directory. An unusable invocation stops the command:
-/// code 2 for the wrong arguments, and code 1 when a path is missing or the two
-/// comparison sources are different kinds.
-fn parse_args() -> Command {
-    match parsed_args(env::args().skip(1)) {
-        Ok(command) => command,
-        Err(CliError::Usage) => {
-            eprint!("{USAGE}");
-            std::process::exit(2);
-        }
-        Err(CliError::NotSource(path)) => {
-            eprintln!("not a file or directory: {path}");
-            std::process::exit(1);
-        }
-        Err(CliError::NotFile(path)) => {
-            eprintln!("not a file: {path}");
-            std::process::exit(1);
-        }
-        Err(CliError::MixedSources) => {
-            eprintln!("sources must both be files or both be directories");
-            std::process::exit(1);
-        }
-    }
 }
 
 /// The shared files, renames, and added line comments between the two sources.
@@ -102,74 +57,6 @@ fn find_differences(sources: &Sources) -> Differences {
 fn exit_with_message(message: String) -> ! {
     eprintln!("{message}");
     std::process::exit(1);
-}
-
-enum CliError {
-    Usage,
-    NotSource(String),
-    NotFile(String),
-    MixedSources,
-}
-
-/// The command described by the arguments.
-///
-/// `--apply` edits one source from a semdif file. Otherwise the three paths are a
-/// comparison. A missing source is rejected, and a file is not compared with a
-/// directory, so the command is not attempted.
-fn parsed_args<I>(args: I) -> Result<Command, CliError>
-where
-    I: IntoIterator<Item = String>,
-{
-    let mut args = args.into_iter();
-    let first = args.next().ok_or(CliError::Usage)?;
-    if first == "--apply" {
-        let source = args.next().ok_or(CliError::Usage)?;
-        let patch = args.next().ok_or(CliError::Usage)?;
-        if args.next().is_some() {
-            return Err(CliError::Usage);
-        }
-        require_source(&source)?;
-        if !Path::new(&patch).is_file() {
-            return Err(CliError::NotFile(patch));
-        }
-        return Ok(Command::Apply { source, patch });
-    }
-    let left = first;
-    let right = args.next().ok_or(CliError::Usage)?;
-    let output = args.next().ok_or(CliError::Usage)?;
-    if args.next().is_some() {
-        return Err(CliError::Usage);
-    }
-    require_source(&left)?;
-    require_source(&right)?;
-    require_same_kind(&left, &right)?;
-    Ok(Command::Compare(Args {
-        sources: Sources { left, right },
-        output,
-    }))
-}
-
-/// Confirms that a source path is a file or a directory.
-///
-/// A missing path cannot be compared.
-fn require_source(path: &str) -> Result<(), CliError> {
-    let path = Path::new(path);
-    if path.is_file() || path.is_dir() {
-        Ok(())
-    } else {
-        Err(CliError::NotSource(path.display().to_string()))
-    }
-}
-
-/// Confirms that both sources are files or both are directories.
-///
-/// A file and a directory are different comparison units, so they are not paired.
-fn require_same_kind(left: &str, right: &str) -> Result<(), CliError> {
-    if Path::new(left).is_dir() == Path::new(right).is_dir() {
-        Ok(())
-    } else {
-        Err(CliError::MixedSources)
-    }
 }
 
 /// The directory from which a source's relative paths are read.
