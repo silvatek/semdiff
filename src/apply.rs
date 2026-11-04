@@ -2,12 +2,12 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
-/// Edits `source` so it gains the changes recorded in `patch`.
+/// Edits `source` so it gains the changes recorded in `semdif`.
 ///
 /// The semdif file is the record of what changed, so the same edits can be replayed
 /// on another copy of that directory. A problem is reported on stderr.
-pub(crate) fn apply(patch: &str, source: &str) -> ExitCode {
-    match apply_changes(Path::new(patch), Path::new(source)) {
+pub(crate) fn apply(semdif: &str, source: &str) -> ExitCode {
+    match apply_changes(Path::new(semdif), Path::new(source)) {
         Ok(()) => ExitCode::SUCCESS,
         Err(message) => {
             eprintln!("{message}");
@@ -16,9 +16,9 @@ pub(crate) fn apply(patch: &str, source: &str) -> ExitCode {
     }
 }
 
-fn apply_changes(patch: &Path, source: &Path) -> Result<(), String> {
-    let document = fs::read_to_string(patch)
-        .map_err(|error| format!("cannot read {}: {error}", patch.display()))?;
+fn apply_changes(semdif: &Path, source: &Path) -> Result<(), String> {
+    let document = fs::read_to_string(semdif)
+        .map_err(|error| format!("cannot read {}: {error}", semdif.display()))?;
     for change in crate::semdif::parse_changes(&document)? {
         apply_change(source, &change)?;
     }

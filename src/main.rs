@@ -22,13 +22,13 @@ fn main() -> ExitCode {
             let differences = find_differences(&args.sources);
             semdif::write_output(&args.output, &args.sources, &differences)
         }
-        Command::Apply { patch, source } => apply::apply(&patch, &source),
+        Command::Apply { semdif, source } => apply::apply(&semdif, &source),
     }
 }
 
 enum Command {
     Compare(Args),
-    Apply { patch: String, source: String },
+    Apply { semdif: String, source: String },
 }
 
 struct Args {
@@ -119,18 +119,18 @@ where
     let mut args = args.into_iter();
     let first = args.next().ok_or(CliError::Usage)?;
     if first == "--apply" {
-        let patch = args.next().ok_or(CliError::Usage)?;
+        let semdif = args.next().ok_or(CliError::Usage)?;
         let source = args.next().ok_or(CliError::Usage)?;
         if args.next().is_some() {
             return Err(CliError::Usage);
         }
-        if !Path::new(&patch).is_file() {
-            return Err(CliError::NotFile(patch));
+        if !Path::new(&semdif).is_file() {
+            return Err(CliError::NotFile(semdif));
         }
         if !Path::new(&source).is_dir() {
             return Err(CliError::NotDirectory(source));
         }
-        return Ok(Command::Apply { patch, source });
+        return Ok(Command::Apply { semdif, source });
     }
     let left = first;
     let right = args.next().ok_or(CliError::Usage)?;
