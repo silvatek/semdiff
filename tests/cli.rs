@@ -150,6 +150,50 @@ fn hashes_past_the_first_buffer() {
 }
 
 #[test]
+fn records_an_added_rust_line_comment() {
+    let root = std::env::temp_dir().join(format!("semdiff-comment-{}", std::process::id()));
+    let left = root.join("left");
+    let right = root.join("right");
+    fs::create_dir_all(left.join("src")).unwrap();
+    fs::create_dir_all(right.join("src")).unwrap();
+    fs::write(left.join("src/main.rs"), "fn fibonacci() {}\n/// Shared.\n").unwrap();
+    fs::write(
+        right.join("src/main.rs"),
+        "/// Returns the nth Fibonacci number.\nfn fib() {}\n/// Shared.\n    /// Inner detail.\n",
+    )
+    .unwrap();
+    fs::write(left.join("notes.txt"), "").unwrap();
+    fs::write(right.join("notes.txt"), "/// not rust\n").unwrap();
+
+    let output_path = root.join("out.yml");
+    let left = left.to_str().unwrap();
+    let right = right.to_str().unwrap();
+    let output_path = output_path.to_str().unwrap();
+    let output = run(&[left, right, output_path]);
+    let document = fs::read_to_string(output_path).expect("failed to read semdiff file");
+
+    assert!(output.status.success());
+    let changes = document.split_once("changes:\n").expect("changes list").1;
+    assert_eq!(
+        changes,
+        concat!(
+            "  - scope: \"src/main.rs\"\n",
+            "    type: line-comment-added\n",
+            "    details:\n",
+            "      line: 1\n",
+            "      text: \"/// Returns the nth Fibonacci number.\"\n",
+            "  - scope: \"src/main.rs\"\n",
+            "    type: line-comment-added\n",
+            "    details:\n",
+            "      line: 4\n",
+            "      text: \"    /// Inner detail.\"\n",
+        )
+    );
+
+    let _ = fs::remove_dir_all(root);
+}
+
+#[test]
 fn requires_an_output_path() {
     let output = run(&[]);
     let stderr = String::from_utf8(output.stderr).expect("stderr was not utf-8");
