@@ -7,3 +7,4 @@ description = "Semantic diff command-line utility"
 
 [dependencies]
 chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
+sha2 = "0.10"
