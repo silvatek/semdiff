@@ -52,6 +52,52 @@ fn records_empty_directories_added_and_removed() {
 }
 
 #[test]
+fn replaces_a_directory_with_a_different_file() {
+    let root = std::env::temp_dir().join(format!("semdiff-dir-file-{}", std::process::id()));
+    let left = root.join("left");
+    let right = root.join("right");
+    let edited = root.join("edited");
+    fs::create_dir_all(left.join("notes/sub")).unwrap();
+    fs::create_dir_all(edited.join("notes/sub")).unwrap();
+    fs::create_dir_all(&right).unwrap();
+    fs::write(left.join("notes/a.txt"), "inside\n").unwrap();
+    fs::write(left.join("notes/sub/b.txt"), "other\n").unwrap();
+    fs::write(edited.join("notes/a.txt"), "inside\n").unwrap();
+    fs::write(edited.join("notes/sub/b.txt"), "other\n").unwrap();
+    fs::write(right.join("notes"), "replaced\n").unwrap();
+
+    let output_path = root.join("out.yml");
+    let left_arg = left.to_str().unwrap();
+    let right_arg = right.to_str().unwrap();
+    let edited_arg = edited.to_str().unwrap();
+    let output_arg = output_path.to_str().unwrap();
+    let compared = run(&[left_arg, right_arg, output_arg]);
+    let document = fs::read_to_string(&output_path).expect("failed to read semdiff file");
+
+    assert!(
+        compared.status.success(),
+        "{}",
+        String::from_utf8_lossy(&compared.stderr)
+    );
+    assert_eq!(
+        document.split_once("changes:\n").expect("changes list").1,
+        "  - scope: \".\"\n    type: file-deleted\n    details:\n      path: \"notes/a.txt\"\n  - scope: \".\"\n    type: file-deleted\n    details:\n      path: \"notes/sub/b.txt\"\n  - scope: \".\"\n    type: directory-deleted\n    details:\n      path: \"notes/sub\"\n  - scope: \".\"\n    type: directory-deleted\n    details:\n      path: \"notes\"\n  - scope: \".\"\n    type: file-added\n    details:\n      path: \"notes\"\n      contents: \"replaced\\n\"\n"
+    );
+
+    let applied = run(&["--apply", output_arg, edited_arg]);
+    assert!(
+        applied.status.success(),
+        "{}",
+        String::from_utf8_lossy(&applied.stderr)
+    );
+    assert_eq!(fs::read(edited.join("notes")).unwrap(), b"replaced\n");
+    assert!(!edited.join("notes/a.txt").exists());
+    assert!(!edited.join("notes/sub").exists());
+
+    let _ = fs::remove_dir_all(root);
+}
+
+#[test]
 fn removes_a_directory_left_empty_by_a_rename() {
     let root = std::env::temp_dir().join(format!("semdiff-dir-rename-{}", std::process::id()));
     let left = root.join("left");
