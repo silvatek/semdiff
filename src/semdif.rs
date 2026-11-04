@@ -14,7 +14,7 @@ pub(crate) fn write_output(
     let document = semdif_document(
         env!("CARGO_PKG_VERSION"),
         &utc_timestamp(),
-        &differences.renames,
+        &differences.changes,
     );
     if let Err(error) = fs::write(output, document) {
         eprintln!("cannot write {output}: {error}");
@@ -30,23 +30,36 @@ pub(crate) fn write_output(
 
 /// The semdif text for one comparison.
 ///
-/// The header is always present. Renames are included only when some were found, so an
+/// The header is always present. Changes are included only when some were found, so an
 /// unchanged pair does not gain an empty change list.
-fn semdif_document(version: &str, timestamp: &str, renames: &[Change]) -> String {
+fn semdif_document(version: &str, timestamp: &str, changes: &[Change]) -> String {
     let mut document = header_document(version, timestamp);
-    if renames.is_empty() {
+    if changes.is_empty() {
         return document;
     }
     document.push_str("changes:\n");
-    for rename in renames {
-        let Change::FileRenamed { from, to } = rename;
-        document.push_str("  - scope: \".\"\n");
-        document.push_str("    type: file-renamed\n");
-        document.push_str("    details:\n");
-        document.push_str(&format!("      from: {}\n", yaml_string(from)));
-        document.push_str(&format!("      to: {}\n", yaml_string(to)));
+    for change in changes {
+        write_change(&mut document, change);
     }
     document
+}
+
+fn write_change(document: &mut String, change: &Change) {
+    match change {
+        Change::FileRenamed { from, to } => {
+            document.push_str("  - scope: \".\"\n");
+            document.push_str("    type: file-renamed\n");
+            document.push_str("    details:\n");
+            document.push_str(&format!("      from: {}\n", yaml_string(from)));
+            document.push_str(&format!("      to: {}\n", yaml_string(to)));
+        }
+        Change::FileDeleted { path } => {
+            document.push_str("  - scope: \".\"\n");
+            document.push_str("    type: file-deleted\n");
+            document.push_str("    details:\n");
+            document.push_str(&format!("      path: {}\n", yaml_string(path)));
+        }
+    }
 }
 
 /// The header that identifies a semdif file.
@@ -77,6 +90,7 @@ fn utc_timestamp() -> String {
 /// details that kind needs.
 pub(crate) enum Change {
     FileRenamed { from: String, to: String },
+    FileDeleted { path: String },
 }
 
 /// The changes recorded in a semdif file.
@@ -152,6 +166,9 @@ impl PartialChange {
             "file-renamed" => Ok(Change::FileRenamed {
                 from: required(&self.fields, "from", "file-renamed")?,
                 to: required(&self.fields, "to", "file-renamed")?,
+            }),
+            "file-deleted" => Ok(Change::FileDeleted {
+                path: required(&self.fields, "path", "file-deleted")?,
             }),
             "" => Err("change is missing a type".to_string()),
             other => Err(format!("unknown change type {other}")),

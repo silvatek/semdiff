@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::io::Read;
 use std::path::Path;
@@ -7,11 +7,12 @@ use sha2::{Digest, Sha256};
 
 const HASH_BUFFER_SIZE: usize = 8 * 1024;
 
-/// File renames among the files that exist on only one side.
+/// Renames and deletions among the files that exist on only one side.
 ///
 /// A hash identifies the content. One file on the left and one file on the right with
-/// the same hash are a rename, so identical copies are not paired by guesswork.
-pub(crate) fn find_renames(
+/// the same hash are a rename, so identical copies are not paired by guesswork. A file
+/// that remains only on the left was removed.
+pub(crate) fn file_changes(
     sources: &crate::Sources,
     left_only: &[String],
     right_only: &[String],
@@ -33,25 +34,34 @@ pub(crate) fn find_renames(
             .push(path);
     }
 
-    let mut renames = Vec::new();
+    let mut changes = Vec::new();
+    let mut renamed = HashSet::new();
     for (hash, from_paths) in left_hashes {
         let Some(to_paths) = right_hashes.get(&hash) else {
             continue;
         };
         if from_paths.len() == 1 && to_paths.len() == 1 {
-            renames.push(crate::semdif::Change::FileRenamed {
+            renamed.insert(from_paths[0].as_str());
+            changes.push(crate::semdif::Change::FileRenamed {
                 from: from_paths[0].clone(),
                 to: to_paths[0].clone(),
             });
         }
     }
-    renames.sort_by(|left, right| rename_paths(left).cmp(&rename_paths(right)));
-    Ok(renames)
+    for path in left_only {
+        if !renamed.contains(path.as_str()) {
+            changes.push(crate::semdif::Change::FileDeleted { path: path.clone() });
+        }
+    }
+    changes.sort_by(|left, right| change_key(left).cmp(&change_key(right)));
+    Ok(changes)
 }
 
-fn rename_paths(change: &crate::semdif::Change) -> (&str, &str) {
-    let crate::semdif::Change::FileRenamed { from, to } = change;
-    (from, to)
+fn change_key(change: &crate::semdif::Change) -> (&str, &str) {
+    match change {
+        crate::semdif::Change::FileRenamed { from, to } => (from, to),
+        crate::semdif::Change::FileDeleted { path } => (path, ""),
+    }
 }
 
 /// A content identity for one file.

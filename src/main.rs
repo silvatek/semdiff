@@ -25,14 +25,14 @@ fn main() -> ExitCode {
 
 struct Differences {
     paths: Vec<String>,
-    renames: Vec<semdif::Change>,
+    changes: Vec<semdif::Change>,
 }
 
-/// The shared files and renames between the two sources.
+/// The shared files and file changes between the two sources.
 ///
 /// The two file lists are split once, so a later step does not search the trees again.
-/// Files that exist on only one side may be a rename. Files that exist on both sides
-/// are paired and can be compared in place.
+/// Files that exist on only one side may be a rename or a deletion. Files that exist
+/// on both sides are paired and can be compared in place.
 fn find_differences(sources: &Sources) -> Differences {
     let left_files = collect_files(Path::new(&sources.left)).unwrap_or_else(|message| {
         exit_with_message(message);
@@ -41,13 +41,13 @@ fn find_differences(sources: &Sources) -> Differences {
         exit_with_message(message);
     });
     let (left_only, right_only, paired_files) = partition_files(left_files, right_files);
-    let renames =
-        rename::find_renames(sources, &left_only, &right_only).unwrap_or_else(|message| {
+    let changes =
+        rename::file_changes(sources, &left_only, &right_only).unwrap_or_else(|message| {
             exit_with_message(message);
         });
     Differences {
         paths: paired_files,
-        renames,
+        changes,
     }
 }
 
