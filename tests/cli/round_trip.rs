@@ -32,6 +32,14 @@ fn applying_the_rust_sample_makes_a_copy_of_v1_match_v2() {
         ),
         "{document}"
     );
+    assert!(
+        document.contains("type: file-added") && document.contains("path: \"added.txt\""),
+        "{document}"
+    );
+    assert!(
+        document.contains("He said \\\"hello\\\"") && document.contains("\\\\temp"),
+        "{document}"
+    );
     let applied_output = run(&["--apply", semdif_file_arg, target_source_arg]);
     assert!(
         applied_output.status.success(),

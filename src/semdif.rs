@@ -2,6 +2,9 @@ use std::collections::BTreeMap;
 use std::fs;
 use std::process::ExitCode;
 
+use base64::engine::general_purpose::STANDARD;
+use base64::Engine;
+
 /// Saves the semdif file and lists the shared paths.
 ///
 /// The file is the command's result. The listing shows which files were eligible for
@@ -59,6 +62,33 @@ fn write_change(document: &mut String, change: &Change) {
             document.push_str("    details:\n");
             document.push_str(&format!("      path: {}\n", yaml_string(path)));
         }
+        Change::FileAdded { path, contents } => {
+            document.push_str("  - scope: \".\"\n");
+            document.push_str("    type: file-added\n");
+            document.push_str("    details:\n");
+            document.push_str(&format!("      path: {}\n", yaml_string(path)));
+            write_added_contents(document, contents);
+        }
+    }
+}
+
+/// Stores the bytes of an added file inside the semdif.
+///
+/// Text stays in the record as a quoted value, with quotes and line breaks escaped so
+/// they do not change the record. Bytes that are not text are encoded, because a YAML
+/// text value cannot hold them, and the original bytes still have to be restored.
+fn write_added_contents(document: &mut String, contents: &[u8]) {
+    match std::str::from_utf8(contents) {
+        Ok(text) => {
+            document.push_str(&format!("      contents: {}\n", yaml_string(text)));
+        }
+        Err(_) => {
+            document.push_str("      encoding: \"base64\"\n");
+            document.push_str(&format!(
+                "      contents: {}\n",
+                yaml_string(&STANDARD.encode(contents))
+            ));
+        }
     }
 }
 
@@ -71,10 +101,25 @@ fn header_document(version: &str, timestamp: &str) -> String {
 
 /// A YAML-safe form of a text value.
 ///
-/// Paths must stay literal when they are written into the semdif file.
+/// Paths and file contents must stay literal when they are written into the semdif
+/// file, including when the text contains quotes or line breaks.
 fn yaml_string(value: &str) -> String {
-    let escaped = value.replace('\\', "\\\\").replace('"', "\\\"");
-    format!("\"{escaped}\"")
+    let mut escaped = String::from("\"");
+    for character in value.chars() {
+        match character {
+            '\\' => escaped.push_str("\\\\"),
+            '"' => escaped.push_str("\\\""),
+            '\n' => escaped.push_str("\\n"),
+            '\r' => escaped.push_str("\\r"),
+            '\t' => escaped.push_str("\\t"),
+            c if (c as u32) < 0x20 || matches!(c, '\u{0085}' | '\u{2028}' | '\u{2029}') => {
+                escaped.push_str(&format!("\\u{code:04x}", code = c as u32));
+            }
+            c => escaped.push(c),
+        }
+    }
+    escaped.push('"');
+    escaped
 }
 
 /// The UTC time to record in a semdif header.
@@ -91,6 +136,7 @@ fn utc_timestamp() -> String {
 pub(crate) enum Change {
     FileRenamed { from: String, to: String },
     FileDeleted { path: String },
+    FileAdded { path: String, contents: Vec<u8> },
 }
 
 /// The changes recorded in a semdif file.
@@ -170,6 +216,20 @@ impl PartialChange {
             "file-deleted" => Ok(Change::FileDeleted {
                 path: required(&self.fields, "path", "file-deleted")?,
             }),
+            "file-added" => {
+                let path = required(&self.fields, "path", "file-added")?;
+                let contents = required(&self.fields, "contents", "file-added")?;
+                let contents = match self.fields.get("encoding").map(String::as_str) {
+                    None => contents.into_bytes(),
+                    Some("base64") => STANDARD
+                        .decode(contents)
+                        .map_err(|_| "file-added contents are not valid base64".to_string())?,
+                    Some(other) => {
+                        return Err(format!("file-added has unsupported encoding {other}"))
+                    }
+                };
+                Ok(Change::FileAdded { path, contents })
+            }
             "" => Err("change is missing a type".to_string()),
             other => Err(format!("unknown change type {other}")),
         }
@@ -209,15 +269,28 @@ fn unquote(value: &str) -> Result<String, String> {
             match chars.next() {
                 Some('\\') => decoded.push('\\'),
                 Some('"') => decoded.push('"'),
-                Some(other) => {
-                    decoded.push('\\');
-                    decoded.push(other);
-                }
-                None => return Err(format!("invalid quoted value: {value}")),
+                Some('n') => decoded.push('\n'),
+                Some('r') => decoded.push('\r'),
+                Some('t') => decoded.push('\t'),
+                Some('u') => decoded.push(decode_hex_char(&mut chars, value)?),
+                _ => return Err(format!("invalid quoted value: {value}")),
             }
         } else {
             decoded.push(character);
         }
     }
     Ok(decoded)
+}
+
+fn decode_hex_char(chars: &mut std::str::Chars<'_>, value: &str) -> Result<char, String> {
+    let mut hex = String::new();
+    for _ in 0..4 {
+        let Some(digit) = chars.next() else {
+            return Err(format!("invalid quoted value: {value}"));
+        };
+        hex.push(digit);
+    }
+    let code =
+        u32::from_str_radix(&hex, 16).map_err(|_| format!("invalid quoted value: {value}"))?;
+    char::from_u32(code).ok_or_else(|| format!("invalid quoted value: {value}"))
 }
