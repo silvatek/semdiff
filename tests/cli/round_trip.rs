@@ -10,10 +10,10 @@ fn applying_the_rust_sample_makes_a_copy_of_v1_match_v2() {
     let sample = manifest.join("TestCode/rust/main");
     let v1_source = sample.join("v1");
     let v2_source = sample.join("v2");
-    let root = std::env::temp_dir().join(format!("semdiff-apply-rust-{}", std::process::id()));
-    let target_source = root.join("v1");
+    let tmp_root = std::env::temp_dir().join(format!("semdiff-apply-rust-{}", std::process::id()));
+    let target_source = tmp_root.join("v1");
     copy_tree(&v1_source, &target_source);
-    let semdif_file = root.join("diff.yml");
+    let semdif_file = tmp_root.join("diff.yml");
 
     let compared = run(&[
         v1_source.to_str().unwrap(),
@@ -38,7 +38,7 @@ fn applying_the_rust_sample_makes_a_copy_of_v1_match_v2() {
 
     assert_eq!(tree_difference(&target_source, &v2_source), "");
 
-    let _ = fs::remove_dir_all(root);
+    let _ = fs::remove_dir_all(tmp_root);
 }
 
 fn copy_tree(from: &Path, to: &Path) {
