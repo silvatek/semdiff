@@ -23,18 +23,39 @@ fn apply_patch(source: &Path, patch: &Path) -> Result<(), String> {
         .map_err(|error| format!("cannot read {}: {error}", patch.display()))?;
     let mut changes = crate::semdif::parse_changes(&document)?;
     changes.sort_by(|left, right| change_order(left).cmp(&change_order(right)));
+    let mut scope = String::new();
+    let mut earlier_delta = 0;
     for change in changes {
-        match change {
-            Change::SymbolRenamed { scope, from, to } => {
-                crate::symbol::apply_rename(source, &scope, &from, &to)?;
-            }
-            Change::LineCommentAdded { scope, line, text } => {
-                insert_line(&source.join(&scope), line, &text)?;
-            }
-            Change::FileRenamed { from, to } => rename_file(source, &from, &to)?,
+        if change.scope != scope {
+            scope = change.scope.clone();
+            earlier_delta = 0;
         }
+        match &change.details {
+            crate::semdif::ChangeDetails::SymbolRenamed { from, to } => {
+                crate::symbol::apply_rename(source, &change.scope, from, to)?;
+            }
+            crate::semdif::ChangeDetails::LineCommentAdded { line, text } => {
+                let line = line_in_current_file(*line, earlier_delta);
+                insert_line(&source.join(&change.scope), line, text)?;
+            }
+            crate::semdif::ChangeDetails::FileRenamed { from, to } => {
+                rename_file(source, from, to)?;
+            }
+        }
+        earlier_delta += change.line_delta;
     }
     Ok(())
+}
+
+/// The line to edit in the file as it stands.
+///
+/// `new_line` is the line in the final text. `earlier_delta` is how many lines
+/// changes already applied in this file added or removed, so the old line and the
+/// current line stay related.
+fn line_in_current_file(new_line: usize, earlier_delta: i32) -> usize {
+    let new_line = i32::try_from(new_line).unwrap_or(i32::MAX);
+    let old_line = new_line.saturating_sub(earlier_delta);
+    usize::try_from(old_line + earlier_delta).unwrap_or(1)
 }
 
 /// Puts symbol renames, then added comments, then file renames.
@@ -42,10 +63,12 @@ fn apply_patch(source: &Path, patch: &Path) -> Result<(), String> {
 /// A comment is recorded against the original path, and its line number assumes earlier
 /// comments are already present. A symbol rename does not add or remove lines.
 fn change_order(change: &Change) -> (u8, String, usize) {
-    match change {
-        Change::SymbolRenamed { from, .. } => (0, from.clone(), 0),
-        Change::LineCommentAdded { scope, line, .. } => (1, scope.clone(), *line),
-        Change::FileRenamed { from, .. } => (2, from.clone(), 0),
+    match &change.details {
+        crate::semdif::ChangeDetails::SymbolRenamed { from, .. } => (0, from.clone(), 0),
+        crate::semdif::ChangeDetails::LineCommentAdded { line, .. } => {
+            (1, change.scope.clone(), *line)
+        }
+        crate::semdif::ChangeDetails::FileRenamed { from, .. } => (2, from.clone(), 0),
     }
 }
 

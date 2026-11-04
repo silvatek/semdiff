@@ -14,9 +14,7 @@ pub(crate) fn write_output(
     let document = semdif_document(
         env!("CARGO_PKG_VERSION"),
         &utc_timestamp(),
-        &differences.renames,
-        &differences.symbol_renames,
-        &differences.added_comments,
+        &differences.changes,
     );
     if let Err(error) = fs::write(output, document) {
         eprintln!("cannot write {output}: {error}");
@@ -34,40 +32,37 @@ pub(crate) fn write_output(
 ///
 /// The header is always present. Changes are included only when some were found, so an
 /// unchanged pair does not gain an empty change list.
-fn semdif_document(
-    version: &str,
-    timestamp: &str,
-    renames: &[(String, String)],
-    symbol_renames: &[crate::symbol::SymbolRename],
-    added_comments: &[crate::comment::AddedLineComment],
-) -> String {
+fn semdif_document(version: &str, timestamp: &str, changes: &[Change]) -> String {
     let mut document = header_document(version, timestamp);
-    if renames.is_empty() && symbol_renames.is_empty() && added_comments.is_empty() {
+    if changes.is_empty() {
         return document;
     }
     document.push_str("changes:\n");
-    for (from, to) in renames {
-        document.push_str("  - scope: \".\"\n");
-        document.push_str("    type: file-renamed\n");
-        document.push_str("    details:\n");
-        document.push_str(&format!("      from: {}\n", yaml_string(from)));
-        document.push_str(&format!("      to: {}\n", yaml_string(to)));
-    }
-    for rename in symbol_renames {
-        document.push_str(&format!("  - scope: {}\n", yaml_string(&rename.scope)));
-        document.push_str("    type: symbol-renamed\n");
-        document.push_str("    details:\n");
-        document.push_str(&format!("      from: {}\n", yaml_string(&rename.from)));
-        document.push_str(&format!("      to: {}\n", yaml_string(&rename.to)));
-    }
-    for comment in added_comments {
-        document.push_str(&format!("  - scope: {}\n", yaml_string(&comment.scope)));
-        document.push_str("    type: line-comment-added\n");
-        document.push_str("    details:\n");
-        document.push_str(&format!("      line: {}\n", comment.line));
-        document.push_str(&format!("      text: {}\n", yaml_string(&comment.text)));
+    for change in changes {
+        write_change(&mut document, change);
     }
     document
+}
+
+/// One change written into the semdif file.
+///
+/// The scope, type, and details are the record. The line delta is kept for the
+/// comparison and is not written, because line numbers in the record are already
+/// those of the new text.
+fn write_change(document: &mut String, change: &Change) {
+    document.push_str(&format!("  - scope: {}\n", yaml_string(&change.scope)));
+    document.push_str(&format!("    type: {}\n", change.change_type.as_str()));
+    document.push_str("    details:\n");
+    match &change.details {
+        ChangeDetails::FileRenamed { from, to } | ChangeDetails::SymbolRenamed { from, to } => {
+            document.push_str(&format!("      from: {}\n", yaml_string(from)));
+            document.push_str(&format!("      to: {}\n", yaml_string(to)));
+        }
+        ChangeDetails::LineCommentAdded { line, text } => {
+            document.push_str(&format!("      line: {line}\n"));
+            document.push_str(&format!("      text: {}\n", yaml_string(text)));
+        }
+    }
 }
 
 /// The header that identifies a semdif file.
@@ -92,22 +87,91 @@ fn utc_timestamp() -> String {
     chrono::Utc::now().format("%Y-%m-%dT%H:%M:%SZ").to_string()
 }
 
-/// One recorded edit from a semdif file.
-pub(crate) enum Change {
-    LineCommentAdded {
-        scope: String,
-        line: usize,
-        text: String,
-    },
-    FileRenamed {
-        from: String,
-        to: String,
-    },
-    SymbolRenamed {
-        scope: String,
-        from: String,
-        to: String,
-    },
+/// One difference between the sources.
+///
+/// The scope is where the change applies, the type and details say what changed,
+/// and `line_delta` is how many lines that change adds or removes. Adding two lines
+/// is `2` and removing one line is `-1`, so a later change can relate a line number
+/// in the new text to one in the old text.
+pub(crate) struct Change {
+    pub scope: String,
+    pub change_type: ChangeType,
+    pub details: ChangeDetails,
+    pub line_delta: i32,
+}
+
+/// The kind of difference a change records.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum ChangeType {
+    FileRenamed,
+    SymbolRenamed,
+    LineCommentAdded,
+}
+
+/// The fields that belong to a change type.
+pub(crate) enum ChangeDetails {
+    FileRenamed { from: String, to: String },
+    SymbolRenamed { from: String, to: String },
+    LineCommentAdded { line: usize, text: String },
+}
+
+impl ChangeType {
+    fn as_str(self) -> &'static str {
+        match self {
+            Self::FileRenamed => "file-renamed",
+            Self::SymbolRenamed => "symbol-renamed",
+            Self::LineCommentAdded => "line-comment-added",
+        }
+    }
+
+    /// How many lines one change of this type adds or removes.
+    ///
+    /// A renamed symbol or file keeps the same lines. An added comment line occupies
+    /// one new line.
+    fn line_delta(self) -> i32 {
+        match self {
+            Self::LineCommentAdded => 1,
+            Self::FileRenamed | Self::SymbolRenamed => 0,
+        }
+    }
+}
+
+impl Change {
+    /// A file whose name changed and whose contents did not.
+    pub(crate) fn file_renamed(from: String, to: String) -> Self {
+        Self::new(
+            ".".to_string(),
+            ChangeType::FileRenamed,
+            ChangeDetails::FileRenamed { from, to },
+        )
+    }
+
+    /// A code identifier renamed everywhere in `scope`.
+    pub(crate) fn symbol_renamed(scope: String, from: String, to: String) -> Self {
+        Self::new(
+            scope,
+            ChangeType::SymbolRenamed,
+            ChangeDetails::SymbolRenamed { from, to },
+        )
+    }
+
+    /// One comment line present in the new file and absent from the old one.
+    pub(crate) fn line_comment_added(scope: String, line: usize, text: String) -> Self {
+        Self::new(
+            scope,
+            ChangeType::LineCommentAdded,
+            ChangeDetails::LineCommentAdded { line, text },
+        )
+    }
+
+    fn new(scope: String, change_type: ChangeType, details: ChangeDetails) -> Self {
+        Self {
+            scope,
+            line_delta: change_type.line_delta(),
+            change_type,
+            details,
+        }
+    }
 }
 
 /// The changes recorded in a semdif document.
@@ -181,37 +245,29 @@ impl RawChange {
                     .get("text")
                     .ok_or("line-comment-added is missing text")?
                     .clone();
-                Ok(Change::LineCommentAdded {
-                    scope: self.scope,
-                    line,
-                    text,
-                })
+                Ok(Change::line_comment_added(self.scope, line, text))
             }
-            "file-renamed" => Ok(Change::FileRenamed {
-                from: self
-                    .details
+            "file-renamed" => Ok(Change::file_renamed(
+                self.details
                     .get("from")
                     .ok_or("file-renamed is missing from")?
                     .clone(),
-                to: self
-                    .details
+                self.details
                     .get("to")
                     .ok_or("file-renamed is missing to")?
                     .clone(),
-            }),
-            "symbol-renamed" => Ok(Change::SymbolRenamed {
-                scope: self.scope,
-                from: self
-                    .details
+            )),
+            "symbol-renamed" => Ok(Change::symbol_renamed(
+                self.scope,
+                self.details
                     .get("from")
                     .ok_or("symbol-renamed is missing from")?
                     .clone(),
-                to: self
-                    .details
+                self.details
                     .get("to")
                     .ok_or("symbol-renamed is missing to")?
                     .clone(),
-            }),
+            )),
             other => Err(format!("unknown change type {other}")),
         }
     }
@@ -255,4 +311,27 @@ fn unquote(value: &str) -> Result<String, String> {
         }
     }
     Ok(decoded)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{Change, ChangeType};
+
+    #[test]
+    fn line_delta_is_the_lines_added_or_removed() {
+        let comment =
+            Change::line_comment_added("src/main.rs".to_string(), 2, "// note".to_string());
+        assert_eq!(comment.change_type, ChangeType::LineCommentAdded);
+        assert_eq!(comment.line_delta, 1);
+        let rename = Change::symbol_renamed(
+            "src/main.rs".to_string(),
+            "fibonacci".to_string(),
+            "fib".to_string(),
+        );
+        assert_eq!(rename.line_delta, 0);
+        assert_eq!(
+            Change::file_renamed("a.txt".to_string(), "b.txt".to_string()).line_delta,
+            0
+        );
+    }
 }

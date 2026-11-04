@@ -8,10 +8,12 @@ mod symbol;
 
 pub(crate) use args::Sources;
 
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
 use std::path::Path;
 use std::process::ExitCode;
+
+use semdif::{Change, ChangeDetails, ChangeType};
 
 /// Compares two sources, or applies a semdif file to one source.
 ///
@@ -28,43 +30,49 @@ fn main() -> ExitCode {
 
 struct Differences {
     paths: Vec<String>,
-    renames: Vec<(String, String)>,
-    symbol_renames: Vec<symbol::SymbolRename>,
-    added_comments: Vec<comment::AddedLineComment>,
+    changes: Vec<Change>,
 }
 
-/// The shared files, renames, and content changes between the two sources.
+/// The shared files and the ordered changes between the two sources.
 ///
-/// File renames are found first. Each paired file is then compared once, and each
-/// change in its content is classified.
+/// File renames come first. Each paired file is then compared once and every content
+/// change is recorded at its own scope. The same rename in several files is then
+/// collapsed into the smallest scope that still covers every use.
 fn find_differences(sources: &Sources) -> Differences {
     let paths = paired_files(sources).unwrap_or_else(|message| {
         exit_with_message(message);
     });
-    let renames = rename::file_renames(sources).unwrap_or_else(|message| {
+    let mut changes = file_rename_changes(sources).unwrap_or_else(|message| {
         exit_with_message(message);
     });
-    let (symbol_renames, added_comments) =
-        changed_content(sources, &paths).unwrap_or_else(|message| {
-            exit_with_message(message);
-        });
+    let (content, compared) = changed_content(sources, &paths).unwrap_or_else(|message| {
+        exit_with_message(message);
+    });
+    changes.extend(content);
     Differences {
         paths,
-        renames,
-        symbol_renames,
-        added_comments,
+        changes: collapse_scopes(changes, &compared),
     }
 }
 
-/// Symbol renames and added line comments in the paired files.
+/// File renames, before any file contents are compared.
 ///
-/// A file whose text changed is classified from that one comparison. An unchanged
-/// file is kept only so a symbol rename can see whether any use of the old name remains.
+/// A renamed file keeps its lines, so the line delta is zero.
+fn file_rename_changes(sources: &Sources) -> Result<Vec<Change>, String> {
+    Ok(rename::file_renames(sources)?
+        .into_iter()
+        .map(|(from, to)| Change::file_renamed(from, to))
+        .collect())
+}
+
+/// Content changes in the paired files, each at the scope of its own file.
+///
+/// An unchanged file is kept only so a later collapse can see a use that did not change.
 fn changed_content(
     sources: &Sources,
     paths: &[String],
-) -> Result<(Vec<symbol::SymbolRename>, Vec<comment::AddedLineComment>), String> {
-    let mut added_comments = Vec::new();
+) -> Result<(Vec<Change>, Vec<symbol::ComparedFile>), String> {
+    let mut changes = Vec::new();
     let mut compared = Vec::new();
     for path in paths {
         let Some(dialect) = crate::dialect::for_path(path) else {
@@ -73,13 +81,134 @@ fn changed_content(
         let left = read_text(&sources.left, path)?;
         let right = read_text(&sources.right, path)?;
         if left != right {
-            added_comments.extend(comment::added_line_comments(path, dialect, &left, &right));
+            changes.extend(
+                comment::added_line_comments(path, dialect, &left, &right)
+                    .into_iter()
+                    .map(|comment| {
+                        Change::line_comment_added(comment.scope, comment.line, comment.text)
+                    }),
+            );
         }
         if let Some(classify) = dialect.spans {
-            compared.push(symbol::compared_file(path, left, right, classify));
+            let file = symbol::compared_file(path, left, right, classify);
+            changes.extend(
+                symbol::file_symbol_renames(&file)
+                    .into_iter()
+                    .map(|rename| Change::symbol_renamed(rename.scope, rename.from, rename.to)),
+            );
+            compared.push(file);
         }
     }
-    Ok((symbol::symbol_renames(&compared), added_comments))
+    Ok((changes, compared))
+}
+
+/// Joins changes that are the same rename and can share a wider scope.
+///
+/// The wider scope is kept only when it contains no use that was left unchanged.
+/// File renames stay first, then symbol renames, then added comments in line order,
+/// so line deltas can be followed from the start of the list.
+fn collapse_scopes(changes: Vec<Change>, files: &[symbol::ComparedFile]) -> Vec<Change> {
+    let mut renames = Vec::new();
+    let mut symbols = Vec::new();
+    let mut comments = Vec::new();
+    for change in changes {
+        match change.change_type {
+            ChangeType::FileRenamed => renames.push(change),
+            ChangeType::SymbolRenamed => symbols.push(change),
+            ChangeType::LineCommentAdded => comments.push(change),
+        }
+    }
+    renames.extend(collapse_symbol_renames(symbols, files));
+    renames.extend(comments);
+    renames
+}
+
+/// Symbol renames after file-sized changes that name the same identifier have been joined.
+///
+/// Each joined change keeps one scope, the smallest directory or file that contains
+/// the renamed uses and no use that was left as it was.
+fn collapse_symbol_renames(changes: Vec<Change>, files: &[symbol::ComparedFile]) -> Vec<Change> {
+    let mut groups: BTreeMap<(String, String), Vec<String>> = BTreeMap::new();
+    for change in changes {
+        let ChangeDetails::SymbolRenamed { from, to } = &change.details else {
+            continue;
+        };
+        groups
+            .entry((from.clone(), to.clone()))
+            .or_default()
+            .push(change.scope.clone());
+    }
+    let mut collapsed = Vec::new();
+    for ((from, to), scopes) in groups {
+        let mut clusters = clusters(&scopes, &from, files);
+        clusters.sort_by(|left, right| {
+            symbol::tightest_scope(&str_refs(left)).cmp(&symbol::tightest_scope(&str_refs(right)))
+        });
+        for cluster in clusters {
+            collapsed.push(Change::symbol_renamed(
+                symbol::tightest_scope(&str_refs(&cluster)),
+                from.clone(),
+                to.clone(),
+            ));
+        }
+    }
+    collapsed
+}
+
+/// Groups of files that can share one scope for a rename of `from`.
+///
+/// Two files are grouped when the directory that contains both does not also contain
+/// a use that still has the old name.
+fn clusters(scopes: &[String], from: &str, files: &[symbol::ComparedFile]) -> Vec<Vec<String>> {
+    let mut clusters: Vec<Vec<String>> = scopes.iter().cloned().map(|scope| vec![scope]).collect();
+    let mut merged = true;
+    while merged {
+        merged = false;
+        let mut index = 0;
+        while index < clusters.len() {
+            let mut other = index + 1;
+            while other < clusters.len() {
+                let mut paths = clusters[index].clone();
+                paths.extend(clusters[other].iter().cloned());
+                let scope = symbol::tightest_scope(&str_refs(&paths));
+                if scope_covers_only(&scope, &paths, from, files) {
+                    clusters[index] = paths;
+                    clusters.remove(other);
+                    merged = true;
+                } else {
+                    other += 1;
+                }
+            }
+            index += 1;
+        }
+    }
+    clusters
+}
+
+/// Whether every use of `from` inside `scope` belongs to `paths`.
+///
+/// A directory that still contains the old name cannot be the scope of the rename.
+fn scope_covers_only(
+    scope: &str,
+    paths: &[String],
+    from: &str,
+    files: &[symbol::ComparedFile],
+) -> bool {
+    files.iter().all(|file| {
+        !file.has_use(from)
+            || paths.iter().any(|path| path == file.path())
+            || !scope_contains(scope, file.path())
+    })
+}
+
+/// Whether `path` is the scope itself or a file inside it.
+fn scope_contains(scope: &str, path: &str) -> bool {
+    scope == "." || scope == path || path.starts_with(&format!("{scope}/"))
+}
+
+/// Borrowed paths, so a scope can be chosen without copying them again.
+fn str_refs(paths: &[String]) -> Vec<&str> {
+    paths.iter().map(String::as_str).collect()
 }
 
 /// The text of one paired file.

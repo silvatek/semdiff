@@ -45,24 +45,32 @@ pub(crate) fn compared_file(
     }
 }
 
-/// Symbol renames across files that have already been compared.
-///
-/// A dialect only classifies a span, so a comment or a string is not read as code.
-/// A rename is recorded when every use of the old name changed to the same new name.
-/// Its scope is the smallest file or directory that contains those uses.
-pub(crate) fn symbol_renames(files: &[ComparedFile]) -> Vec<SymbolRename> {
-    let mut edits = Vec::new();
-    for file in files {
-        if file.left != file.right {
-            edits.extend(identifier_edits(
-                &file.left,
-                &file.right,
-                &file.left_spans,
-                &file.right_spans,
-            ));
-        }
+impl ComparedFile {
+    /// The paired file this comparison came from.
+    pub(crate) fn path(&self) -> &str {
+        &self.path
     }
-    renames_for_scope(files, &edits)
+
+    /// Whether this file uses `name` as a code identifier on either side.
+    ///
+    /// A wider scope cannot be chosen while a use remains outside the renamed files.
+    pub(crate) fn has_use(&self, name: &str) -> bool {
+        identifier_uses(&self.left, &self.left_spans, name) > 0
+            || identifier_uses(&self.right, &self.right_spans, name) > 0
+    }
+}
+
+/// Symbol renames that are complete in one file.
+///
+/// The file is the scope. The same rename in other files can later share a wider
+/// scope when that scope still covers every use. A comment or a string is not a use.
+pub(crate) fn file_symbol_renames(file: &ComparedFile) -> Vec<SymbolRename> {
+    let edits = if file.left != file.right {
+        identifier_edits(&file.left, &file.right, &file.left_spans, &file.right_spans)
+    } else {
+        Vec::new()
+    };
+    renames_for_scope(std::slice::from_ref(file), &edits)
 }
 
 /// Renames one code identifier in every file of `scope`.
@@ -89,10 +97,10 @@ struct TextLine<'a> {
     text: &'a str,
 }
 
-/// One rename for each name whose every use changed to the same new name.
+/// One rename for each name whose every use in these files changed to the same new name.
 ///
 /// The scope is the smallest file or directory that contains those uses. A name that
-/// is still used, or that changed to more than one new name, is not recorded.
+/// is still used there, or that changed to more than one new name, is not recorded.
 fn renames_for_scope(files: &[ComparedFile], edits: &[(String, String)]) -> Vec<SymbolRename> {
     let mut by_from: BTreeMap<&str, BTreeMap<&str, usize>> = BTreeMap::new();
     for (from, to) in edits {
@@ -134,7 +142,7 @@ fn renames_for_scope(files: &[ComparedFile], edits: &[(String, String)]) -> Vec<
 ///
 /// One file is its own scope. Several files share the longest directory that still
 /// contains them, and the compared tree is `.` when they share no directory.
-fn tightest_scope(paths: &[&str]) -> String {
+pub(crate) fn tightest_scope(paths: &[&str]) -> String {
     let Some(first) = paths.first() else {
         return ".".to_string();
     };
