@@ -15,6 +15,7 @@ fn fibonacci(n: u32) -> u64 {
     }
 }
 
+// Print Fibonacci numbers.
 fn main() {
     let count = std::env::args()
         .nth(1)
