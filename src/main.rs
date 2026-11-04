@@ -1,8 +1,13 @@
 use std::collections::{BTreeSet, HashMap};
 use std::env;
 use std::fs;
+use std::io::Read;
 use std::path::Path;
 use std::process::ExitCode;
+
+use sha2::{Digest, Sha256};
+
+const HASH_BUFFER_SIZE: usize = 8 * 1024;
 
 fn main() -> ExitCode {
     match parse_args(env::args().skip(1)) {
@@ -110,30 +115,30 @@ fn file_renames(left: &str, right: &str) -> Result<Vec<(String, String)>, String
     let left_names: BTreeSet<_> = left_files.iter().cloned().collect();
     let right_names: BTreeSet<_> = right_files.iter().cloned().collect();
 
-    let mut left_only = HashMap::<Vec<u8>, Vec<String>>::new();
+    let mut left_only = HashMap::<[u8; 32], Vec<String>>::new();
     for path in left_files
         .into_iter()
         .filter(|path| !right_names.contains(path))
     {
         left_only
-            .entry(read_file(left_root, &path)?)
+            .entry(file_hash(left_root, &path)?)
             .or_default()
             .push(path);
     }
-    let mut right_only = HashMap::<Vec<u8>, Vec<String>>::new();
+    let mut right_only = HashMap::<[u8; 32], Vec<String>>::new();
     for path in right_files
         .into_iter()
         .filter(|path| !left_names.contains(path))
     {
         right_only
-            .entry(read_file(right_root, &path)?)
+            .entry(file_hash(right_root, &path)?)
             .or_default()
             .push(path);
     }
 
     let mut renames = Vec::new();
-    for (bytes, from_paths) in left_only {
-        let Some(to_paths) = right_only.get(&bytes) else {
+    for (hash, from_paths) in left_only {
+        let Some(to_paths) = right_only.get(&hash) else {
             continue;
         };
         if from_paths.len() == 1 && to_paths.len() == 1 {
@@ -144,9 +149,22 @@ fn file_renames(left: &str, right: &str) -> Result<Vec<(String, String)>, String
     Ok(renames)
 }
 
-fn read_file(root: &Path, relative: &str) -> Result<Vec<u8>, String> {
+fn file_hash(root: &Path, relative: &str) -> Result<[u8; 32], String> {
     let path = root.join(relative);
-    fs::read(&path).map_err(|error| format!("cannot read {}: {error}", path.display()))
+    let mut file = fs::File::open(&path)
+        .map_err(|error| format!("cannot read {}: {error}", path.display()))?;
+    let mut hasher = Sha256::new();
+    let mut buffer = [0_u8; HASH_BUFFER_SIZE];
+    loop {
+        let count = file
+            .read(&mut buffer)
+            .map_err(|error| format!("cannot read {}: {error}", path.display()))?;
+        if count == 0 {
+            break;
+        }
+        hasher.update(&buffer[..count]);
+    }
+    Ok(hasher.finalize().into())
 }
 
 fn paired_files(left: &str, right: &str) -> Result<Vec<String>, String> {
