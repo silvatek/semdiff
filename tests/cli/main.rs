@@ -1,6 +1,6 @@
 mod apply;
 mod args;
-mod rename;
+mod file_change;
 mod round_trip;
 mod semdif;
 

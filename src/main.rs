@@ -1,6 +1,6 @@
 mod apply;
 mod args;
-mod rename;
+mod file_change;
 mod semdif;
 
 pub(crate) use args::Sources;
@@ -42,7 +42,7 @@ fn find_differences(sources: &Sources) -> Differences {
     });
     let (left_only, right_only, paired_files) = partition_files(left_files, right_files);
     let changes =
-        rename::file_changes(sources, &left_only, &right_only).unwrap_or_else(|message| {
+        file_change::file_changes(sources, &left_only, &right_only).unwrap_or_else(|message| {
             exit_with_message(message);
         });
     Differences {
