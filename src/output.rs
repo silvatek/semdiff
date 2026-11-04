@@ -1,6 +1,9 @@
 use std::fs;
 use std::process::ExitCode;
 
+/// Writes the semdiff document to `output` and prints the shared paths.
+///
+/// Returns an exit code of 1 when the file cannot be written.
 pub(crate) fn write_output(
     output: &str,
     sources: &crate::Sources,
@@ -23,6 +26,7 @@ pub(crate) fn write_output(
     ExitCode::SUCCESS
 }
 
+/// Builds the YAML document, including a `changes` list when any files were renamed.
 fn semdiff_document(version: &str, timestamp: &str, renames: &[(String, String)]) -> String {
     let mut document = header_document(version, timestamp);
     if renames.is_empty() {
@@ -39,15 +43,18 @@ fn semdiff_document(version: &str, timestamp: &str, renames: &[(String, String)]
     document
 }
 
+/// Builds the YAML header containing the semdiff version and a UTC timestamp.
 fn header_document(version: &str, timestamp: &str) -> String {
     format!("header:\n  semdiff: \"{version}\"\n  timestamp: \"{timestamp}\"\n")
 }
 
+/// Quotes `value` as a YAML double-quoted scalar.
 fn yaml_string(value: &str) -> String {
     let escaped = value.replace('\\', "\\\\").replace('"', "\\\"");
     format!("\"{escaped}\"")
 }
 
+/// Returns the current UTC time as `YYYY-MM-DDTHH:MM:SSZ`.
 fn utc_timestamp() -> String {
     chrono::Utc::now().format("%Y-%m-%dT%H:%M:%SZ").to_string()
 }
