@@ -5,9 +5,14 @@ use std::path::Path;
 use std::process::ExitCode;
 
 fn main() -> ExitCode {
-    match parse_dirs(env::args().skip(1)) {
-        Ok((left, right)) => match paired_files(&left, &right) {
+    match parse_args(env::args().skip(1)) {
+        Ok((left, right, output)) => match paired_files(&left, &right) {
             Ok(paths) => {
+                let document = header_document(env!("CARGO_PKG_VERSION"), &utc_timestamp());
+                if let Err(error) = fs::write(&output, document) {
+                    eprintln!("cannot write {output}: {error}");
+                    return ExitCode::from(1);
+                }
                 println!("Semdiff {}", env!("CARGO_PKG_VERSION"));
                 println!("Comparing {left} and {right}");
                 for path in paths {
@@ -21,7 +26,7 @@ fn main() -> ExitCode {
             }
         },
         Err(CliError::Usage) => {
-            eprintln!("Usage: semdiff <left> <right>");
+            eprintln!("Usage: semdiff <left> <right> <output>");
             ExitCode::from(2)
         }
         Err(CliError::NotDirectory(path)) => {
@@ -36,19 +41,28 @@ enum CliError {
     NotDirectory(String),
 }
 
-fn parse_dirs<I>(args: I) -> Result<(String, String), CliError>
+fn parse_args<I>(args: I) -> Result<(String, String, String), CliError>
 where
     I: IntoIterator<Item = String>,
 {
     let mut args = args.into_iter();
     let left = args.next().ok_or(CliError::Usage)?;
     let right = args.next().ok_or(CliError::Usage)?;
+    let output = args.next().ok_or(CliError::Usage)?;
     if args.next().is_some() {
         return Err(CliError::Usage);
     }
     require_dir(&left)?;
     require_dir(&right)?;
-    Ok((left, right))
+    Ok((left, right, output))
+}
+
+fn header_document(version: &str, timestamp: &str) -> String {
+    format!("header:\n  semdiff: \"{version}\"\n  timestamp: \"{timestamp}\"\n")
+}
+
+fn utc_timestamp() -> String {
+    chrono::Utc::now().format("%Y-%m-%dT%H:%M:%SZ").to_string()
 }
 
 fn require_dir(path: &str) -> Result<(), CliError> {
