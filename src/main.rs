@@ -35,9 +35,9 @@ struct Differences {
 
 /// The shared files and the ordered changes between the two sources.
 ///
-/// File renames come first. Each paired file is then compared once and every content
-/// change is recorded at its own scope. The same rename in several files is then
-/// collapsed into the smallest scope that still covers every use.
+/// File renames come first. Each paired file is then compared on its own: the lines
+/// that differ, the spans that differ inside those lines, and what each span is.
+/// Identifier renames that name the same thing are then collapsed into one wider scope.
 fn find_differences(sources: &Sources) -> Differences {
     let paths = paired_files(sources).unwrap_or_else(|message| {
         exit_with_message(message);
@@ -67,9 +67,8 @@ fn file_rename_changes(sources: &Sources) -> Result<Vec<Change>, String> {
 
 /// Content changes in the paired files, each at the scope of its own file.
 ///
-/// Each file is compared once. The lines that differ are found, then the spans that
-/// differ inside those lines, and each of those differences is classified. An unchanged
-/// file is kept only so a later collapse can see a use that did not change.
+/// A file whose text did not change is kept only so a later collapse can see a use
+/// that was left as it was.
 fn changed_content(
     sources: &Sources,
     paths: &[String],
@@ -86,7 +85,7 @@ fn changed_content(
             .spans
             .map(|classify| symbol::compared_file(path, left.clone(), right.clone(), classify));
         if left != right {
-            changes.extend(classify_file(path, dialect, &left, &right, file.as_ref()));
+            changes.extend(changes_in_file(path, dialect, &left, &right, file.as_ref()));
         }
         if let Some(file) = file {
             compared.push(file);
@@ -95,12 +94,12 @@ fn changed_content(
     Ok((changes, compared))
 }
 
-/// The changes in one file whose text differs.
+/// The changes found by walking one file's differing lines, then the spans in those lines.
 ///
-/// Inserted lines are classified with the dialect's line-comment test. Spans inside
-/// a changed line are classified from the spans the dialect already read, and an
-/// identifier that was renamed becomes a symbol rename when every use in the file changed.
-fn classify_file(
+/// An inserted line that is a comment is recorded on its own. Each changed span is
+/// identified, and an identifier is added to a list. Once every line has been read,
+/// that list becomes a symbol rename when every use of the name in the file changed.
+fn changes_in_file(
     path: &str,
     dialect: &crate::dialect::Dialect,
     left: &str,
@@ -112,21 +111,38 @@ fn classify_file(
     let right_spans = file
         .map(symbol::ComparedFile::right_spans)
         .unwrap_or(&empty);
-    let diff = symbol::content_diff(left, right, left_spans, right_spans);
     let mut changes = Vec::new();
-    for (line, text) in diff.inserted_lines {
-        if let Some(comment) = comment::inserted_comment(path, line, &text, dialect.is_line_comment)
-        {
-            changes.push(Change::line_comment_added(
-                comment.scope,
-                comment.line,
-                comment.text,
-            ));
+    let mut identifiers = Vec::new();
+    for line in symbol::changed_lines(left, right) {
+        match line {
+            symbol::ChangedLine::Inserted { line, text } => {
+                if let Some(added) =
+                    comment::inserted_comment(path, line, text, dialect.is_line_comment)
+                {
+                    changes.push(Change::line_comment_added(
+                        added.scope,
+                        added.line,
+                        added.text,
+                    ));
+                }
+            }
+            symbol::ChangedLine::Edited(line) => {
+                for (before, after) in
+                    symbol::changed_spans(left, right, &line, left_spans, right_spans)
+                {
+                    if before.kind == crate::dialect::SpanKind::Identifier
+                        && after.kind == crate::dialect::SpanKind::Identifier
+                        && before.text != after.text
+                    {
+                        identifiers.push((before.text.to_string(), after.text.to_string()));
+                    }
+                }
+            }
         }
     }
     if let Some(file) = file {
         changes.extend(
-            symbol::renames_in_file(file, &diff.identifier_edits)
+            symbol::renames_in_file(file, &identifiers)
                 .into_iter()
                 .map(|rename| Change::symbol_renamed(rename.scope, rename.from, rename.to)),
         );

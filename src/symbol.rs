@@ -58,6 +58,16 @@ impl ComparedFile {
         identifier_uses(&self.left, &self.left_spans, name) > 0
             || identifier_uses(&self.right, &self.right_spans, name) > 0
     }
+
+    /// The classified spans of the old text.
+    pub(crate) fn left_spans(&self) -> &[Span] {
+        &self.left_spans
+    }
+
+    /// The classified spans of the new text.
+    pub(crate) fn right_spans(&self) -> &[Span] {
+        &self.right_spans
+    }
 }
 
 /// Symbol renames that are complete in one file.
@@ -70,18 +80,6 @@ pub(crate) fn renames_in_file(
     edits: &[(String, String)],
 ) -> Vec<SymbolRename> {
     renames_for_scope(std::slice::from_ref(file), edits)
-}
-
-impl ComparedFile {
-    /// The classified spans of the old text.
-    pub(crate) fn left_spans(&self) -> &[Span] {
-        &self.left_spans
-    }
-
-    /// The classified spans of the new text.
-    pub(crate) fn right_spans(&self) -> &[Span] {
-        &self.right_spans
-    }
 }
 
 /// Renames one code identifier in every file of `scope`.
@@ -110,34 +108,115 @@ struct TextLine<'a> {
     text: &'a str,
 }
 
-/// Lines and identifier spans that differ between two versions of a file.
-///
-/// Both come from one comparison, so a comment line and a renamed identifier in the
-/// same file are not discovered separately.
-pub(crate) struct ContentDiff {
-    pub inserted_lines: Vec<(usize, String)>,
-    pub identifier_edits: Vec<(String, String)>,
+/// One line that differs between the two versions of a file.
+pub(crate) enum ChangedLine<'a> {
+    /// A line present only in the new file. `line` is its 1-based number there.
+    Inserted { line: usize, text: &'a str },
+    /// The same line, with different text.
+    Edited(EditedLine<'a>),
 }
 
-/// The differing lines and identifier spans in one file.
+/// A line that exists on both sides but whose text changed.
+pub(crate) struct EditedLine<'a> {
+    /// The 1-based line number in the new file.
+    pub line: usize,
+    pub left: &'a str,
+    pub right: &'a str,
+    /// Where `left` starts in the old file.
+    pub left_start: usize,
+    /// Where `right` starts in the new file.
+    pub right_start: usize,
+}
+
+/// What a changed span is, and the text it covers.
+pub(crate) struct IdentifiedSpan<'a> {
+    pub kind: SpanKind,
+    pub text: &'a str,
+}
+
+/// The lines whose text differs.
 ///
-/// Inserted lines keep their line number in the new file. Identifier edits are the
-/// renamed names inside lines that changed but were not inserted whole.
-pub(crate) fn content_diff(
-    left: &str,
-    right: &str,
-    left_spans: &[Span],
-    right_spans: &[Span],
-) -> ContentDiff {
+/// An inserted comment stays on its own. A line that was edited in place is paired
+/// with the line it became, so a later step can look at the spans inside it.
+pub(crate) fn changed_lines<'a>(left: &'a str, right: &'a str) -> Vec<ChangedLine<'a>> {
     let diff = line_diff(left, right);
-    ContentDiff {
-        inserted_lines: diff
-            .inserted
-            .iter()
-            .map(|line| (line.line, line.text.to_string()))
-            .collect(),
-        identifier_edits: identifier_edits_in(left, right, left_spans, right_spans, &diff.pairs),
+    let mut lines = Vec::new();
+    for line in diff.inserted {
+        lines.push(ChangedLine::Inserted {
+            line: line.line,
+            text: line.text,
+        });
     }
+    for (left_line, right_line) in diff.pairs {
+        lines.push(ChangedLine::Edited(EditedLine {
+            line: right_line.line,
+            left: left_line.text,
+            right: right_line.text,
+            left_start: left_line.start,
+            right_start: right_line.start,
+        }));
+    }
+    lines.sort_by_key(ChangedLine::line_number);
+    lines
+}
+
+impl ChangedLine<'_> {
+    fn line_number(&self) -> usize {
+        match self {
+            Self::Inserted { line, .. } => *line,
+            Self::Edited(line) => line.line,
+        }
+    }
+}
+
+/// The spans that differ inside one edited line, each identified.
+///
+/// Comment and string text is set aside first, so a name repeated there is not the
+/// span that changed. The dialect's classification of the remaining span is what the
+/// caller uses: keyword, identifier, comment, or string.
+pub(crate) fn changed_spans<'a>(
+    left_file: &'a str,
+    right_file: &'a str,
+    line: &EditedLine<'a>,
+    left_spans: &'a [Span],
+    right_spans: &'a [Span],
+) -> Vec<(IdentifiedSpan<'a>, IdentifiedSpan<'a>)> {
+    let left_code = code_text(left_file, left_spans);
+    let right_code = code_text(right_file, right_spans);
+    let left_text = &left_code[line.left_start..line.left_start + line.left.len()];
+    let right_text = &right_code[line.right_start..line.right_start + line.right.len()];
+    let mut found = Vec::new();
+    let mut seen = BTreeSet::new();
+    for (left_range, right_range) in changed_ranges(left_text, right_text) {
+        let Some(before) = changed_token(
+            left_spans,
+            line.left_start + left_range.start,
+            line.left_start + left_range.end,
+        ) else {
+            continue;
+        };
+        let Some(after) = changed_token(
+            right_spans,
+            line.right_start + right_range.start,
+            line.right_start + right_range.end,
+        ) else {
+            continue;
+        };
+        if !seen.insert((before.start, after.start)) {
+            continue;
+        }
+        found.push((
+            IdentifiedSpan {
+                kind: before.kind,
+                text: &left_file[before.start..before.end],
+            },
+            IdentifiedSpan {
+                kind: after.kind,
+                text: &right_file[after.start..after.end],
+            },
+        ));
+    }
+    found
 }
 
 /// One rename for each name whose every use in these files changed to the same new name.
@@ -228,51 +307,6 @@ fn identifier_uses(source: &str, spans: &[Span], name: &str) -> usize {
         .iter()
         .filter(|span| span.kind == SpanKind::Identifier && &source[span.start..span.end] == name)
         .count()
-}
-
-/// Identifier renames inside lines that changed in place.
-///
-/// A span is kept only when both sides read it as an identifier. A comment or a
-/// string can repeat a name without that being a use.
-fn identifier_edits_in(
-    left: &str,
-    right: &str,
-    left_spans: &[Span],
-    right_spans: &[Span],
-    pairs: &[(TextLine<'_>, TextLine<'_>)],
-) -> Vec<(String, String)> {
-    let left_code = code_text(left, left_spans);
-    let right_code = code_text(right, right_spans);
-    let mut edits = Vec::new();
-    let mut seen = BTreeSet::new();
-    for (left_line, right_line) in pairs {
-        let left_text = &left_code[left_line.start..left_line.start + left_line.text.len()];
-        let right_text = &right_code[right_line.start..right_line.start + right_line.text.len()];
-        for (left_range, right_range) in changed_ranges(left_text, right_text) {
-            let left_token = changed_token(
-                left_spans,
-                left_line.start + left_range.start,
-                left_line.start + left_range.end,
-            );
-            let right_token = changed_token(
-                right_spans,
-                right_line.start + right_range.start,
-                right_line.start + right_range.end,
-            );
-            let (Some(left_token), Some(right_token)) = (left_token, right_token) else {
-                continue;
-            };
-            if left_token.kind != SpanKind::Identifier || right_token.kind != SpanKind::Identifier {
-                continue;
-            }
-            let from = left[left_token.start..left_token.end].to_string();
-            let to = right[right_token.start..right_token.end].to_string();
-            if from != to && seen.insert((left_token.start, right_token.start)) {
-                edits.push((from, to));
-            }
-        }
-    }
-    edits
 }
 
 /// The file text that is code.
@@ -628,18 +662,44 @@ fn replace_identifiers(source: &str, spans: &[Span], from: &str, to: &str) -> St
 
 #[cfg(test)]
 mod tests {
-    use super::{content_diff, line_diff, replace_identifiers, tightest_scope};
+    use super::{
+        changed_lines, changed_spans, replace_identifiers, tightest_scope, ChangedLine, EditedLine,
+    };
     use crate::dialect::{Span, SpanKind, RUST};
+
+    fn identifier_renames(left: &str, right: &str, lines: &[ChangedLine]) -> Vec<(String, String)> {
+        let classify = RUST.spans.unwrap();
+        let left_spans = classify(left);
+        let right_spans = classify(right);
+        let mut names = Vec::new();
+        for line in lines {
+            let ChangedLine::Edited(line) = line else {
+                continue;
+            };
+            for (before, after) in changed_spans(left, right, line, &left_spans, &right_spans) {
+                if before.kind == SpanKind::Identifier && after.kind == SpanKind::Identifier {
+                    names.push((before.text.to_string(), after.text.to_string()));
+                }
+            }
+        }
+        names
+    }
 
     #[test]
     fn one_comparison_finds_an_inserted_comment_and_a_renamed_identifier() {
         let left = "fn fibonacci() {}\n";
         let right = "/// note\nfn fib() {}\n";
-        let classify = RUST.spans.unwrap();
-        let diff = content_diff(left, right, &classify(left), &classify(right));
-        assert_eq!(diff.inserted_lines, vec![(1, "/// note".to_string())]);
+        let lines = changed_lines(left, right);
+        let inserted: Vec<_> = lines
+            .iter()
+            .filter_map(|line| match line {
+                ChangedLine::Inserted { line, text } => Some((*line, *text)),
+                ChangedLine::Edited(_) => None,
+            })
+            .collect();
+        assert_eq!(inserted, vec![(1, "/// note")]);
         assert_eq!(
-            diff.identifier_edits,
+            identifier_renames(left, right, &lines),
             vec![("fibonacci".to_string(), "fib".to_string())]
         );
     }
@@ -648,20 +708,26 @@ mod tests {
     fn pairs_a_changed_line_and_not_an_inserted_comment() {
         let left = "fn fibonacci(n: u32) -> u64 {\n    match n {\n";
         let right = "/// where `fib(0)` is 0.\nfn fib(n: u32) -> u64 {\n    match n {\n";
-        let pairs = line_diff(left, right).pairs;
-        assert_eq!(pairs.len(), 1);
-        assert!(pairs[0].0.text.contains("fibonacci"));
-        assert!(pairs[0].1.text.starts_with("fn fib("));
+        let lines = changed_lines(left, right);
+        let edited: Vec<&EditedLine> = lines
+            .iter()
+            .filter_map(|line| match line {
+                ChangedLine::Edited(line) => Some(line),
+                ChangedLine::Inserted { .. } => None,
+            })
+            .collect();
+        assert_eq!(edited.len(), 1);
+        assert!(edited[0].left.contains("fibonacci"));
+        assert!(edited[0].right.starts_with("fn fib("));
     }
 
     #[test]
     fn an_inserted_comment_is_not_an_identifier_change() {
         let left = "fn fibonacci(n: u32) -> u64 {\n    println!(\"{n}: {}\", fibonacci(n));\n";
         let right = "/// where `fib(0)` is 0.\nfn fib(n: u32) -> u64 {\n    println!(\"{n}: {}\", fib(n));\n";
-        let classify = RUST.spans.unwrap();
-        let edits = content_diff(left, right, &classify(left), &classify(right)).identifier_edits;
+        let lines = changed_lines(left, right);
         assert_eq!(
-            edits,
+            identifier_renames(left, right, &lines),
             vec![
                 ("fibonacci".to_string(), "fib".to_string()),
                 ("fibonacci".to_string(), "fib".to_string()),
@@ -673,9 +739,11 @@ mod tests {
     fn a_trailing_comment_does_not_hide_the_rename() {
         let left = "fn use_it() { fibonacci(); }\n";
         let right = "fn use_it() { fib(); } // fibonacci\n";
-        let classify = RUST.spans.unwrap();
-        let edits = content_diff(left, right, &classify(left), &classify(right)).identifier_edits;
-        assert_eq!(edits, vec![("fibonacci".to_string(), "fib".to_string())]);
+        let lines = changed_lines(left, right);
+        assert_eq!(
+            identifier_renames(left, right, &lines),
+            vec![("fibonacci".to_string(), "fib".to_string())]
+        );
     }
 
     #[test]
