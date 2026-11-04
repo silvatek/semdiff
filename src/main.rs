@@ -65,6 +65,7 @@ fn find_differences(sources: &Sources) -> Differences {
         &right_dirs,
         &right_files,
     ));
+    let changes = directory_changes::place_replacement_files(changes);
     Differences {
         paths: paired_files,
         changes,

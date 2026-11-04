@@ -45,6 +45,34 @@ pub(crate) fn directory_changes(
     changes
 }
 
+/// Puts a file that replaces a removed directory after that directory is removed.
+///
+/// The file cannot be written while its path is still a directory. Deleting the
+/// files inside, then the directory, leaves the path free for the new file.
+pub(crate) fn place_replacement_files(
+    changes: Vec<crate::semdif::Change>,
+) -> Vec<crate::semdif::Change> {
+    let removed: BTreeSet<_> = changes
+        .iter()
+        .filter_map(|change| match change {
+            crate::semdif::Change::DirectoryDeleted { path } => Some(path.clone()),
+            _ => None,
+        })
+        .collect();
+    let mut kept = Vec::new();
+    let mut replacements = Vec::new();
+    for change in changes {
+        match &change {
+            crate::semdif::Change::FileAdded { path, .. } if removed.contains(path) => {
+                replacements.push(change);
+            }
+            _ => kept.push(change),
+        }
+    }
+    kept.extend(replacements);
+    kept
+}
+
 fn directory_depth(path: &str) -> usize {
     path.matches('/').count()
 }
