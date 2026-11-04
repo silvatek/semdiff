@@ -159,10 +159,88 @@ fn requires_an_output_path() {
 }
 
 #[test]
-fn rejects_a_missing_directory() {
+fn rejects_a_missing_source() {
     let output = run(&["missing-left", "missing-right", "out.yml"]);
     let stderr = String::from_utf8(output.stderr).expect("stderr was not utf-8");
 
     assert_eq!(output.status.code(), Some(1));
-    assert_eq!(stderr, "not a directory: missing-left\n");
+    assert_eq!(stderr, "not a file or directory: missing-left\n");
+}
+
+#[test]
+fn compares_individual_files() {
+    let root = std::env::temp_dir().join(format!("semdiff-files-{}", std::process::id()));
+    let left_dir = root.join("left");
+    let right_dir = root.join("right");
+    fs::create_dir_all(&left_dir).unwrap();
+    fs::create_dir_all(&right_dir).unwrap();
+    fs::write(left_dir.join("quote.txt"), "Brevity is the soul of wit.\n").unwrap();
+    fs::write(right_dir.join("quote.txt"), "Brevity is the soul of wit.\n").unwrap();
+
+    let output_path = root.join("out.yml");
+    let left = left_dir.join("quote.txt");
+    let right = right_dir.join("quote.txt");
+    let left = left.to_str().unwrap();
+    let right = right.to_str().unwrap();
+    let output_path = output_path.to_str().unwrap();
+    let output = run(&[left, right, output_path]);
+    let stdout = String::from_utf8(output.stdout).expect("stdout was not utf-8");
+    let document = fs::read_to_string(output_path).expect("failed to read semdiff file");
+
+    assert!(output.status.success());
+    assert!(stdout.ends_with("quote.txt\n"), "{stdout}");
+    assert!(!document.contains("changes:"));
+
+    let _ = fs::remove_dir_all(root);
+}
+
+#[test]
+fn detects_a_rename_between_individual_files() {
+    let root = std::env::temp_dir().join(format!("semdiff-file-rename-{}", std::process::id()));
+    let left_dir = root.join("left");
+    let right_dir = root.join("right");
+    fs::create_dir_all(&left_dir).unwrap();
+    fs::create_dir_all(&right_dir).unwrap();
+    let quote = "Brevity is the soul of wit.\n";
+    fs::write(left_dir.join("quote.txt"), quote).unwrap();
+    fs::write(right_dir.join("quotation.txt"), quote).unwrap();
+
+    let output_path = root.join("out.yml");
+    let left = left_dir.join("quote.txt");
+    let right = right_dir.join("quotation.txt");
+    let left = left.to_str().unwrap();
+    let right = right.to_str().unwrap();
+    let output_path = output_path.to_str().unwrap();
+    let output = run(&[left, right, output_path]);
+    let document = fs::read_to_string(output_path).expect("failed to read semdiff file");
+
+    assert!(output.status.success());
+    let changes = document.split_once("changes:\n").expect("changes list").1;
+    assert_eq!(
+        changes,
+        "  - scope: \".\"\n    type: file-renamed\n    details:\n      from: \"quote.txt\"\n      to: \"quotation.txt\"\n"
+    );
+
+    let _ = fs::remove_dir_all(root);
+}
+
+#[test]
+fn rejects_a_file_compared_with_a_directory() {
+    let root = std::env::temp_dir().join(format!("semdiff-mixed-{}", std::process::id()));
+    fs::create_dir_all(&root).unwrap();
+    let file = root.join("quote.txt");
+    fs::write(&file, "Brevity is the soul of wit.\n").unwrap();
+
+    let file = file.to_str().unwrap();
+    let directory = root.to_str().unwrap();
+    let output = run(&[file, directory, "out.yml"]);
+    let stderr = String::from_utf8(output.stderr).expect("stderr was not utf-8");
+
+    assert_eq!(output.status.code(), Some(1));
+    assert_eq!(
+        stderr,
+        "sources must both be files or both be directories\n"
+    );
+
+    let _ = fs::remove_dir_all(root);
 }

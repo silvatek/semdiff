@@ -12,10 +12,12 @@ const HASH_BUFFER_SIZE: usize = 8 * 1024;
 /// A match is reported only when one unpaired file on each side has that content, so
 /// identical copies are not paired by guesswork.
 pub(crate) fn file_renames(sources: &crate::Sources) -> Result<Vec<(String, String)>, String> {
-    let left_root = Path::new(&sources.left);
-    let right_root = Path::new(&sources.right);
-    let left_files = crate::collect_files(left_root)?;
-    let right_files = crate::collect_files(right_root)?;
+    let left_path = Path::new(&sources.left);
+    let right_path = Path::new(&sources.right);
+    let left_root = crate::source_base(left_path);
+    let right_root = crate::source_base(right_path);
+    let left_files = crate::collect_files(left_path)?;
+    let right_files = crate::collect_files(right_path)?;
     let left_names: BTreeSet<_> = left_files.iter().cloned().collect();
     let right_names: BTreeSet<_> = right_files.iter().cloned().collect();
 

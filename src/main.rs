@@ -7,7 +7,7 @@ use std::fs;
 use std::path::Path;
 use std::process::ExitCode;
 
-/// Compares two directories and writes a semdiff file.
+/// Compares two sources and writes a semdiff file.
 ///
 /// Argument errors stop the command before a comparison starts.
 fn main() -> ExitCode {
@@ -31,10 +31,11 @@ struct Differences {
     renames: Vec<(String, String)>,
 }
 
-/// The directories to compare and where the semdiff file should be written.
+/// The sources to compare and where the semdiff file should be written.
 ///
-/// An unusable invocation stops the command: code 2 for the wrong arguments, and code 1
-/// when a source is not a directory.
+/// A source may be a file or a directory. An unusable invocation stops the command:
+/// code 2 for the wrong arguments, and code 1 when a source is missing or the two
+/// sources are different kinds.
 fn parse_args() -> Args {
     match parsed_args(env::args().skip(1)) {
         Ok(args) => args,
@@ -42,8 +43,12 @@ fn parse_args() -> Args {
             eprintln!("Usage: semdiff <left> <right> <output>");
             std::process::exit(2);
         }
-        Err(CliError::NotDirectory(path)) => {
-            eprintln!("not a directory: {path}");
+        Err(CliError::NotSource(path)) => {
+            eprintln!("not a file or directory: {path}");
+            std::process::exit(1);
+        }
+        Err(CliError::MixedSources) => {
+            eprintln!("sources must both be files or both be directories");
             std::process::exit(1);
         }
     }
@@ -72,13 +77,14 @@ fn exit_with_message(message: String) -> ! {
 
 enum CliError {
     Usage,
-    NotDirectory(String),
+    NotSource(String),
+    MixedSources,
 }
 
 /// The command arguments taken from the three expected paths.
 ///
-/// The wrong number of paths is a usage error. A source that is not a directory is
-/// rejected so the comparison is not attempted.
+/// The wrong number of paths is a usage error. A missing source is rejected, and a file
+/// is not compared with a directory, so the comparison is not attempted.
 fn parsed_args<I>(args: I) -> Result<Args, CliError>
 where
     I: IntoIterator<Item = String>,
@@ -90,22 +96,48 @@ where
     if args.next().is_some() {
         return Err(CliError::Usage);
     }
-    require_dir(&left)?;
-    require_dir(&right)?;
+    require_source(&left)?;
+    require_source(&right)?;
+    require_same_kind(&left, &right)?;
     Ok(Args {
         sources: Sources { left, right },
         output,
     })
 }
 
-/// Confirms that a source path is a directory.
+/// Confirms that a source path is a file or a directory.
 ///
-/// The comparison is defined on two file trees, so a file or a missing path cannot be a source.
-fn require_dir(path: &str) -> Result<(), CliError> {
-    if Path::new(path).is_dir() {
+/// A missing path cannot be compared.
+fn require_source(path: &str) -> Result<(), CliError> {
+    let path = Path::new(path);
+    if path.is_file() || path.is_dir() {
         Ok(())
     } else {
-        Err(CliError::NotDirectory(path.to_string()))
+        Err(CliError::NotSource(path.display().to_string()))
+    }
+}
+
+/// Confirms that both sources are files or both are directories.
+///
+/// A file and a directory are different comparison units, so they are not paired.
+fn require_same_kind(left: &str, right: &str) -> Result<(), CliError> {
+    if Path::new(left).is_dir() == Path::new(right).is_dir() {
+        Ok(())
+    } else {
+        Err(CliError::MixedSources)
+    }
+}
+
+/// The directory from which a source's relative paths are read.
+///
+/// A single file and a directory tree can then be read in the same way.
+pub(crate) fn source_base(path: &Path) -> &Path {
+    if path.is_file() {
+        path.parent()
+            .filter(|parent| !parent.as_os_str().is_empty())
+            .unwrap_or(Path::new("."))
+    } else {
+        path
     }
 }
 
@@ -125,10 +157,17 @@ fn paired_files(sources: &Sources) -> Result<Vec<String>, String> {
     Ok(shared)
 }
 
-/// The project files in a source tree.
+/// The files that belong to a source.
 ///
-/// Generated build output is omitted so it is not treated as project content.
+/// A directory contributes its project files, and a file contributes itself. Generated
+/// build output is omitted so it is not treated as project content.
 pub(crate) fn collect_files(root: &Path) -> Result<Vec<String>, String> {
+    if root.is_file() {
+        let name = root
+            .file_name()
+            .ok_or_else(|| format!("cannot name {}", root.display()))?;
+        return Ok(vec![name.to_string_lossy().into_owned()]);
+    }
     let mut files = Vec::new();
     visit_dir(root, root, &mut files)?;
     Ok(files)
