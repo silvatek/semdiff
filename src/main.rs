@@ -1,8 +1,8 @@
 mod apply;
 mod comment;
 mod dialect;
-mod output;
 mod rename;
+mod semdif;
 
 use std::collections::BTreeSet;
 use std::env;
@@ -22,7 +22,7 @@ fn main() -> ExitCode {
     match parse_args() {
         Command::Compare(args) => {
             let differences = find_differences(&args.sources);
-            output::write_output(&args.output, &args.sources, &differences)
+            semdif::write_output(&args.output, &args.sources, &differences)
         }
         Command::Apply { source, patch } => apply::apply(&source, &patch),
     }
