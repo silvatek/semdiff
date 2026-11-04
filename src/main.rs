@@ -1,3 +1,5 @@
+mod comment;
+mod dialect;
 mod output;
 mod rename;
 
@@ -29,6 +31,7 @@ struct Sources {
 struct Differences {
     paths: Vec<String>,
     renames: Vec<(String, String)>,
+    added_comments: Vec<comment::AddedLineComment>,
 }
 
 /// The sources to compare and where the semdiff file should be written.
@@ -54,7 +57,7 @@ fn parse_args() -> Args {
     }
 }
 
-/// The shared files and renames between the two sources.
+/// The shared files, renames, and added line comments between the two sources.
 ///
 /// Later steps use this result instead of searching the trees again.
 fn find_differences(sources: &Sources) -> Differences {
@@ -64,7 +67,14 @@ fn find_differences(sources: &Sources) -> Differences {
     let renames = rename::file_renames(sources).unwrap_or_else(|message| {
         exit_with_message(message);
     });
-    Differences { paths, renames }
+    let added_comments = comment::added_line_comments(sources, &paths).unwrap_or_else(|message| {
+        exit_with_message(message);
+    });
+    Differences {
+        paths,
+        renames,
+        added_comments,
+    }
 }
 
 /// Stops the command after a comparison failure.

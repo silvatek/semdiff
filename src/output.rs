@@ -14,6 +14,7 @@ pub(crate) fn write_output(
         env!("CARGO_PKG_VERSION"),
         &utc_timestamp(),
         &differences.renames,
+        &differences.added_comments,
     );
     if let Err(error) = fs::write(output, document) {
         eprintln!("cannot write {output}: {error}");
@@ -29,11 +30,16 @@ pub(crate) fn write_output(
 
 /// The semdiff text for one comparison.
 ///
-/// The header is always present. Renames are included only when some were found, so an
+/// The header is always present. Changes are included only when some were found, so an
 /// unchanged pair does not gain an empty change list.
-fn semdiff_document(version: &str, timestamp: &str, renames: &[(String, String)]) -> String {
+fn semdiff_document(
+    version: &str,
+    timestamp: &str,
+    renames: &[(String, String)],
+    added_comments: &[crate::comment::AddedLineComment],
+) -> String {
     let mut document = header_document(version, timestamp);
-    if renames.is_empty() {
+    if renames.is_empty() && added_comments.is_empty() {
         return document;
     }
     document.push_str("changes:\n");
@@ -43,6 +49,13 @@ fn semdiff_document(version: &str, timestamp: &str, renames: &[(String, String)]
         document.push_str("    details:\n");
         document.push_str(&format!("      from: {}\n", yaml_string(from)));
         document.push_str(&format!("      to: {}\n", yaml_string(to)));
+    }
+    for comment in added_comments {
+        document.push_str(&format!("  - scope: {}\n", yaml_string(&comment.scope)));
+        document.push_str("    type: line-comment-added\n");
+        document.push_str("    details:\n");
+        document.push_str(&format!("      line: {}\n", comment.line));
+        document.push_str(&format!("      text: {}\n", yaml_string(&comment.text)));
     }
     document
 }
