@@ -1,222 +1,70 @@
-mod apply;
-mod args;
-mod comment;
-mod dialect;
+mod output;
 mod rename;
-mod semdif;
-mod symbol;
 
-pub(crate) use args::Sources;
-
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeSet;
+use std::env;
 use std::fs;
 use std::path::Path;
 use std::process::ExitCode;
 
-use semdif::{Change, ChangeDetails, ChangeType};
-
-/// Compares two sources, or applies a semdif file to one source.
+/// Compares two sources and writes a semdiff file.
 ///
-/// Argument errors stop the command before any comparison or edit starts.
+/// Argument errors stop the command before a comparison starts.
 fn main() -> ExitCode {
-    match args::parse_args() {
-        args::Command::Compare(args) => {
-            let differences = find_differences(&args.sources);
-            semdif::write_output(&args.output, &args.sources, &differences)
-        }
-        args::Command::Apply { source, patch } => apply::apply(&source, &patch),
-    }
+    let args = parse_args();
+    let differences = find_differences(&args.sources);
+    output::write_output(&args.output, &args.sources, &differences)
+}
+
+struct Args {
+    sources: Sources,
+    output: String,
+}
+
+struct Sources {
+    left: String,
+    right: String,
 }
 
 struct Differences {
     paths: Vec<String>,
-    changes: Vec<Change>,
+    renames: Vec<(String, String)>,
 }
 
-/// The shared files and the ordered changes between the two sources.
+/// The sources to compare and where the semdiff file should be written.
 ///
-/// File renames come first. Each paired file is then compared once and every content
-/// change is recorded at its own scope. The same rename in several files is then
-/// collapsed into the smallest scope that still covers every use.
+/// A source may be a file or a directory. An unusable invocation stops the command:
+/// code 2 for the wrong arguments, and code 1 when a source is missing or the two
+/// sources are different kinds.
+fn parse_args() -> Args {
+    match parsed_args(env::args().skip(1)) {
+        Ok(args) => args,
+        Err(CliError::Usage) => {
+            eprintln!("Usage: semdiff <left> <right> <output>");
+            std::process::exit(2);
+        }
+        Err(CliError::NotSource(path)) => {
+            eprintln!("not a file or directory: {path}");
+            std::process::exit(1);
+        }
+        Err(CliError::MixedSources) => {
+            eprintln!("sources must both be files or both be directories");
+            std::process::exit(1);
+        }
+    }
+}
+
+/// The shared files and renames between the two sources.
+///
+/// Later steps use this result instead of searching the trees again.
 fn find_differences(sources: &Sources) -> Differences {
     let paths = paired_files(sources).unwrap_or_else(|message| {
         exit_with_message(message);
     });
-    let mut changes = file_rename_changes(sources).unwrap_or_else(|message| {
+    let renames = rename::file_renames(sources).unwrap_or_else(|message| {
         exit_with_message(message);
     });
-    let (content, compared) = changed_content(sources, &paths).unwrap_or_else(|message| {
-        exit_with_message(message);
-    });
-    changes.extend(content);
-    Differences {
-        paths,
-        changes: collapse_scopes(changes, &compared),
-    }
-}
-
-/// File renames, before any file contents are compared.
-///
-/// A renamed file keeps its lines, so the line delta is zero.
-fn file_rename_changes(sources: &Sources) -> Result<Vec<Change>, String> {
-    Ok(rename::file_renames(sources)?
-        .into_iter()
-        .map(|(from, to)| Change::file_renamed(from, to))
-        .collect())
-}
-
-/// Content changes in the paired files, each at the scope of its own file.
-///
-/// An unchanged file is kept only so a later collapse can see a use that did not change.
-fn changed_content(
-    sources: &Sources,
-    paths: &[String],
-) -> Result<(Vec<Change>, Vec<symbol::ComparedFile>), String> {
-    let mut changes = Vec::new();
-    let mut compared = Vec::new();
-    for path in paths {
-        let Some(dialect) = crate::dialect::for_path(path) else {
-            continue;
-        };
-        let left = read_text(&sources.left, path)?;
-        let right = read_text(&sources.right, path)?;
-        if left != right {
-            changes.extend(
-                comment::added_line_comments(path, dialect, &left, &right)
-                    .into_iter()
-                    .map(|comment| {
-                        Change::line_comment_added(comment.scope, comment.line, comment.text)
-                    }),
-            );
-        }
-        if let Some(classify) = dialect.spans {
-            let file = symbol::compared_file(path, left, right, classify);
-            changes.extend(
-                symbol::file_symbol_renames(&file)
-                    .into_iter()
-                    .map(|rename| Change::symbol_renamed(rename.scope, rename.from, rename.to)),
-            );
-            compared.push(file);
-        }
-    }
-    Ok((changes, compared))
-}
-
-/// Joins changes that are the same rename and can share a wider scope.
-///
-/// The wider scope is kept only when it contains no use that was left unchanged.
-/// File renames stay first, then symbol renames, then added comments in line order,
-/// so line deltas can be followed from the start of the list.
-fn collapse_scopes(changes: Vec<Change>, files: &[symbol::ComparedFile]) -> Vec<Change> {
-    let mut renames = Vec::new();
-    let mut symbols = Vec::new();
-    let mut comments = Vec::new();
-    for change in changes {
-        match change.change_type {
-            ChangeType::FileRenamed => renames.push(change),
-            ChangeType::SymbolRenamed => symbols.push(change),
-            ChangeType::LineCommentAdded => comments.push(change),
-        }
-    }
-    renames.extend(collapse_symbol_renames(symbols, files));
-    renames.extend(comments);
-    renames
-}
-
-/// Symbol renames after file-sized changes that name the same identifier have been joined.
-///
-/// Each joined change keeps one scope, the smallest directory or file that contains
-/// the renamed uses and no use that was left as it was.
-fn collapse_symbol_renames(changes: Vec<Change>, files: &[symbol::ComparedFile]) -> Vec<Change> {
-    let mut groups: BTreeMap<(String, String), Vec<String>> = BTreeMap::new();
-    for change in changes {
-        let ChangeDetails::SymbolRenamed { from, to } = &change.details else {
-            continue;
-        };
-        groups
-            .entry((from.clone(), to.clone()))
-            .or_default()
-            .push(change.scope.clone());
-    }
-    let mut collapsed = Vec::new();
-    for ((from, to), scopes) in groups {
-        let mut clusters = clusters(&scopes, &from, files);
-        clusters.sort_by(|left, right| {
-            symbol::tightest_scope(&str_refs(left)).cmp(&symbol::tightest_scope(&str_refs(right)))
-        });
-        for cluster in clusters {
-            collapsed.push(Change::symbol_renamed(
-                symbol::tightest_scope(&str_refs(&cluster)),
-                from.clone(),
-                to.clone(),
-            ));
-        }
-    }
-    collapsed
-}
-
-/// Groups of files that can share one scope for a rename of `from`.
-///
-/// Two files are grouped when the directory that contains both does not also contain
-/// a use that still has the old name.
-fn clusters(scopes: &[String], from: &str, files: &[symbol::ComparedFile]) -> Vec<Vec<String>> {
-    let mut clusters: Vec<Vec<String>> = scopes.iter().cloned().map(|scope| vec![scope]).collect();
-    let mut merged = true;
-    while merged {
-        merged = false;
-        let mut index = 0;
-        while index < clusters.len() {
-            let mut other = index + 1;
-            while other < clusters.len() {
-                let mut paths = clusters[index].clone();
-                paths.extend(clusters[other].iter().cloned());
-                let scope = symbol::tightest_scope(&str_refs(&paths));
-                if scope_covers_only(&scope, &paths, from, files) {
-                    clusters[index] = paths;
-                    clusters.remove(other);
-                    merged = true;
-                } else {
-                    other += 1;
-                }
-            }
-            index += 1;
-        }
-    }
-    clusters
-}
-
-/// Whether every use of `from` inside `scope` belongs to `paths`.
-///
-/// A directory that still contains the old name cannot be the scope of the rename.
-fn scope_covers_only(
-    scope: &str,
-    paths: &[String],
-    from: &str,
-    files: &[symbol::ComparedFile],
-) -> bool {
-    files.iter().all(|file| {
-        !file.has_use(from)
-            || paths.iter().any(|path| path == file.path())
-            || !scope_contains(scope, file.path())
-    })
-}
-
-/// Whether `path` is the scope itself or a file inside it.
-fn scope_contains(scope: &str, path: &str) -> bool {
-    scope == "." || scope == path || path.starts_with(&format!("{scope}/"))
-}
-
-/// Borrowed paths, so a scope can be chosen without copying them again.
-fn str_refs(paths: &[String]) -> Vec<&str> {
-    paths.iter().map(String::as_str).collect()
-}
-
-/// The text of one paired file.
-///
-/// The comparison classifies this text, so the file is not read again for each change type.
-fn read_text(source: &str, relative: &str) -> Result<String, String> {
-    let path = source_base(Path::new(source)).join(relative);
-    fs::read_to_string(&path).map_err(|error| format!("cannot read {}: {error}", path.display()))
+    Differences { paths, renames }
 }
 
 /// Stops the command after a comparison failure.
@@ -225,6 +73,59 @@ fn read_text(source: &str, relative: &str) -> Result<String, String> {
 fn exit_with_message(message: String) -> ! {
     eprintln!("{message}");
     std::process::exit(1);
+}
+
+enum CliError {
+    Usage,
+    NotSource(String),
+    MixedSources,
+}
+
+/// The command arguments taken from the three expected paths.
+///
+/// The wrong number of paths is a usage error. A missing source is rejected, and a file
+/// is not compared with a directory, so the comparison is not attempted.
+fn parsed_args<I>(args: I) -> Result<Args, CliError>
+where
+    I: IntoIterator<Item = String>,
+{
+    let mut args = args.into_iter();
+    let left = args.next().ok_or(CliError::Usage)?;
+    let right = args.next().ok_or(CliError::Usage)?;
+    let output = args.next().ok_or(CliError::Usage)?;
+    if args.next().is_some() {
+        return Err(CliError::Usage);
+    }
+    require_source(&left)?;
+    require_source(&right)?;
+    require_same_kind(&left, &right)?;
+    Ok(Args {
+        sources: Sources { left, right },
+        output,
+    })
+}
+
+/// Confirms that a source path is a file or a directory.
+///
+/// A missing path cannot be compared.
+fn require_source(path: &str) -> Result<(), CliError> {
+    let path = Path::new(path);
+    if path.is_file() || path.is_dir() {
+        Ok(())
+    } else {
+        Err(CliError::NotSource(path.display().to_string()))
+    }
+}
+
+/// Confirms that both sources are files or both are directories.
+///
+/// A file and a directory are different comparison units, so they are not paired.
+fn require_same_kind(left: &str, right: &str) -> Result<(), CliError> {
+    if Path::new(left).is_dir() == Path::new(right).is_dir() {
+        Ok(())
+    } else {
+        Err(CliError::MixedSources)
+    }
 }
 
 /// The directory from which a source's relative paths are read.
