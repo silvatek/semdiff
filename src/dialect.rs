@@ -17,11 +17,19 @@ pub(crate) static RUST: Dialect = Dialect {
     is_line_comment: rust_line_comment,
 };
 
+/// The Python dialect.
+///
+/// Python files use `.py`, and a line comment begins with `#`.
+pub(crate) static PYTHON: Dialect = Dialect {
+    extensions: &[".py"],
+    is_line_comment: python_line_comment,
+};
+
 /// The dialect for a paired file, when semdiff knows that language.
 ///
 /// Files with no dialect are skipped, so a comment marker in an unknown file is not reported.
 pub(crate) fn for_path(path: &str) -> Option<&'static Dialect> {
-    [&RUST].into_iter().find(|dialect| {
+    [&RUST, &PYTHON].into_iter().find(|dialect| {
         dialect
             .extensions
             .iter()
@@ -36,9 +44,16 @@ fn rust_line_comment(line: &str) -> bool {
     line.trim_start().starts_with("//")
 }
 
+/// Whether a line is a Python line comment.
+///
+/// A comment occupies the line, so a trailing note on a code line is not reported.
+fn python_line_comment(line: &str) -> bool {
+    line.trim_start().starts_with('#')
+}
+
 #[cfg(test)]
 mod tests {
-    use super::RUST;
+    use super::{PYTHON, RUST};
 
     #[test]
     fn rust_identifies_line_comments() {
@@ -47,5 +62,14 @@ mod tests {
         assert!((RUST.is_line_comment)("  /// doc"));
         assert!((RUST.is_line_comment)("//! inner"));
         assert!(!(RUST.is_line_comment)("fn f() {} // trailing"));
+    }
+
+    #[test]
+    fn python_identifies_line_comments() {
+        assert!(PYTHON.extensions.contains(&".py"));
+        assert!((PYTHON.is_line_comment)("# note"));
+        assert!((PYTHON.is_line_comment)("  # indented"));
+        assert!(!(PYTHON.is_line_comment)("def f():  # trailing"));
+        assert!(!(PYTHON.is_line_comment)("\"\"\"doc\"\"\""));
     }
 }

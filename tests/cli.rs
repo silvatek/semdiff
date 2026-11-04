@@ -201,6 +201,59 @@ fn records_an_added_rust_line_comment() {
 }
 
 #[test]
+fn records_an_added_python_line_comment() {
+    let root = std::env::temp_dir().join(format!("semdiff-py-comment-{}", std::process::id()));
+    let left = root.join("left");
+    let right = root.join("right");
+    fs::create_dir_all(&left).unwrap();
+    fs::create_dir_all(&right).unwrap();
+    fs::write(
+        left.join("main.py"),
+        "def fibonacci():\n    pass\n# Shared.\n",
+    )
+    .unwrap();
+    fs::write(
+        right.join("main.py"),
+        "# Returns the nth Fibonacci number.\n# Keep this.\ndef fibonacci():\n    pass  # trailing\n# Shared.\n    # Inner detail.\n",
+    )
+    .unwrap();
+    fs::write(left.join("notes.txt"), "").unwrap();
+    fs::write(right.join("notes.txt"), "# not python\n").unwrap();
+
+    let output_path = root.join("out.yml");
+    let left = left.to_str().unwrap();
+    let right = right.to_str().unwrap();
+    let output_path = output_path.to_str().unwrap();
+    let output = run(&[left, right, output_path]);
+    let document = fs::read_to_string(output_path).expect("failed to read semdif file");
+
+    assert!(output.status.success());
+    let changes = document.split_once("changes:\n").expect("changes list").1;
+    assert_eq!(
+        changes,
+        concat!(
+            "  - scope: \"main.py\"\n",
+            "    type: line-comment-added\n",
+            "    details:\n",
+            "      line: 1\n",
+            "      text: \"# Returns the nth Fibonacci number.\"\n",
+            "  - scope: \"main.py\"\n",
+            "    type: line-comment-added\n",
+            "    details:\n",
+            "      line: 2\n",
+            "      text: \"# Keep this.\"\n",
+            "  - scope: \"main.py\"\n",
+            "    type: line-comment-added\n",
+            "    details:\n",
+            "      line: 6\n",
+            "      text: \"    # Inner detail.\"\n",
+        )
+    );
+
+    let _ = fs::remove_dir_all(root);
+}
+
+#[test]
 fn requires_an_output_path() {
     let output = run(&[]);
     let stderr = String::from_utf8(output.stderr).expect("stderr was not utf-8");
@@ -301,11 +354,27 @@ fn rejects_a_file_compared_with_a_directory() {
 
 #[test]
 fn applying_the_sample_diff_makes_v3_identical_to_v2() {
+    apply_sample("TestCode/rust/main");
+}
+
+#[test]
+fn applying_the_python_sample_diff_makes_v3_identical_to_v2() {
+    apply_sample("TestCode/python/main");
+}
+
+fn apply_sample(sample: &str) {
     let manifest = Path::new(env!("CARGO_MANIFEST_DIR"));
-    let v1 = manifest.join("TestCode/rust/main/v1");
-    let v2 = manifest.join("TestCode/rust/main/v2");
-    let v3 = manifest.join("TestCode/rust/main/v3");
-    let root = std::env::temp_dir().join(format!("semdiff-apply-{}", std::process::id()));
+    let sample = manifest.join(sample);
+    let v1 = sample.join("v1");
+    let v2 = sample.join("v2");
+    let v3 = sample.join("v3");
+    let language = sample
+        .parent()
+        .and_then(|parent| parent.file_name())
+        .unwrap()
+        .to_string_lossy();
+    let root =
+        std::env::temp_dir().join(format!("semdiff-apply-{language}-{}", std::process::id()));
     let applied = root.join("v3");
     copy_tree(&v3, &applied);
     let diff = root.join("diff.yml");
