@@ -1,5 +1,6 @@
 mod apply;
 mod args;
+mod content_changes;
 mod file_change;
 mod semdif;
 
@@ -32,7 +33,7 @@ struct Differences {
 ///
 /// The two file lists are split once, so a later step does not search the trees again.
 /// Files that exist on only one side may be a rename, a deletion, or an addition.
-/// Files that exist on both sides are paired and can be compared in place.
+/// Files that exist on both sides are paired and compared in place.
 fn find_differences(sources: &Sources) -> Differences {
     let left_files = collect_files(Path::new(&sources.left)).unwrap_or_else(|message| {
         exit_with_message(message);
@@ -41,10 +42,15 @@ fn find_differences(sources: &Sources) -> Differences {
         exit_with_message(message);
     });
     let (left_only, right_only, paired_files) = partition_files(left_files, right_files);
-    let changes =
+    let mut changes =
         file_change::file_changes(sources, &left_only, &right_only).unwrap_or_else(|message| {
             exit_with_message(message);
         });
+    changes.extend(
+        content_changes::content_changes(sources, &paired_files).unwrap_or_else(|message| {
+            exit_with_message(message);
+        }),
+    );
     Differences {
         paths: paired_files,
         changes,

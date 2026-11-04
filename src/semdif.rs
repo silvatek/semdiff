@@ -67,17 +67,24 @@ fn write_change(document: &mut String, change: &Change) {
             document.push_str("    type: file-added\n");
             document.push_str("    details:\n");
             document.push_str(&format!("      path: {}\n", yaml_string(path)));
-            write_added_contents(document, contents);
+            write_file_contents(document, contents);
+        }
+        Change::FileChanged { path, contents } => {
+            document.push_str("  - scope: \".\"\n");
+            document.push_str("    type: file-changed\n");
+            document.push_str("    details:\n");
+            document.push_str(&format!("      path: {}\n", yaml_string(path)));
+            write_file_contents(document, contents);
         }
     }
 }
 
-/// Stores the bytes of an added file inside the semdif.
+/// Stores one file's bytes inside the semdif.
 ///
 /// Text stays in the record as a quoted value, with quotes and line breaks escaped so
 /// they do not change the record. Bytes that are not text are encoded, because a YAML
 /// text value cannot hold them, and the original bytes still have to be restored.
-fn write_added_contents(document: &mut String, contents: &[u8]) {
+fn write_file_contents(document: &mut String, contents: &[u8]) {
     match std::str::from_utf8(contents) {
         Ok(text) => {
             document.push_str(&format!("      contents: {}\n", yaml_string(text)));
@@ -137,6 +144,7 @@ pub(crate) enum Change {
     FileRenamed { from: String, to: String },
     FileDeleted { path: String },
     FileAdded { path: String, contents: Vec<u8> },
+    FileChanged { path: String, contents: Vec<u8> },
 }
 
 /// The changes recorded in a semdif file.
@@ -216,23 +224,32 @@ impl PartialChange {
             "file-deleted" => Ok(Change::FileDeleted {
                 path: required(&self.fields, "path", "file-deleted")?,
             }),
-            "file-added" => {
-                let path = required(&self.fields, "path", "file-added")?;
-                let contents = required(&self.fields, "contents", "file-added")?;
-                let contents = match self.fields.get("encoding").map(String::as_str) {
-                    None => contents.into_bytes(),
-                    Some("base64") => STANDARD
-                        .decode(contents)
-                        .map_err(|_| "file-added contents are not valid base64".to_string())?,
-                    Some(other) => {
-                        return Err(format!("file-added has unsupported encoding {other}"))
-                    }
-                };
-                Ok(Change::FileAdded { path, contents })
-            }
+            "file-added" => Ok(Change::FileAdded {
+                path: required(&self.fields, "path", "file-added")?,
+                contents: stored_bytes(&self.fields, "file-added")?,
+            }),
+            "file-changed" => Ok(Change::FileChanged {
+                path: required(&self.fields, "path", "file-changed")?,
+                contents: stored_bytes(&self.fields, "file-changed")?,
+            }),
             "" => Err("change is missing a type".to_string()),
             other => Err(format!("unknown change type {other}")),
         }
+    }
+}
+
+/// The bytes recorded for a file, restored from the semdif value.
+///
+/// Text is stored directly. Encoded bytes are decoded so the file can be written
+/// back unchanged.
+fn stored_bytes(fields: &BTreeMap<String, String>, kind: &str) -> Result<Vec<u8>, String> {
+    let contents = required(fields, "contents", kind)?;
+    match fields.get("encoding").map(String::as_str) {
+        None => Ok(contents.into_bytes()),
+        Some("base64") => STANDARD
+            .decode(contents)
+            .map_err(|_| format!("{kind} contents are not valid base64")),
+        Some(other) => Err(format!("{kind} has unsupported encoding {other}")),
     }
 }
 

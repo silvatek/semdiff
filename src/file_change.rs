@@ -72,7 +72,8 @@ fn change_key(change: &crate::semdif::Change) -> (&str, &str) {
     match change {
         crate::semdif::Change::FileRenamed { from, to } => (from, to),
         crate::semdif::Change::FileDeleted { path }
-        | crate::semdif::Change::FileAdded { path, .. } => (path, ""),
+        | crate::semdif::Change::FileAdded { path, .. }
+        | crate::semdif::Change::FileChanged { path, .. } => (path, ""),
     }
 }
 
