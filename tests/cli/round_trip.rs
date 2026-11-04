@@ -14,22 +14,18 @@ fn applying_the_rust_sample_makes_a_copy_of_v1_match_v2() {
     let target_source = tmp_root.join("v1");
     copy_tree(&v1_source, &target_source);
     let semdif_file = tmp_root.join("diff.yml");
+    let v1_source_arg = v1_source.to_str().unwrap();
+    let v2_source_arg = v2_source.to_str().unwrap();
+    let semdif_file_arg = semdif_file.to_str().unwrap();
+    let target_source_arg = target_source.to_str().unwrap();
 
-    let compared = run(&[
-        v1_source.to_str().unwrap(),
-        v2_source.to_str().unwrap(),
-        semdif_file.to_str().unwrap(),
-    ]);
+    let compared = run(&[v1_source_arg, v2_source_arg, semdif_file_arg]);
     assert!(
         compared.status.success(),
         "{}",
         String::from_utf8_lossy(&compared.stderr)
     );
-    let applied_output = run(&[
-        "--apply",
-        semdif_file.to_str().unwrap(),
-        target_source.to_str().unwrap(),
-    ]);
+    let applied_output = run(&["--apply", semdif_file_arg, target_source_arg]);
     assert!(
         applied_output.status.success(),
         "{}",
