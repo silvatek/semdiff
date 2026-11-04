@@ -12,10 +12,10 @@ use std::process::ExitCode;
 
 const USAGE: &str = "\
 Usage: semdiff <left> <right> <output>
-       semdiff --apply <source> <semdiff>
+       semdiff --apply <source> <semdif>
 ";
 
-/// Compares two sources, or applies a semdiff file to one source.
+/// Compares two sources, or applies a semdif file to one source.
 ///
 /// Argument errors stop the command before any comparison or edit starts.
 fn main() -> ExitCode {
@@ -113,7 +113,7 @@ enum CliError {
 
 /// The command described by the arguments.
 ///
-/// `--apply` edits one source from a semdiff file. Otherwise the three paths are a
+/// `--apply` edits one source from a semdif file. Otherwise the three paths are a
 /// comparison. A missing source is rejected, and a file is not compared with a
 /// directory, so the command is not attempted.
 fn parsed_args<I>(args: I) -> Result<Command, CliError>

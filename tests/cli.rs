@@ -24,7 +24,7 @@ fn prints_name_and_version_when_comparing_directories() {
     let output_path = output_path.to_str().unwrap();
     let output = run(&[left, right, output_path]);
     let stdout = String::from_utf8(output.stdout).expect("stdout was not utf-8");
-    let document = fs::read_to_string(output_path).expect("failed to read semdiff file");
+    let document = fs::read_to_string(output_path).expect("failed to read semdif file");
 
     assert!(output.status.success());
     assert_eq!(
@@ -104,7 +104,7 @@ fn writes_a_file_renamed_change() {
     let right = right.to_str().unwrap();
     let output_path = output_path.to_str().unwrap();
     let output = run(&[left, right, output_path]);
-    let document = fs::read_to_string(output_path).expect("failed to read semdiff file");
+    let document = fs::read_to_string(output_path).expect("failed to read semdif file");
 
     assert!(output.status.success());
     let changes = document.split_once("changes:\n").expect("changes list").1;
@@ -139,7 +139,7 @@ fn hashes_past_the_first_buffer() {
     let right = right.to_str().unwrap();
     let output_path = output_path.to_str().unwrap();
     let output = run(&[left, right, output_path]);
-    let document = fs::read_to_string(output_path).expect("failed to read semdiff file");
+    let document = fs::read_to_string(output_path).expect("failed to read semdif file");
 
     assert!(output.status.success());
     let changes = document.split_once("changes:\n").expect("changes list").1;
@@ -172,7 +172,7 @@ fn records_an_added_rust_line_comment() {
     let right = right.to_str().unwrap();
     let output_path = output_path.to_str().unwrap();
     let output = run(&[left, right, output_path]);
-    let document = fs::read_to_string(output_path).expect("failed to read semdiff file");
+    let document = fs::read_to_string(output_path).expect("failed to read semdif file");
 
     assert!(output.status.success());
     let changes = document.split_once("changes:\n").expect("changes list").1;
@@ -208,7 +208,7 @@ fn requires_an_output_path() {
     assert_eq!(output.status.code(), Some(2));
     assert_eq!(
         stderr,
-        "Usage: semdiff <left> <right> <output>\n       semdiff --apply <source> <semdiff>\n"
+        "Usage: semdiff <left> <right> <output>\n       semdiff --apply <source> <semdif>\n"
     );
 }
 
@@ -239,7 +239,7 @@ fn compares_individual_files() {
     let output_path = output_path.to_str().unwrap();
     let output = run(&[left, right, output_path]);
     let stdout = String::from_utf8(output.stdout).expect("stdout was not utf-8");
-    let document = fs::read_to_string(output_path).expect("failed to read semdiff file");
+    let document = fs::read_to_string(output_path).expect("failed to read semdif file");
 
     assert!(output.status.success());
     assert!(stdout.ends_with("quote.txt\n"), "{stdout}");
@@ -266,7 +266,7 @@ fn detects_a_rename_between_individual_files() {
     let right = right.to_str().unwrap();
     let output_path = output_path.to_str().unwrap();
     let output = run(&[left, right, output_path]);
-    let document = fs::read_to_string(output_path).expect("failed to read semdiff file");
+    let document = fs::read_to_string(output_path).expect("failed to read semdif file");
 
     assert!(output.status.success());
     let changes = document.split_once("changes:\n").expect("changes list").1;

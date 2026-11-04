@@ -6,7 +6,7 @@ use crate::semdif::Change;
 
 /// Edits `source` so it gains the changes recorded in `patch`.
 ///
-/// The semdiff file is the record of what changed, so the same edit can be replayed
+/// The semdif file is the record of what changed, so the same edit can be replayed
 /// on another copy of the original source. A problem is reported on stderr.
 pub(crate) fn apply(source: &str, patch: &str) -> ExitCode {
     match apply_patch(Path::new(source), Path::new(patch)) {
@@ -45,7 +45,7 @@ fn change_order(change: &Change) -> (u8, String, usize) {
     }
 }
 
-/// Inserts `text` so it occupies the 1-based line from the semdiff record.
+/// Inserts `text` so it occupies the 1-based line from the semdif record.
 ///
 /// Those line numbers refer to the file after earlier additions, so comments land
 /// where the comparison saw them.

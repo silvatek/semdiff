@@ -2,7 +2,7 @@ use std::collections::BTreeMap;
 use std::fs;
 use std::process::ExitCode;
 
-/// Saves the semdiff file and lists the shared paths.
+/// Saves the semdif file and lists the shared paths.
 ///
 /// The file is the command's result. The listing shows which files were eligible for
 /// comparison. A failure to save the file returns exit code 1.
@@ -11,7 +11,7 @@ pub(crate) fn write_output(
     sources: &crate::Sources,
     differences: &crate::Differences,
 ) -> ExitCode {
-    let document = semdiff_document(
+    let document = semdif_document(
         env!("CARGO_PKG_VERSION"),
         &utc_timestamp(),
         &differences.renames,
@@ -29,11 +29,11 @@ pub(crate) fn write_output(
     ExitCode::SUCCESS
 }
 
-/// The semdiff text for one comparison.
+/// The semdif text for one comparison.
 ///
 /// The header is always present. Changes are included only when some were found, so an
 /// unchanged pair does not gain an empty change list.
-fn semdiff_document(
+fn semdif_document(
     version: &str,
     timestamp: &str,
     renames: &[(String, String)],
@@ -61,29 +61,29 @@ fn semdiff_document(
     document
 }
 
-/// The header that identifies a semdiff file.
+/// The header that identifies a semdif file.
 ///
-/// It records which tool version produced the file and the UTC time it was produced.
+/// It records which semdiff version produced the file and the UTC time it was produced.
 fn header_document(version: &str, timestamp: &str) -> String {
     format!("header:\n  semdiff: \"{version}\"\n  timestamp: \"{timestamp}\"\n")
 }
 
 /// A YAML-safe form of a text value.
 ///
-/// Paths must stay literal when they are written into the semdiff file.
+/// Paths must stay literal when they are written into the semdif file.
 fn yaml_string(value: &str) -> String {
     let escaped = value.replace('\\', "\\\\").replace('"', "\\\"");
     format!("\"{escaped}\"")
 }
 
-/// The UTC time to record in a semdiff header.
+/// The UTC time to record in a semdif header.
 ///
 /// Readers can see when the file was produced without depending on a local timezone.
 fn utc_timestamp() -> String {
     chrono::Utc::now().format("%Y-%m-%dT%H:%M:%SZ").to_string()
 }
 
-/// One recorded edit from a semdiff file.
+/// One recorded edit from a semdif file.
 pub(crate) enum Change {
     LineCommentAdded {
         scope: String,
@@ -96,7 +96,7 @@ pub(crate) enum Change {
     },
 }
 
-/// The changes recorded in a semdiff document.
+/// The changes recorded in a semdif document.
 ///
 /// Apply replays those records and does not need the header.
 pub(crate) fn parse_changes(document: &str) -> Result<Vec<Change>, String> {
@@ -150,7 +150,7 @@ struct RawChange {
 }
 
 impl RawChange {
-    /// The typed change described by one semdiff record.
+    /// The typed change described by one semdif record.
     ///
     /// An unknown record is rejected so an unsupported edit is not skipped.
     fn into_change(self) -> Result<Change, String> {
@@ -190,17 +190,17 @@ impl RawChange {
     }
 }
 
-/// One key and its value from a semdiff line.
+/// One key and its value from a semdif line.
 ///
 /// Values may be quoted so paths and comments stay literal.
 fn split_field(text: &str) -> Result<(String, String), String> {
     let (key, value) = text
         .split_once(':')
-        .ok_or_else(|| format!("invalid semdiff line: {text}"))?;
+        .ok_or_else(|| format!("invalid semdif line: {text}"))?;
     Ok((key.trim().to_string(), unquote(value.trim())?))
 }
 
-/// The text stored in a semdiff value.
+/// The text stored in a semdif value.
 ///
 /// A quoted value can contain characters that would otherwise change the record.
 fn unquote(value: &str) -> Result<String, String> {
