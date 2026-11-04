@@ -1,3 +1,4 @@
+/// Returns the nth Fibonacci number, where `fib(0)` is 0 and `fib(1)` is 1.
 fn fib(n: u32) -> u64 {
     match n {
         0 => 0,
