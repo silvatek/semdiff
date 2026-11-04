@@ -1,5 +1,6 @@
 mod apply;
 mod args;
+mod content_changes;
 mod file_change;
 mod round_trip;
 mod semdif;

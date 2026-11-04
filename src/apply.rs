@@ -30,15 +30,17 @@ fn apply_change(source: &Path, change: &crate::semdif::Change) -> Result<(), Str
     match change {
         crate::semdif::Change::FileRenamed { from, to } => rename_file(source, from, to),
         crate::semdif::Change::FileDeleted { path } => delete_file(source, path),
-        crate::semdif::Change::FileAdded { path, contents } => add_file(source, path, contents),
+        crate::semdif::Change::FileAdded { path, contents }
+        | crate::semdif::Change::FileChanged { path, contents } => {
+            write_file(source, path, contents)
+        }
     }
 }
 
-/// Creates one file in the source directory.
+/// Writes one file in the source directory.
 ///
-/// The semdif records the path and the bytes, so a file that exists only on the
-/// other side can be recreated.
-fn add_file(root: &Path, relative: &str, contents: &[u8]) -> Result<(), String> {
+/// An added file is created. A changed file is replaced with the recorded bytes.
+fn write_file(root: &Path, relative: &str, contents: &[u8]) -> Result<(), String> {
     let path = path_inside(root, relative)?;
     create_parent(root, &path)?;
     fs::write(&path, contents).map_err(|error| format!("cannot write {}: {error}", path.display()))
