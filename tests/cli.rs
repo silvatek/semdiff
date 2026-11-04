@@ -300,7 +300,7 @@ fn rejects_a_file_compared_with_a_directory() {
 }
 
 #[test]
-fn applying_the_sample_diff_reports_the_remaining_difference() {
+fn applying_the_sample_diff_makes_v3_identical_to_v2() {
     let manifest = Path::new(env!("CARGO_MANIFEST_DIR"));
     let v1 = manifest.join("TestCode/rust/main/v1");
     let v2 = manifest.join("TestCode/rust/main/v2");
@@ -327,27 +327,7 @@ fn applying_the_sample_diff_reports_the_remaining_difference() {
         String::from_utf8_lossy(&applied_output.stderr)
     );
 
-    let report = tree_difference(&applied, &v2);
-    assert_eq!(
-        report,
-        "\
-src/main.rs
--fn fibonacci(n: u32) -> u64 {
-+fn fib(n: u32) -> u64 {
--        println!(\"{n}: {}\", fibonacci(n));
-+        println!(\"{n}: {}\", fib(n));
--    use super::fibonacci;
-+    use super::fib;
--        assert_eq!(fibonacci(0), 0);
-+        assert_eq!(fib(0), 0);
--        assert_eq!(fibonacci(1), 1);
-+        assert_eq!(fib(1), 1);
--        assert_eq!(fibonacci(2), 1);
-+        assert_eq!(fib(2), 1);
--        assert_eq!(fibonacci(10), 55);
-+        assert_eq!(fib(10), 55);
-"
-    );
+    assert_eq!(tree_difference(&applied, &v2), "");
 
     let _ = fs::remove_dir_all(root);
 }
