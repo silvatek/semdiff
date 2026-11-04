@@ -29,7 +29,16 @@ fn apply_changes(semdif: &Path, source: &Path) -> Result<(), String> {
 fn apply_change(source: &Path, change: &crate::semdif::Change) -> Result<(), String> {
     match change {
         crate::semdif::Change::FileRenamed { from, to } => rename_file(source, from, to),
+        crate::semdif::Change::FileDeleted { path } => delete_file(source, path),
     }
+}
+
+/// Removes one file from the source directory.
+///
+/// The semdif records the path relative to that directory.
+fn delete_file(root: &Path, relative: &str) -> Result<(), String> {
+    let path = path_inside(root, relative)?;
+    fs::remove_file(&path).map_err(|error| format!("cannot delete {}: {error}", path.display()))
 }
 
 /// Moves one file inside the source directory.
@@ -55,7 +64,7 @@ fn rename_file(root: &Path, from: &str, to: &str) -> Result<(), String> {
 
 /// A path that stays inside the source directory.
 ///
-/// Rename paths come from the semdif file, so a path that leaves the directory is rejected.
+/// Change paths come from the semdif file, so a path that leaves the directory is rejected.
 fn path_inside(root: &Path, relative: &str) -> Result<PathBuf, String> {
     let path = Path::new(relative);
     if relative.is_empty()
@@ -65,7 +74,7 @@ fn path_inside(root: &Path, relative: &str) -> Result<PathBuf, String> {
             .any(|component| matches!(component, std::path::Component::ParentDir))
     {
         return Err(format!(
-            "rename path must stay inside the source directory: {relative}"
+            "change path must stay inside the source directory: {relative}"
         ));
     }
     Ok(root.join(path))

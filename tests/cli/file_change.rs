@@ -26,7 +26,7 @@ fn writes_a_file_renamed_change() {
     let changes = document.split_once("changes:\n").expect("changes list").1;
     assert_eq!(
         changes,
-        "  - scope: \".\"\n    type: file-renamed\n    details:\n      from: \"quote.txt\"\n      to: \"quotation.txt\"\n"
+        "  - scope: \".\"\n    type: file-deleted\n    details:\n      path: \"notes.txt\"\n  - scope: \".\"\n    type: file-renamed\n    details:\n      from: \"quote.txt\"\n      to: \"quotation.txt\"\n"
     );
 
     let _ = fs::remove_dir_all(root);
@@ -61,7 +61,7 @@ fn hashes_past_the_first_buffer() {
     let changes = document.split_once("changes:\n").expect("changes list").1;
     assert_eq!(
         changes,
-        "  - scope: \".\"\n    type: file-renamed\n    details:\n      from: \"same.bin\"\n      to: \"same-renamed.bin\"\n"
+        "  - scope: \".\"\n    type: file-deleted\n    details:\n      path: \"left.bin\"\n  - scope: \".\"\n    type: file-renamed\n    details:\n      from: \"same.bin\"\n      to: \"same-renamed.bin\"\n"
     );
 
     let _ = fs::remove_dir_all(root);

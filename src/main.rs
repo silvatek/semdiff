@@ -1,6 +1,6 @@
 mod apply;
 mod args;
-mod rename;
+mod file_change;
 mod semdif;
 
 pub(crate) use args::Sources;
@@ -25,20 +25,30 @@ fn main() -> ExitCode {
 
 struct Differences {
     paths: Vec<String>,
-    renames: Vec<(String, String)>,
+    changes: Vec<semdif::Change>,
 }
 
-/// The shared files and renames between the two sources.
+/// The shared files and file changes between the two sources.
 ///
-/// Later steps use this result instead of searching the trees again.
+/// The two file lists are split once, so a later step does not search the trees again.
+/// Files that exist on only one side may be a rename or a deletion. Files that exist
+/// on both sides are paired and can be compared in place.
 fn find_differences(sources: &Sources) -> Differences {
-    let paths = paired_files(sources).unwrap_or_else(|message| {
+    let left_files = collect_files(Path::new(&sources.left)).unwrap_or_else(|message| {
         exit_with_message(message);
     });
-    let renames = rename::file_renames(sources).unwrap_or_else(|message| {
+    let right_files = collect_files(Path::new(&sources.right)).unwrap_or_else(|message| {
         exit_with_message(message);
     });
-    Differences { paths, renames }
+    let (left_only, right_only, paired_files) = partition_files(left_files, right_files);
+    let changes =
+        file_change::file_changes(sources, &left_only, &right_only).unwrap_or_else(|message| {
+            exit_with_message(message);
+        });
+    Differences {
+        paths: paired_files,
+        changes,
+    }
 }
 
 /// Stops the command after a comparison failure.
@@ -62,20 +72,29 @@ pub(crate) fn source_base(path: &Path) -> &Path {
     }
 }
 
-/// The files that can be compared in place because they exist in both sources.
+/// Files only on the left, only on the right, and present under the same path on both sides.
 ///
-/// The paths are in a stable order so repeated runs list the same files.
-fn paired_files(sources: &Sources) -> Result<Vec<String>, String> {
-    let right_files: BTreeSet<_> = collect_files(Path::new(&sources.right))?
+/// A paired path is the same file in both sources. The other two lists are the candidates
+/// for a rename.
+fn partition_files(
+    left_files: Vec<String>,
+    right_files: Vec<String>,
+) -> (Vec<String>, Vec<String>, Vec<String>) {
+    let left_names: BTreeSet<_> = left_files.iter().cloned().collect();
+    let right_names: BTreeSet<_> = right_files.iter().cloned().collect();
+    let mut left_only: Vec<_> = left_files
         .into_iter()
+        .filter(|path| !right_names.contains(path))
         .collect();
-    let mut shared: Vec<_> = collect_files(Path::new(&sources.left))?
+    let mut right_only: Vec<_> = right_files
         .into_iter()
-        .filter(|path| right_files.contains(path))
+        .filter(|path| !left_names.contains(path))
         .collect();
-    shared.sort();
-    shared.dedup();
-    Ok(shared)
+    let mut paired_files: Vec<_> = left_names.intersection(&right_names).cloned().collect();
+    left_only.sort();
+    right_only.sort();
+    paired_files.sort();
+    (left_only, right_only, paired_files)
 }
 
 /// The files that belong to a source.
