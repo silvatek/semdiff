@@ -3,8 +3,7 @@ use std::path::Path;
 
 /// Content changes for files present on both sides.
 ///
-/// A pair with the same bytes needs no record. A pair that differs records the new
-/// contents so the old copy can be brought up to date.
+/// Each paired path is compared on its own. Only pairs whose contents differ are recorded.
 pub(crate) fn content_changes(
     sources: &crate::Sources,
     paired_files: &[String],
@@ -13,17 +12,31 @@ pub(crate) fn content_changes(
     let right_root = crate::source_base(Path::new(&sources.right));
     let mut changes = Vec::new();
     for path in paired_files {
-        let before = read_file(left_root, path)?;
-        let after = read_file(right_root, path)?;
-        if before == after {
-            continue;
+        if let Some(change) = content_change(left_root, right_root, path)? {
+            changes.push(change);
         }
-        changes.push(crate::semdif::Change::FileChanged {
-            path: path.clone(),
-            contents: after,
-        });
     }
     Ok(changes)
+}
+
+/// The change for one paired file, when its two copies differ.
+///
+/// Matching copies are left out. A difference records the new contents so the old
+/// copy can be brought up to date.
+fn content_change(
+    left_root: &Path,
+    right_root: &Path,
+    path: &str,
+) -> Result<Option<crate::semdif::Change>, String> {
+    let before = read_file(left_root, path)?;
+    let after = read_file(right_root, path)?;
+    if before == after {
+        return Ok(None);
+    }
+    Ok(Some(crate::semdif::Change::FileChanged {
+        path: path.to_string(),
+        contents: after,
+    }))
 }
 
 fn read_file(root: &Path, relative: &str) -> Result<Vec<u8>, String> {
