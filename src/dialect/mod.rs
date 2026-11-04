@@ -1,3 +1,5 @@
+mod rust;
+
 /// A language semdiff knows how to read.
 ///
 /// Extensions select its files. The line-comment test and the identifier readers select
@@ -8,9 +10,9 @@ pub(crate) struct Dialect {
     pub extensions: &'static [&'static str],
     /// Whether one line is a single-line comment in this dialect.
     pub is_line_comment: fn(&str) -> bool,
-    /// Code identifiers, when this dialect can tell them from comments and strings.
+    /// Code identifiers, when this dialect can tell them from keywords, comments, and strings.
     pub identifiers: Option<fn(&str) -> Vec<String>>,
-    /// Source with one code identifier renamed, when this dialect can tell it from comments and strings.
+    /// Source with one code identifier renamed, when this dialect can tell it from keywords, comments, and strings.
     pub rename_identifier: Option<fn(&str, &str, &str) -> String>,
 }
 
@@ -20,8 +22,8 @@ pub(crate) struct Dialect {
 pub(crate) static RUST: Dialect = Dialect {
     extensions: &[".rs"],
     is_line_comment: rust_line_comment,
-    identifiers: Some(crate::symbol::rust_identifiers),
-    rename_identifier: Some(crate::symbol::rust_rename_identifier),
+    identifiers: Some(rust::identifiers),
+    rename_identifier: Some(rust::rename_identifier),
 };
 
 /// The Python dialect.
