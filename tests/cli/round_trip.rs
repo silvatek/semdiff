@@ -40,6 +40,12 @@ fn applying_the_rust_sample_makes_a_copy_of_v1_match_v2() {
         document.contains("He said \\\"hello\\\"") && document.contains("\\\\temp"),
         "{document}"
     );
+    assert!(
+        document.contains("type: file-changed")
+            && document.contains("path: \"src/main.rs\"")
+            && document.contains("// Print Fibonacci numbers."),
+        "{document}"
+    );
     let applied_output = run(&["--apply", semdif_file_arg, target_source_arg]);
     assert!(
         applied_output.status.success(),
