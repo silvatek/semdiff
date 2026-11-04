@@ -31,7 +31,7 @@ fn records_one_symbol_rename_across_rust_files() {
     assert_eq!(
         changes,
         concat!(
-            "  - scope: \".\"\n",
+            "  - scope: \"src\"\n",
             "    type: symbol-renamed\n",
             "    details:\n",
             "      from: \"fibonacci\"\n",
@@ -91,7 +91,7 @@ fn records_the_rust_sample_symbol_rename() {
     assert_eq!(document.matches("type: symbol-renamed").count(), 1);
     assert!(
         document.contains(concat!(
-            "  - scope: \".\"\n",
+            "  - scope: \"src/main.rs\"\n",
             "    type: symbol-renamed\n",
             "    details:\n",
             "      from: \"fibonacci\"\n",

@@ -5,9 +5,10 @@ use std::path::{Path, PathBuf};
 
 use crate::dialect::{Span, SpanKind};
 
-/// A symbol rename that covers every file in one scope.
+/// A symbol rename that covers every use in one scope.
 ///
-/// Every use of the old name in that scope changed to the same new name.
+/// The scope is the smallest file or directory that contains those uses, and every
+/// use of the old name there changed to the same new name.
 pub(crate) struct SymbolRename {
     pub scope: String,
     pub from: String,
@@ -17,9 +18,9 @@ pub(crate) struct SymbolRename {
 /// Symbol renames across the paired files.
 ///
 /// Changed files are compared as text. A dialect only classifies a span, so a comment
-/// or a string is not read as code. A rename is recorded when one scope contains no
-/// remaining use of the old name. A name that is still used would have to be split
-/// into smaller scopes.
+/// or a string is not read as code. A rename is recorded when every use of the old
+/// name changed to the same new name. Its scope is the smallest file or directory
+/// that contains those uses.
 pub(crate) fn symbol_renames(
     sources: &crate::Sources,
     paths: &[String],
@@ -45,6 +46,7 @@ pub(crate) fn symbol_renames(
             edits.extend(identifier_edits(&left, &right, &left_spans, &right_spans));
         }
         files.push(ClassifiedFile {
+            path: path.clone(),
             left,
             right,
             left_spans,
@@ -73,6 +75,7 @@ pub(crate) fn apply_rename(root: &Path, scope: &str, from: &str, to: &str) -> Re
 }
 
 struct ClassifiedFile {
+    path: String,
     left: String,
     right: String,
     left_spans: Vec<Span>,
@@ -85,10 +88,10 @@ struct TextLine<'a> {
     text: &'a str,
 }
 
-/// A rename whose every use in the scope changed to one new name.
+/// One rename for each name whose every use changed to the same new name.
 ///
-/// A name that became more than one new name, or that is still used, is left for a
-/// later split into smaller scopes.
+/// The scope is the smallest file or directory that contains those uses. A name that
+/// is still used, or that changed to more than one new name, is not recorded.
 fn renames_for_scope(files: &[ClassifiedFile], edits: &[(String, String)]) -> Vec<SymbolRename> {
     let mut by_from: BTreeMap<&str, BTreeMap<&str, usize>> = BTreeMap::new();
     for (from, to) in edits {
@@ -107,15 +110,56 @@ fn renames_for_scope(files: &[ClassifiedFile], edits: &[(String, String)]) -> Ve
             .iter()
             .map(|file| identifier_uses(&file.right, &file.right_spans, from))
             .sum::<usize>();
-        if change_count == left_uses && right_uses == 0 {
+        let use_paths: Vec<&str> = files
+            .iter()
+            .filter(|file| {
+                identifier_uses(&file.left, &file.left_spans, from) > 0
+                    || identifier_uses(&file.right, &file.right_spans, from) > 0
+            })
+            .map(|file| file.path.as_str())
+            .collect();
+        if change_count == left_uses && right_uses == 0 && !use_paths.is_empty() {
             renames.push(SymbolRename {
-                scope: ".".to_string(),
+                scope: tightest_scope(&use_paths),
                 from: from.to_string(),
                 to: to.to_string(),
             });
         }
     }
     renames
+}
+
+/// The smallest file or directory that contains every path.
+///
+/// One file is its own scope. Several files share the longest directory that still
+/// contains them, and the compared tree is `.` when they share no directory.
+fn tightest_scope(paths: &[&str]) -> String {
+    let Some(first) = paths.first() else {
+        return ".".to_string();
+    };
+    if paths.len() == 1 {
+        return (*first).to_string();
+    }
+    let mut common = directory(first);
+    for path in &paths[1..] {
+        let shared = common
+            .iter()
+            .zip(directory(path))
+            .take_while(|(left, right)| *left == right)
+            .count();
+        common.truncate(shared);
+    }
+    if common.is_empty() {
+        ".".to_string()
+    } else {
+        common.join("/")
+    }
+}
+
+fn directory(path: &str) -> Vec<&str> {
+    let mut parts: Vec<&str> = path.split('/').collect();
+    parts.pop();
+    parts
 }
 
 /// The new name, when every change of an identifier chose that same name.
@@ -510,7 +554,7 @@ fn replace_identifiers(source: &str, spans: &[Span], from: &str, to: &str) -> St
 
 #[cfg(test)]
 mod tests {
-    use super::{changed_line_pairs, identifier_edits, replace_identifiers};
+    use super::{changed_line_pairs, identifier_edits, replace_identifiers, tightest_scope};
     use crate::dialect::{Span, SpanKind, RUST};
 
     #[test]
@@ -545,6 +589,14 @@ mod tests {
         let classify = RUST.spans.unwrap();
         let edits = identifier_edits(left, right, &classify(left), &classify(right));
         assert_eq!(edits, vec![("fibonacci".to_string(), "fib".to_string())]);
+    }
+
+    #[test]
+    fn scope_is_the_tightest_path_that_covers_every_use() {
+        assert_eq!(tightest_scope(&["src/main.rs"]), "src/main.rs");
+        assert_eq!(tightest_scope(&["src/a.rs", "src/b.rs"]), "src");
+        assert_eq!(tightest_scope(&["src/foo/a.rs", "src/bar/b.rs"]), "src");
+        assert_eq!(tightest_scope(&["a.rs", "nested/b.rs"]), ".");
     }
 
     #[test]
