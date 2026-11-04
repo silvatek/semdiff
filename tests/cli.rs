@@ -85,6 +85,36 @@ fn prints_paths_present_in_both_directories() {
 }
 
 #[test]
+fn writes_a_file_renamed_change() {
+    let root = std::env::temp_dir().join(format!("semdiff-rename-{}", std::process::id()));
+    let left = root.join("left");
+    let right = root.join("right");
+    fs::create_dir_all(&left).unwrap();
+    fs::create_dir_all(&right).unwrap();
+    let quote = "Brevity is the soul of wit.\n";
+    fs::write(left.join("quote.txt"), quote).unwrap();
+    fs::write(right.join("quotation.txt"), quote).unwrap();
+    fs::write(left.join("notes.txt"), "left only\n").unwrap();
+    fs::write(right.join("other.txt"), "right only\n").unwrap();
+
+    let output_path = root.join("out.yml");
+    let left = left.to_str().unwrap();
+    let right = right.to_str().unwrap();
+    let output_path = output_path.to_str().unwrap();
+    let output = run(&[left, right, output_path]);
+    let document = fs::read_to_string(output_path).expect("failed to read semdiff file");
+
+    assert!(output.status.success());
+    let changes = document.split_once("changes:\n").expect("changes list").1;
+    assert_eq!(
+        changes,
+        "  - scope: \".\"\n    type: file-renamed\n    details:\n      from: \"quote.txt\"\n      to: \"quotation.txt\"\n"
+    );
+
+    let _ = fs::remove_dir_all(root);
+}
+
+#[test]
 fn requires_an_output_path() {
     let output = run(&[]);
     let stderr = String::from_utf8(output.stderr).expect("stderr was not utf-8");
