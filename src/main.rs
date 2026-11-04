@@ -45,13 +45,13 @@ fn find_differences(sources: &Sources) -> Differences {
     let mut changes = file_rename_changes(sources).unwrap_or_else(|message| {
         exit_with_message(message);
     });
-    let (content, compared) = changed_content(sources, &paths).unwrap_or_else(|message| {
+    let (content, paired) = changed_content(sources, &paths).unwrap_or_else(|message| {
         exit_with_message(message);
     });
     changes.extend(content);
     Differences {
         paths,
-        changes: collapse_scopes(changes, &compared),
+        changes: collapse_scopes(changes, &paired),
     }
 }
 
@@ -65,89 +65,133 @@ fn file_rename_changes(sources: &Sources) -> Result<Vec<Change>, String> {
         .collect())
 }
 
-/// Content changes in the paired files, each at the scope of its own file.
+/// One paired file's text, kept so a later collapse can see a use that was left as it was.
 ///
-/// A file whose text did not change is kept only so a later collapse can see a use
-/// that was left as it was.
+/// The path is the same on both sides. A renamed file is recorded before this step.
+struct PairedText {
+    path: String,
+    left: String,
+    right: String,
+}
+
+/// Content changes in the files that kept the same path.
+///
+/// A renamed file is already recorded, so the dialect is the one named by the extension.
+/// Text that did not change is kept so a later collapse can see a use that was left as it was.
 fn changed_content(
     sources: &Sources,
     paths: &[String],
-) -> Result<(Vec<Change>, Vec<symbol::ComparedFile>), String> {
+) -> Result<(Vec<Change>, Vec<PairedText>), String> {
     let mut changes = Vec::new();
-    let mut compared = Vec::new();
+    let mut paired = Vec::new();
     for path in paths {
-        let Some(dialect) = crate::dialect::for_path(path) else {
+        let Some(dialect) = dialect_for(path) else {
             continue;
         };
         let left = read_text(&sources.left, path)?;
         let right = read_text(&sources.right, path)?;
-        let file = dialect
-            .spans
-            .map(|classify| symbol::compared_file(path, left.clone(), right.clone(), classify));
         if left != right {
-            changes.extend(changes_in_file(path, dialect, &left, &right, file.as_ref()));
+            changes.extend(changes_in_file(path, dialect, &left, &right));
         }
-        if let Some(file) = file {
-            compared.push(file);
-        }
+        paired.push(PairedText {
+            path: path.clone(),
+            left,
+            right,
+        });
     }
-    Ok((changes, compared))
+    Ok((changes, paired))
+}
+
+/// The dialect for a file that kept its path.
+///
+/// Both sides use that path, so the extension is enough to choose the dialect.
+fn dialect_for(path: &str) -> Option<&'static crate::dialect::Dialect> {
+    crate::dialect::for_path(path)
 }
 
 /// The changes found by walking one file's differing lines, then the spans in those lines.
 ///
-/// An inserted line that is a comment is recorded on its own. Each changed span is
-/// identified, and an identifier is added to a list. Once every line has been read,
-/// that list becomes a symbol rename when every use of the name in the file changed.
+/// An inserted line that is a comment is recorded on its own. Spans are named only once
+/// an edited line has spans to identify. An identifier is added to a list, and once every
+/// line has been read that list becomes a symbol rename when every use of the name changed.
 fn changes_in_file(
     path: &str,
     dialect: &crate::dialect::Dialect,
     left: &str,
     right: &str,
-    file: Option<&symbol::ComparedFile>,
 ) -> Vec<Change> {
-    let empty = Vec::new();
-    let left_spans = file.map(symbol::ComparedFile::left_spans).unwrap_or(&empty);
-    let right_spans = file
-        .map(symbol::ComparedFile::right_spans)
-        .unwrap_or(&empty);
     let mut changes = Vec::new();
+    let lines = symbol::changed_lines(left, right);
+    for line in &lines {
+        let symbol::ChangedLine::Inserted { line, text } = line else {
+            continue;
+        };
+        if let Some(added) = comment::inserted_comment(path, *line, text, dialect.is_line_comment) {
+            changes.push(Change::line_comment_added(
+                added.scope,
+                added.line,
+                added.text,
+            ));
+        }
+    }
+    changes.extend(symbol_renames(path, dialect, left, right, &lines));
+    changes
+}
+
+/// Symbol renames in one paired file.
+///
+/// Spans are named only when an edited line has spans to identify. The file then
+/// becomes a rename when every use of that name changed to the same new name.
+fn symbol_renames(
+    path: &str,
+    dialect: &crate::dialect::Dialect,
+    left: &str,
+    right: &str,
+    lines: &[symbol::ChangedLine],
+) -> Vec<Change> {
+    if !lines
+        .iter()
+        .any(|line| matches!(line, symbol::ChangedLine::Edited(_)))
+    {
+        return Vec::new();
+    }
+    let Some(file) = named_spans(path, dialect, left, right) else {
+        return Vec::new();
+    };
     let mut identifiers = Vec::new();
-    for line in symbol::changed_lines(left, right) {
-        match line {
-            symbol::ChangedLine::Inserted { line, text } => {
-                if let Some(added) =
-                    comment::inserted_comment(path, line, text, dialect.is_line_comment)
-                {
-                    changes.push(Change::line_comment_added(
-                        added.scope,
-                        added.line,
-                        added.text,
-                    ));
-                }
-            }
-            symbol::ChangedLine::Edited(line) => {
-                for (before, after) in
-                    symbol::changed_spans(left, right, &line, left_spans, right_spans)
-                {
-                    if before.kind == crate::dialect::SpanKind::Identifier
-                        && after.kind == crate::dialect::SpanKind::Identifier
-                        && before.text != after.text
-                    {
-                        identifiers.push((before.text.to_string(), after.text.to_string()));
-                    }
-                }
+    for line in lines {
+        let symbol::ChangedLine::Edited(line) = line else {
+            continue;
+        };
+        for (before, after) in
+            symbol::changed_spans(left, right, line, file.left_spans(), file.right_spans())
+        {
+            if before.kind == crate::dialect::SpanKind::Identifier
+                && after.kind == crate::dialect::SpanKind::Identifier
+                && before.text != after.text
+            {
+                identifiers.push((before.text.to_string(), after.text.to_string()));
             }
         }
     }
-    if let Some(file) = file {
-        changes.extend(
-            symbol::renames_in_file(file, &identifiers)
-                .into_iter()
-                .map(|rename| Change::symbol_renamed(rename.scope, rename.from, rename.to)),
-        );
-    }
-    changes
+    symbol::renames_in_file(&file, &identifiers)
+        .into_iter()
+        .map(|rename| Change::symbol_renamed(rename.scope, rename.from, rename.to))
+        .collect()
+}
+
+/// The paired file with its spans named, when this dialect can name them.
+///
+/// A dialect that cannot name spans yet has no symbol renames.
+fn named_spans(
+    path: &str,
+    dialect: &crate::dialect::Dialect,
+    left: &str,
+    right: &str,
+) -> Option<symbol::ComparedFile> {
+    dialect
+        .spans
+        .map(|classify| symbol::compared_file(path, left.to_string(), right.to_string(), classify))
 }
 
 /// Joins changes that are the same rename and can share a wider scope.
@@ -155,7 +199,7 @@ fn changes_in_file(
 /// The wider scope is kept only when it contains no use that was left unchanged.
 /// File renames stay first, then symbol renames, then added comments in line order,
 /// so line deltas can be followed from the start of the list.
-fn collapse_scopes(changes: Vec<Change>, files: &[symbol::ComparedFile]) -> Vec<Change> {
+fn collapse_scopes(changes: Vec<Change>, files: &[PairedText]) -> Vec<Change> {
     let mut renames = Vec::new();
     let mut symbols = Vec::new();
     let mut comments = Vec::new();
@@ -175,7 +219,8 @@ fn collapse_scopes(changes: Vec<Change>, files: &[symbol::ComparedFile]) -> Vec<
 ///
 /// Each joined change keeps one scope, the smallest directory or file that contains
 /// the renamed uses and no use that was left as it was.
-fn collapse_symbol_renames(changes: Vec<Change>, files: &[symbol::ComparedFile]) -> Vec<Change> {
+fn collapse_symbol_renames(changes: Vec<Change>, files: &[PairedText]) -> Vec<Change> {
+    let files = files_with_uses(files);
     let mut groups: BTreeMap<(String, String), Vec<String>> = BTreeMap::new();
     for change in changes {
         let ChangeDetails::SymbolRenamed { from, to } = &change.details else {
@@ -188,7 +233,7 @@ fn collapse_symbol_renames(changes: Vec<Change>, files: &[symbol::ComparedFile])
     }
     let mut collapsed = Vec::new();
     for ((from, to), scopes) in groups {
-        let mut clusters = clusters(&scopes, &from, files);
+        let mut clusters = clusters(&scopes, &from, &files);
         clusters.sort_by(|left, right| {
             symbol::tightest_scope(&str_refs(left)).cmp(&symbol::tightest_scope(&str_refs(right)))
         });
@@ -201,6 +246,23 @@ fn collapse_symbol_renames(changes: Vec<Change>, files: &[symbol::ComparedFile])
         }
     }
     collapsed
+}
+
+/// Paired files in which a remaining use of a renamed name can be seen.
+///
+/// A wider scope is kept only when none of them still has the old name.
+fn files_with_uses(files: &[PairedText]) -> Vec<symbol::ComparedFile> {
+    files
+        .iter()
+        .filter_map(|file| {
+            named_spans(
+                &file.path,
+                dialect_for(&file.path)?,
+                &file.left,
+                &file.right,
+            )
+        })
+        .collect()
 }
 
 /// Groups of files that can share one scope for a rename of `from`.
