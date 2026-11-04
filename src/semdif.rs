@@ -76,7 +76,16 @@ fn write_change(document: &mut String, change: &Change) {
             document.push_str(&format!("      path: {}\n", yaml_string(path)));
             write_file_contents(document, contents);
         }
+        Change::DirectoryAdded { path } => write_directory(document, "directory-added", path),
+        Change::DirectoryDeleted { path } => write_directory(document, "directory-deleted", path),
     }
+}
+
+fn write_directory(document: &mut String, kind: &str, path: &str) {
+    document.push_str("  - scope: \".\"\n");
+    document.push_str(&format!("    type: {kind}\n"));
+    document.push_str("    details:\n");
+    document.push_str(&format!("      path: {}\n", yaml_string(path)));
 }
 
 /// Stores one file's bytes inside the semdif.
@@ -145,6 +154,8 @@ pub(crate) enum Change {
     FileDeleted { path: String },
     FileAdded { path: String, contents: Vec<u8> },
     FileChanged { path: String, contents: Vec<u8> },
+    DirectoryAdded { path: String },
+    DirectoryDeleted { path: String },
 }
 
 /// The changes recorded in a semdif file.
@@ -231,6 +242,12 @@ impl PartialChange {
             "file-changed" => Ok(Change::FileChanged {
                 path: required(&self.fields, "path", "file-changed")?,
                 contents: stored_bytes(&self.fields, "file-changed")?,
+            }),
+            "directory-added" => Ok(Change::DirectoryAdded {
+                path: required(&self.fields, "path", "directory-added")?,
+            }),
+            "directory-deleted" => Ok(Change::DirectoryDeleted {
+                path: required(&self.fields, "path", "directory-deleted")?,
             }),
             "" => Err("change is missing a type".to_string()),
             other => Err(format!("unknown change type {other}")),

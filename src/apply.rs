@@ -34,7 +34,26 @@ fn apply_change(source: &Path, change: &crate::semdif::Change) -> Result<(), Str
         | crate::semdif::Change::FileChanged { path, contents } => {
             write_file(source, path, contents)
         }
+        crate::semdif::Change::DirectoryAdded { path } => add_directory(source, path),
+        crate::semdif::Change::DirectoryDeleted { path } => remove_directory(source, path),
     }
+}
+
+/// Creates one directory in the source.
+///
+/// The semdif records an empty directory that exists only on the other side.
+fn add_directory(root: &Path, relative: &str) -> Result<(), String> {
+    let path = path_inside(root, relative)?;
+    fs::create_dir_all(&path).map_err(|error| format!("cannot create {}: {error}", path.display()))
+}
+
+/// Removes one empty directory from the source.
+///
+/// Files inside it have already been moved or deleted. A directory that still
+/// holds something is left in place and reported.
+fn remove_directory(root: &Path, relative: &str) -> Result<(), String> {
+    let path = path_inside(root, relative)?;
+    fs::remove_dir(&path).map_err(|error| format!("cannot remove {}: {error}", path.display()))
 }
 
 /// Writes one file in the source directory.
