@@ -155,7 +155,127 @@ fn requires_an_output_path() {
     let stderr = String::from_utf8(output.stderr).expect("stderr was not utf-8");
 
     assert_eq!(output.status.code(), Some(2));
-    assert_eq!(stderr, "Usage: semdiff <left> <right> <output>\n");
+    assert_eq!(
+        stderr,
+        "Usage: semdiff <left> <right> <output>\n       semdiff --apply <directory> <semdif>\n"
+    );
+}
+
+#[test]
+fn applies_a_rename_inside_a_directory() {
+    let root = std::env::temp_dir().join(format!("semdiff-apply-{}", std::process::id()));
+    let left = root.join("left");
+    let right = root.join("right");
+    let edited = root.join("edited");
+    fs::create_dir_all(left.join("src")).unwrap();
+    fs::create_dir_all(right.join("src")).unwrap();
+    fs::create_dir_all(right.join("notes")).unwrap();
+    fs::create_dir_all(edited.join("src")).unwrap();
+    let quote = "Brevity is the soul of wit.\n";
+    let source = "fn fibonacci() {}\n";
+    fs::write(left.join("quote.txt"), quote).unwrap();
+    fs::write(right.join("notes/quotation.txt"), quote).unwrap();
+    fs::write(left.join("src/main.rs"), source).unwrap();
+    fs::write(right.join("src/main.rs"), source).unwrap();
+    fs::write(edited.join("quote.txt"), quote).unwrap();
+    fs::write(edited.join("src/main.rs"), source).unwrap();
+
+    let output_path = root.join("out.yml");
+    let left = left.to_str().unwrap();
+    let right = right.to_str().unwrap();
+    let edited_path = edited.to_str().unwrap();
+    let output_path = output_path.to_str().unwrap();
+    let compared = run(&[left, right, output_path]);
+    let applied = run(&["--apply", edited_path, output_path]);
+
+    assert!(compared.status.success());
+    assert!(
+        applied.status.success(),
+        "{}",
+        String::from_utf8_lossy(&applied.stderr)
+    );
+    assert!(!edited.join("quote.txt").exists());
+    assert_eq!(
+        fs::read_to_string(edited.join("notes/quotation.txt")).unwrap(),
+        quote
+    );
+    assert_eq!(
+        fs::read_to_string(edited.join("src/main.rs")).unwrap(),
+        source
+    );
+
+    let _ = fs::remove_dir_all(root);
+}
+
+#[test]
+fn rejects_apply_to_a_file() {
+    let root = std::env::temp_dir().join(format!("semdiff-apply-file-{}", std::process::id()));
+    fs::create_dir_all(&root).unwrap();
+    let file = root.join("quote.txt");
+    let patch = root.join("out.yml");
+    fs::write(&file, "Brevity is the soul of wit.\n").unwrap();
+    fs::write(&patch, "header:\n  semdiff: \"0.1.0\"\n").unwrap();
+
+    let file = file.to_str().unwrap();
+    let patch = patch.to_str().unwrap();
+    let output = run(&["--apply", file, patch]);
+    let stderr = String::from_utf8(output.stderr).expect("stderr was not utf-8");
+
+    assert_eq!(output.status.code(), Some(1));
+    assert_eq!(stderr, format!("not a directory: {file}\n"));
+
+    let _ = fs::remove_dir_all(root);
+}
+
+#[test]
+fn rejects_a_missing_semdif_file() {
+    let root = std::env::temp_dir().join(format!("semdiff-apply-missing-{}", std::process::id()));
+    let source = root.join("source");
+    fs::create_dir_all(&source).unwrap();
+    let patch = root.join("missing.yml");
+
+    let source = source.to_str().unwrap();
+    let patch_arg = patch.to_str().unwrap();
+    let output = run(&["--apply", source, patch_arg]);
+    let stderr = String::from_utf8(output.stderr).expect("stderr was not utf-8");
+
+    assert_eq!(output.status.code(), Some(1));
+    assert_eq!(stderr, format!("not a file: {}\n", patch.display()));
+
+    let _ = fs::remove_dir_all(root);
+}
+
+#[test]
+fn rejects_a_change_that_is_not_a_rename() {
+    let root = std::env::temp_dir().join(format!("semdiff-apply-type-{}", std::process::id()));
+    let source = root.join("source");
+    fs::create_dir_all(&source).unwrap();
+    let patch = root.join("out.yml");
+    fs::write(
+        &patch,
+        "\
+header:
+  semdiff: \"0.1.0\"
+  timestamp: \"2020-01-01T00:00:00Z\"
+changes:
+  - scope: \".\"
+    type: line-comment-added
+    details:
+      line: 1
+      text: \"/// note\"
+",
+    )
+    .unwrap();
+
+    let source = source.to_str().unwrap();
+    let patch = patch.to_str().unwrap();
+    let output = run(&["--apply", source, patch]);
+    let stderr = String::from_utf8(output.stderr).expect("stderr was not utf-8");
+
+    assert_eq!(output.status.code(), Some(1));
+    assert_eq!(stderr, "unknown change type line-comment-added\n");
+
+    let _ = fs::remove_dir_all(root);
 }
 
 #[test]
