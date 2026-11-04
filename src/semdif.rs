@@ -1,3 +1,4 @@
+use std::collections::BTreeMap;
 use std::fs;
 use std::process::ExitCode;
 
@@ -69,23 +70,25 @@ fn utc_timestamp() -> String {
     chrono::Utc::now().format("%Y-%m-%dT%H:%M:%SZ").to_string()
 }
 
-/// One file rename recorded in a semdif file.
-pub(crate) struct FileRenamed {
-    pub from: String,
-    pub to: String,
+/// One change recorded in a semdif file.
+///
+/// Apply replays these in the order they were recorded. Each kind carries the
+/// details that kind needs.
+pub(crate) enum Change {
+    FileRenamed { from: String, to: String },
 }
 
-/// The file renames recorded in a semdif file.
+/// The changes recorded in a semdif file.
 ///
-/// Apply replays those records onto one directory. Any other change is rejected
-/// so an unsupported edit is not skipped.
-pub(crate) fn parse_renames(document: &str) -> Result<Vec<FileRenamed>, String> {
+/// The header is not needed to replay the edits. A change whose kind is not known
+/// is rejected so an unsupported edit is not skipped.
+pub(crate) fn parse_changes(document: &str) -> Result<Vec<Change>, String> {
     let mut lines = document.lines();
     if lines.find(|line| line.trim() == "changes:").is_none() {
         return Ok(Vec::new());
     }
     let mut found = Vec::new();
-    let mut record: Option<PartialRename> = None;
+    let mut record: Option<PartialChange> = None;
     for line in lines {
         let trimmed = line.trim();
         if trimmed.is_empty() {
@@ -95,7 +98,7 @@ pub(crate) fn parse_renames(document: &str) -> Result<Vec<FileRenamed>, String> 
             if let Some(done) = record.take() {
                 found.push(done.finish()?);
             }
-            record = Some(PartialRename::start(rest)?);
+            record = Some(PartialChange::start(rest)?);
             continue;
         }
         let record = record
@@ -109,19 +112,19 @@ pub(crate) fn parse_renames(document: &str) -> Result<Vec<FileRenamed>, String> 
     Ok(found)
 }
 
-/// Fields of one change record, gathered before the rename is known to be complete.
-struct PartialRename {
+/// Fields of one change record, gathered before its kind is known.
+struct PartialChange {
+    scope: String,
     kind: String,
-    from: Option<String>,
-    to: Option<String>,
+    fields: BTreeMap<String, String>,
 }
 
-impl PartialRename {
+impl PartialChange {
     fn start(text: &str) -> Result<Self, String> {
         let mut record = Self {
+            scope: String::new(),
             kind: String::new(),
-            from: None,
-            to: None,
+            fields: BTreeMap::new(),
         };
         record.read(text)?;
         Ok(record)
@@ -130,24 +133,37 @@ impl PartialRename {
     fn read(&mut self, text: &str) -> Result<(), String> {
         let (key, value) = field(text)?;
         match key.as_str() {
+            "scope" => self.scope = value,
             "type" => self.kind = value,
-            "from" => self.from = Some(value),
-            "to" => self.to = Some(value),
-            _ => {}
+            "details" => {}
+            other => {
+                self.fields.insert(other.to_string(), value);
+            }
         }
         Ok(())
     }
 
-    fn finish(self) -> Result<FileRenamed, String> {
+    fn finish(self) -> Result<Change, String> {
+        if self.scope.is_empty() {
+            return Err("change is missing a scope".to_string());
+        }
         match self.kind.as_str() {
-            "file-renamed" => Ok(FileRenamed {
-                from: self.from.ok_or("file-renamed is missing from")?,
-                to: self.to.ok_or("file-renamed is missing to")?,
+            "file-renamed" => Ok(Change::FileRenamed {
+                from: required(&self.fields, "from", "file-renamed")?,
+                to: required(&self.fields, "to", "file-renamed")?,
             }),
             "" => Err("change is missing a type".to_string()),
             other => Err(format!("unknown change type {other}")),
         }
     }
+}
+
+/// One detail that a change kind requires.
+fn required(fields: &BTreeMap<String, String>, key: &str, kind: &str) -> Result<String, String> {
+    fields
+        .get(key)
+        .cloned()
+        .ok_or_else(|| format!("{kind} is missing {key}"))
 }
 
 /// One key and its value from a semdif line.

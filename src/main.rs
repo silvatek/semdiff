@@ -13,7 +13,7 @@ Usage: semdiff <left> <right> <output>
        semdiff --apply <semdif> <directory>
 ";
 
-/// Compares two sources, or applies renames from a semdif file to one directory.
+/// Compares two sources, or applies a semdif file to one directory.
 ///
 /// Argument errors stop the command before a comparison or edit starts.
 fn main() -> ExitCode {
@@ -109,7 +109,7 @@ enum CliError {
 
 /// The command described by the arguments.
 ///
-/// `--apply` renames files in one directory from a semdif file. Otherwise the three
+/// `--apply` edits one directory from a semdif file. Otherwise the three
 /// paths are a comparison. A missing source is rejected, and a file is not compared
 /// with a directory, so the command is not attempted.
 fn parsed_args<I>(args: I) -> Result<Command, CliError>

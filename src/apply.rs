@@ -2,13 +2,12 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
-/// Renames files in `source` as recorded in `patch`.
+/// Edits `source` so it gains the changes recorded in `patch`.
 ///
-/// The semdif file is the record of what moved, so the same renames can be replayed
-/// on another copy of that directory. A rename is the only change that can be applied.
-/// A problem is reported on stderr.
+/// The semdif file is the record of what changed, so the same edits can be replayed
+/// on another copy of that directory. A problem is reported on stderr.
 pub(crate) fn apply(patch: &str, source: &str) -> ExitCode {
-    match apply_renames(Path::new(patch), Path::new(source)) {
+    match apply_changes(Path::new(patch), Path::new(source)) {
         Ok(()) => ExitCode::SUCCESS,
         Err(message) => {
             eprintln!("{message}");
@@ -17,13 +16,20 @@ pub(crate) fn apply(patch: &str, source: &str) -> ExitCode {
     }
 }
 
-fn apply_renames(patch: &Path, source: &Path) -> Result<(), String> {
+fn apply_changes(patch: &Path, source: &Path) -> Result<(), String> {
     let document = fs::read_to_string(patch)
         .map_err(|error| format!("cannot read {}: {error}", patch.display()))?;
-    for rename in crate::semdif::parse_renames(&document)? {
-        rename_file(source, &rename.from, &rename.to)?;
+    for change in crate::semdif::parse_changes(&document)? {
+        apply_change(source, &change)?;
     }
     Ok(())
+}
+
+/// Performs one recorded change in the source directory.
+fn apply_change(source: &Path, change: &crate::semdif::Change) -> Result<(), String> {
+    match change {
+        crate::semdif::Change::FileRenamed { from, to } => rename_file(source, from, to),
+    }
 }
 
 /// Moves one file inside the source directory.
