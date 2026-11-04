@@ -3,19 +3,21 @@ use std::process::ExitCode;
 
 pub(crate) fn write_output(
     output: &str,
-    left: &str,
-    right: &str,
-    paths: &[String],
-    renames: &[(String, String)],
+    sources: &crate::Sources,
+    differences: &crate::Differences,
 ) -> ExitCode {
-    let document = semdiff_document(env!("CARGO_PKG_VERSION"), &utc_timestamp(), renames);
+    let document = semdiff_document(
+        env!("CARGO_PKG_VERSION"),
+        &utc_timestamp(),
+        &differences.renames,
+    );
     if let Err(error) = fs::write(output, document) {
         eprintln!("cannot write {output}: {error}");
         return ExitCode::from(1);
     }
     println!("Semdiff {}", env!("CARGO_PKG_VERSION"));
-    println!("Comparing {left} and {right}");
-    for path in paths {
+    println!("Comparing {} and {}", sources.left, sources.right);
+    for path in &differences.paths {
         println!("{path}");
     }
     ExitCode::SUCCESS

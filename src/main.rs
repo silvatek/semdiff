@@ -9,14 +9,23 @@ use std::process::ExitCode;
 
 fn main() -> ExitCode {
     let args = parse_args();
-    let (paths, renames) = find_differences(&args.left, &args.right);
-    output::write_output(&args.output, &args.left, &args.right, &paths, &renames)
+    let differences = find_differences(&args.sources);
+    output::write_output(&args.output, &args.sources, &differences)
 }
 
 struct Args {
+    sources: Sources,
+    output: String,
+}
+
+struct Sources {
     left: String,
     right: String,
-    output: String,
+}
+
+struct Differences {
+    paths: Vec<String>,
+    renames: Vec<(String, String)>,
 }
 
 fn parse_args() -> Args {
@@ -33,14 +42,14 @@ fn parse_args() -> Args {
     }
 }
 
-fn find_differences(left: &str, right: &str) -> (Vec<String>, Vec<(String, String)>) {
-    let paths = paired_files(left, right).unwrap_or_else(|message| {
+fn find_differences(sources: &Sources) -> Differences {
+    let paths = paired_files(sources).unwrap_or_else(|message| {
         exit_with_message(message);
     });
-    let renames = rename::file_renames(left, right).unwrap_or_else(|message| {
+    let renames = rename::file_renames(sources).unwrap_or_else(|message| {
         exit_with_message(message);
     });
-    (paths, renames)
+    Differences { paths, renames }
 }
 
 fn exit_with_message(message: String) -> ! {
@@ -67,8 +76,7 @@ where
     require_dir(&left)?;
     require_dir(&right)?;
     Ok(Args {
-        left,
-        right,
+        sources: Sources { left, right },
         output,
     })
 }
@@ -81,9 +89,11 @@ fn require_dir(path: &str) -> Result<(), CliError> {
     }
 }
 
-fn paired_files(left: &str, right: &str) -> Result<Vec<String>, String> {
-    let right_files: BTreeSet<_> = collect_files(Path::new(right))?.into_iter().collect();
-    let mut shared: Vec<_> = collect_files(Path::new(left))?
+fn paired_files(sources: &Sources) -> Result<Vec<String>, String> {
+    let right_files: BTreeSet<_> = collect_files(Path::new(&sources.right))?
+        .into_iter()
+        .collect();
+    let mut shared: Vec<_> = collect_files(Path::new(&sources.left))?
         .into_iter()
         .filter(|path| right_files.contains(path))
         .collect();

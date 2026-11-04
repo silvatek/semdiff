@@ -7,9 +7,9 @@ use sha2::{Digest, Sha256};
 
 const HASH_BUFFER_SIZE: usize = 8 * 1024;
 
-pub(crate) fn file_renames(left: &str, right: &str) -> Result<Vec<(String, String)>, String> {
-    let left_root = Path::new(left);
-    let right_root = Path::new(right);
+pub(crate) fn file_renames(sources: &crate::Sources) -> Result<Vec<(String, String)>, String> {
+    let left_root = Path::new(&sources.left);
+    let right_root = Path::new(&sources.right);
     let left_files = crate::collect_files(left_root)?;
     let right_files = crate::collect_files(right_root)?;
     let left_names: BTreeSet<_> = left_files.iter().cloned().collect();
