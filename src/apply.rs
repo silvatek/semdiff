@@ -30,7 +30,18 @@ fn apply_change(source: &Path, change: &crate::semdif::Change) -> Result<(), Str
     match change {
         crate::semdif::Change::FileRenamed { from, to } => rename_file(source, from, to),
         crate::semdif::Change::FileDeleted { path } => delete_file(source, path),
+        crate::semdif::Change::FileAdded { path, contents } => add_file(source, path, contents),
     }
+}
+
+/// Creates one file in the source directory.
+///
+/// The semdif records the path and the bytes, so a file that exists only on the
+/// other side can be recreated.
+fn add_file(root: &Path, relative: &str, contents: &[u8]) -> Result<(), String> {
+    let path = path_inside(root, relative)?;
+    create_parent(root, &path)?;
+    fs::write(&path, contents).map_err(|error| format!("cannot write {}: {error}", path.display()))
 }
 
 /// Removes one file from the source directory.
@@ -47,12 +58,7 @@ fn delete_file(root: &Path, relative: &str) -> Result<(), String> {
 fn rename_file(root: &Path, from: &str, to: &str) -> Result<(), String> {
     let from_path = path_inside(root, from)?;
     let to_path = path_inside(root, to)?;
-    if let Some(parent) = to_path.parent() {
-        if parent != root && !parent.as_os_str().is_empty() {
-            fs::create_dir_all(parent)
-                .map_err(|error| format!("cannot create {}: {error}", parent.display()))?;
-        }
-    }
+    create_parent(root, &to_path)?;
     fs::rename(&from_path, &to_path).map_err(|error| {
         format!(
             "cannot rename {} to {}: {error}",
@@ -60,6 +66,19 @@ fn rename_file(root: &Path, from: &str, to: &str) -> Result<(), String> {
             to_path.display()
         )
     })
+}
+
+/// Creates the directory that will hold a changed file.
+///
+/// A rename or addition can name a path in a directory that does not exist yet.
+fn create_parent(root: &Path, path: &Path) -> Result<(), String> {
+    if let Some(parent) = path.parent() {
+        if parent != root && !parent.as_os_str().is_empty() {
+            fs::create_dir_all(parent)
+                .map_err(|error| format!("cannot create {}: {error}", parent.display()))?;
+        }
+    }
+    Ok(())
 }
 
 /// A path that stays inside the source directory.

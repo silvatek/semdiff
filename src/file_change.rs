@@ -7,11 +7,12 @@ use sha2::{Digest, Sha256};
 
 const HASH_BUFFER_SIZE: usize = 8 * 1024;
 
-/// Renames and deletions among the files that exist on only one side.
+/// Renames, deletions, and additions among the files that exist on only one side.
 ///
 /// A hash identifies the content. One file on the left and one file on the right with
 /// the same hash are a rename, so identical copies are not paired by guesswork. A file
-/// that remains only on the left was removed.
+/// that remains only on the left was removed. A file that remains only on the right
+/// was added, and its contents are kept so the file can be recreated.
 pub(crate) fn file_changes(
     sources: &crate::Sources,
     left_only: &[String],
@@ -35,13 +36,15 @@ pub(crate) fn file_changes(
     }
 
     let mut changes = Vec::new();
-    let mut renamed = HashSet::new();
+    let mut renamed_from = HashSet::new();
+    let mut renamed_to = HashSet::new();
     for (hash, from_paths) in left_hashes {
         let Some(to_paths) = right_hashes.get(&hash) else {
             continue;
         };
         if from_paths.len() == 1 && to_paths.len() == 1 {
-            renamed.insert(from_paths[0].as_str());
+            renamed_from.insert(from_paths[0].as_str());
+            renamed_to.insert(to_paths[0].as_str());
             changes.push(crate::semdif::Change::FileRenamed {
                 from: from_paths[0].clone(),
                 to: to_paths[0].clone(),
@@ -49,8 +52,16 @@ pub(crate) fn file_changes(
         }
     }
     for path in left_only {
-        if !renamed.contains(path.as_str()) {
+        if !renamed_from.contains(path.as_str()) {
             changes.push(crate::semdif::Change::FileDeleted { path: path.clone() });
+        }
+    }
+    for path in right_only {
+        if !renamed_to.contains(path.as_str()) {
+            changes.push(crate::semdif::Change::FileAdded {
+                path: path.clone(),
+                contents: read_file(right_root, path)?,
+            });
         }
     }
     changes.sort_by(|left, right| change_key(left).cmp(&change_key(right)));
@@ -60,8 +71,14 @@ pub(crate) fn file_changes(
 fn change_key(change: &crate::semdif::Change) -> (&str, &str) {
     match change {
         crate::semdif::Change::FileRenamed { from, to } => (from, to),
-        crate::semdif::Change::FileDeleted { path } => (path, ""),
+        crate::semdif::Change::FileDeleted { path }
+        | crate::semdif::Change::FileAdded { path, .. } => (path, ""),
     }
+}
+
+fn read_file(root: &Path, relative: &str) -> Result<Vec<u8>, String> {
+    let path = root.join(relative);
+    fs::read(&path).map_err(|error| format!("cannot read {}: {error}", path.display()))
 }
 
 /// A content identity for one file.
