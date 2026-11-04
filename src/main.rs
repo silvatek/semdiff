@@ -1,4 +1,4 @@
-use std::collections::BTreeSet;
+use std::collections::{BTreeSet, HashMap};
 use std::env;
 use std::fs;
 use std::path::Path;
@@ -6,25 +6,33 @@ use std::process::ExitCode;
 
 fn main() -> ExitCode {
     match parse_args(env::args().skip(1)) {
-        Ok((left, right, output)) => match paired_files(&left, &right) {
-            Ok(paths) => {
-                let document = header_document(env!("CARGO_PKG_VERSION"), &utc_timestamp());
-                if let Err(error) = fs::write(&output, document) {
-                    eprintln!("cannot write {output}: {error}");
+        Ok((left, right, output)) => {
+            let paths = match paired_files(&left, &right) {
+                Ok(paths) => paths,
+                Err(message) => {
+                    eprintln!("{message}");
                     return ExitCode::from(1);
                 }
-                println!("Semdiff {}", env!("CARGO_PKG_VERSION"));
-                println!("Comparing {left} and {right}");
-                for path in paths {
-                    println!("{path}");
+            };
+            let renames = match file_renames(&left, &right) {
+                Ok(renames) => renames,
+                Err(message) => {
+                    eprintln!("{message}");
+                    return ExitCode::from(1);
                 }
-                ExitCode::SUCCESS
+            };
+            let document = semdiff_document(env!("CARGO_PKG_VERSION"), &utc_timestamp(), &renames);
+            if let Err(error) = fs::write(&output, document) {
+                eprintln!("cannot write {output}: {error}");
+                return ExitCode::from(1);
             }
-            Err(message) => {
-                eprintln!("{message}");
-                ExitCode::from(1)
+            println!("Semdiff {}", env!("CARGO_PKG_VERSION"));
+            println!("Comparing {left} and {right}");
+            for path in paths {
+                println!("{path}");
             }
-        },
+            ExitCode::SUCCESS
+        }
         Err(CliError::Usage) => {
             eprintln!("Usage: semdiff <left> <right> <output>");
             ExitCode::from(2)
@@ -61,6 +69,27 @@ fn header_document(version: &str, timestamp: &str) -> String {
     format!("header:\n  semdiff: \"{version}\"\n  timestamp: \"{timestamp}\"\n")
 }
 
+fn semdiff_document(version: &str, timestamp: &str, renames: &[(String, String)]) -> String {
+    let mut document = header_document(version, timestamp);
+    if renames.is_empty() {
+        return document;
+    }
+    document.push_str("changes:\n");
+    for (from, to) in renames {
+        document.push_str("  - scope: \".\"\n");
+        document.push_str("    type: file-renamed\n");
+        document.push_str("    details:\n");
+        document.push_str(&format!("      from: {}\n", yaml_string(from)));
+        document.push_str(&format!("      to: {}\n", yaml_string(to)));
+    }
+    document
+}
+
+fn yaml_string(value: &str) -> String {
+    let escaped = value.replace('\\', "\\\\").replace('"', "\\\"");
+    format!("\"{escaped}\"")
+}
+
 fn utc_timestamp() -> String {
     chrono::Utc::now().format("%Y-%m-%dT%H:%M:%SZ").to_string()
 }
@@ -71,6 +100,53 @@ fn require_dir(path: &str) -> Result<(), CliError> {
     } else {
         Err(CliError::NotDirectory(path.to_string()))
     }
+}
+
+fn file_renames(left: &str, right: &str) -> Result<Vec<(String, String)>, String> {
+    let left_root = Path::new(left);
+    let right_root = Path::new(right);
+    let left_files = collect_files(left_root)?;
+    let right_files = collect_files(right_root)?;
+    let left_names: BTreeSet<_> = left_files.iter().cloned().collect();
+    let right_names: BTreeSet<_> = right_files.iter().cloned().collect();
+
+    let mut left_only = HashMap::<Vec<u8>, Vec<String>>::new();
+    for path in left_files
+        .into_iter()
+        .filter(|path| !right_names.contains(path))
+    {
+        left_only
+            .entry(read_file(left_root, &path)?)
+            .or_default()
+            .push(path);
+    }
+    let mut right_only = HashMap::<Vec<u8>, Vec<String>>::new();
+    for path in right_files
+        .into_iter()
+        .filter(|path| !left_names.contains(path))
+    {
+        right_only
+            .entry(read_file(right_root, &path)?)
+            .or_default()
+            .push(path);
+    }
+
+    let mut renames = Vec::new();
+    for (bytes, from_paths) in left_only {
+        let Some(to_paths) = right_only.get(&bytes) else {
+            continue;
+        };
+        if from_paths.len() == 1 && to_paths.len() == 1 {
+            renames.push((from_paths[0].clone(), to_paths[0].clone()));
+        }
+    }
+    renames.sort();
+    Ok(renames)
+}
+
+fn read_file(root: &Path, relative: &str) -> Result<Vec<u8>, String> {
+    let path = root.join(relative);
+    fs::read(&path).map_err(|error| format!("cannot read {}: {error}", path.display()))
 }
 
 fn paired_files(left: &str, right: &str) -> Result<Vec<String>, String> {
