@@ -1,5 +1,5 @@
 /// Returns the nth Fibonacci number, where `fib(0)` is 0 and `fib(1)` is 1.
-fn fib(n: u32) -> u64 {
+fn fibonacci(n: u32) -> u64 {
     match n {
         0 => 0,
         1 => 1,
@@ -23,19 +23,19 @@ fn main() {
         .unwrap_or(10);
 
     for n in 0..count {
-        println!("{n}: {}", fib(n));
+        println!("{n}: {}", fibonacci(n));
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use super::fib;
+    use super::fibonacci;
 
     #[test]
     fn first_values() {
-        assert_eq!(fib(0), 0);
-        assert_eq!(fib(1), 1);
-        assert_eq!(fib(2), 1);
-        assert_eq!(fib(10), 55);
+        assert_eq!(fibonacci(0), 0);
+        assert_eq!(fibonacci(1), 1);
+        assert_eq!(fibonacci(2), 1);
+        assert_eq!(fibonacci(10), 55);
     }
 }
