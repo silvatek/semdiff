@@ -33,9 +33,10 @@ struct Differences {
     added_comments: Vec<comment::AddedLineComment>,
 }
 
-/// The shared files, renames, symbol renames, and added line comments between the two sources.
+/// The shared files, renames, and content changes between the two sources.
 ///
-/// Later steps use this result instead of searching the trees again.
+/// File renames are found first. Each paired file is then compared once, and each
+/// change in its content is classified.
 fn find_differences(sources: &Sources) -> Differences {
     let paths = paired_files(sources).unwrap_or_else(|message| {
         exit_with_message(message);
@@ -43,18 +44,50 @@ fn find_differences(sources: &Sources) -> Differences {
     let renames = rename::file_renames(sources).unwrap_or_else(|message| {
         exit_with_message(message);
     });
-    let symbol_renames = symbol::symbol_renames(sources, &paths).unwrap_or_else(|message| {
-        exit_with_message(message);
-    });
-    let added_comments = comment::added_line_comments(sources, &paths).unwrap_or_else(|message| {
-        exit_with_message(message);
-    });
+    let (symbol_renames, added_comments) =
+        changed_content(sources, &paths).unwrap_or_else(|message| {
+            exit_with_message(message);
+        });
     Differences {
         paths,
         renames,
         symbol_renames,
         added_comments,
     }
+}
+
+/// Symbol renames and added line comments in the paired files.
+///
+/// A file whose text changed is classified from that one comparison. An unchanged
+/// file is kept only so a symbol rename can see whether any use of the old name remains.
+fn changed_content(
+    sources: &Sources,
+    paths: &[String],
+) -> Result<(Vec<symbol::SymbolRename>, Vec<comment::AddedLineComment>), String> {
+    let mut added_comments = Vec::new();
+    let mut compared = Vec::new();
+    for path in paths {
+        let Some(dialect) = crate::dialect::for_path(path) else {
+            continue;
+        };
+        let left = read_text(&sources.left, path)?;
+        let right = read_text(&sources.right, path)?;
+        if left != right {
+            added_comments.extend(comment::added_line_comments(path, dialect, &left, &right));
+        }
+        if let Some(classify) = dialect.spans {
+            compared.push(symbol::compared_file(path, left, right, classify));
+        }
+    }
+    Ok((symbol::symbol_renames(&compared), added_comments))
+}
+
+/// The text of one paired file.
+///
+/// The comparison classifies this text, so the file is not read again for each change type.
+fn read_text(source: &str, relative: &str) -> Result<String, String> {
+    let path = source_base(Path::new(source)).join(relative);
+    fs::read_to_string(&path).map_err(|error| format!("cannot read {}: {error}", path.display()))
 }
 
 /// Stops the command after a comparison failure.

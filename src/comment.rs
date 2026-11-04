@@ -1,7 +1,4 @@
 use std::collections::HashMap;
-use std::fs::File;
-use std::io::{BufRead, BufReader};
-use std::path::Path;
 
 /// A line comment that is present in the right-hand source and not the left.
 pub(crate) struct AddedLineComment {
@@ -10,30 +7,18 @@ pub(crate) struct AddedLineComment {
     pub text: String,
 }
 
-/// Line comments added in paired files whose language semdiff knows.
+/// Line comments added in one paired file that has already been read.
 ///
 /// A comment line can appear without the file itself being new, so those lines are
 /// reported on their own. A line counts as added only when the right-hand file has
 /// more copies of that comment than the left.
 pub(crate) fn added_line_comments(
-    sources: &crate::Sources,
-    paths: &[String],
-) -> Result<Vec<AddedLineComment>, String> {
-    let mut added = Vec::new();
-    for path in paths {
-        let Some(dialect) = crate::dialect::for_path(path) else {
-            continue;
-        };
-        let left_lines = read_lines(&source_file(&sources.left, path))?;
-        let right_lines = read_lines(&source_file(&sources.right, path))?;
-        added.extend(added_comments_in_file(
-            path,
-            dialect,
-            &left_lines,
-            &right_lines,
-        ));
-    }
-    Ok(added)
+    path: &str,
+    dialect: &crate::dialect::Dialect,
+    left: &str,
+    right: &str,
+) -> Vec<AddedLineComment> {
+    added_comments_in_file(path, dialect, &text_lines(left), &text_lines(right))
 }
 
 /// Comments added in one paired file.
@@ -43,28 +28,29 @@ pub(crate) fn added_line_comments(
 fn added_comments_in_file(
     scope: &str,
     dialect: &crate::dialect::Dialect,
-    left_lines: &[String],
-    right_lines: &[String],
+    left_lines: &[&str],
+    right_lines: &[&str],
 ) -> Vec<AddedLineComment> {
     let mut remaining = HashMap::<&str, usize>::new();
     for line in left_lines
         .iter()
+        .copied()
         .filter(|line| (dialect.is_line_comment)(line))
     {
         *remaining.entry(line).or_default() += 1;
     }
 
     let mut added = Vec::new();
-    for (index, line) in right_lines.iter().enumerate() {
+    for (index, line) in right_lines.iter().copied().enumerate() {
         if !(dialect.is_line_comment)(line) {
             continue;
         }
-        let count = remaining.get(line.as_str()).copied().unwrap_or(0);
+        let count = remaining.get(line).copied().unwrap_or(0);
         if count == 0 {
             added.push(AddedLineComment {
                 scope: scope.to_string(),
                 line: index + 1,
-                text: line.clone(),
+                text: line.to_string(),
             });
         } else {
             remaining.insert(line, count - 1);
@@ -73,21 +59,9 @@ fn added_comments_in_file(
     added
 }
 
-/// The text lines of one source file.
+/// The lines of a file that has already been read.
 ///
-/// Added comments are reported with their line number in the right-hand file.
-fn read_lines(path: &Path) -> Result<Vec<String>, String> {
-    let file =
-        File::open(path).map_err(|error| format!("cannot read {}: {error}", path.display()))?;
-    BufReader::new(file)
-        .lines()
-        .map(|line| line.map_err(|error| format!("cannot read {}: {error}", path.display())))
-        .collect()
-}
-
-/// The filesystem path of a file inside a source.
-///
-/// Paired files are named relative to the source, and the comment check needs the real path.
-fn source_file(source: &str, relative: &str) -> std::path::PathBuf {
-    crate::source_base(Path::new(source)).join(relative)
+/// An added comment is reported with its line number in the right-hand file.
+fn text_lines(source: &str) -> Vec<&str> {
+    source.lines().collect()
 }

@@ -1,7 +1,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
 use std::ops::Range;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
 use crate::dialect::{Span, SpanKind};
 
@@ -15,45 +15,54 @@ pub(crate) struct SymbolRename {
     pub to: String,
 }
 
-/// Symbol renames across the paired files.
+/// One paired file whose spans have been classified.
 ///
-/// Changed files are compared as text. A dialect only classifies a span, so a comment
-/// or a string is not read as code. A rename is recorded when every use of the old
-/// name changed to the same new name. Its scope is the smallest file or directory
-/// that contains those uses.
-pub(crate) fn symbol_renames(
-    sources: &crate::Sources,
-    paths: &[String],
-) -> Result<Vec<SymbolRename>, String> {
-    let mut edits = Vec::new();
-    let mut files = Vec::new();
-    for path in paths {
-        let Some(dialect) = crate::dialect::for_path(path) else {
-            continue;
-        };
-        let Some(classify) = dialect.spans else {
-            continue;
-        };
-        let left_path = source_file(&sources.left, path);
-        let right_path = source_file(&sources.right, path);
-        let left = fs::read_to_string(&left_path)
-            .map_err(|error| format!("cannot read {}: {error}", left_path.display()))?;
-        let right = fs::read_to_string(&right_path)
-            .map_err(|error| format!("cannot read {}: {error}", right_path.display()))?;
-        let left_spans = classify(&left);
-        let right_spans = classify(&right);
-        if left != right {
-            edits.extend(identifier_edits(&left, &right, &left_spans, &right_spans));
-        }
-        files.push(ClassifiedFile {
-            path: path.clone(),
-            left,
-            right,
-            left_spans,
-            right_spans,
-        });
+/// The comparison has already read the file. Symbol renames are decided from these
+/// texts, including a file whose text did not change, because a remaining use counts.
+pub(crate) struct ComparedFile {
+    path: String,
+    left: String,
+    right: String,
+    left_spans: Vec<Span>,
+    right_spans: Vec<Span>,
+}
+
+/// Classifies the identifiers in a paired file that has already been read.
+pub(crate) fn compared_file(
+    path: &str,
+    left: String,
+    right: String,
+    classify: fn(&str) -> Vec<Span>,
+) -> ComparedFile {
+    let left_spans = classify(&left);
+    let right_spans = classify(&right);
+    ComparedFile {
+        path: path.to_string(),
+        left,
+        right,
+        left_spans,
+        right_spans,
     }
-    Ok(renames_for_scope(&files, &edits))
+}
+
+/// Symbol renames across files that have already been compared.
+///
+/// A dialect only classifies a span, so a comment or a string is not read as code.
+/// A rename is recorded when every use of the old name changed to the same new name.
+/// Its scope is the smallest file or directory that contains those uses.
+pub(crate) fn symbol_renames(files: &[ComparedFile]) -> Vec<SymbolRename> {
+    let mut edits = Vec::new();
+    for file in files {
+        if file.left != file.right {
+            edits.extend(identifier_edits(
+                &file.left,
+                &file.right,
+                &file.left_spans,
+                &file.right_spans,
+            ));
+        }
+    }
+    renames_for_scope(files, &edits)
 }
 
 /// Renames one code identifier in every file of `scope`.
@@ -74,14 +83,6 @@ pub(crate) fn apply_rename(root: &Path, scope: &str, from: &str, to: &str) -> Re
     Ok(())
 }
 
-struct ClassifiedFile {
-    path: String,
-    left: String,
-    right: String,
-    left_spans: Vec<Span>,
-    right_spans: Vec<Span>,
-}
-
 #[derive(Clone, Copy)]
 struct TextLine<'a> {
     start: usize,
@@ -92,7 +93,7 @@ struct TextLine<'a> {
 ///
 /// The scope is the smallest file or directory that contains those uses. A name that
 /// is still used, or that changed to more than one new name, is not recorded.
-fn renames_for_scope(files: &[ClassifiedFile], edits: &[(String, String)]) -> Vec<SymbolRename> {
+fn renames_for_scope(files: &[ComparedFile], edits: &[(String, String)]) -> Vec<SymbolRename> {
     let mut by_from: BTreeMap<&str, BTreeMap<&str, usize>> = BTreeMap::new();
     for (from, to) in edits {
         *by_from.entry(from).or_default().entry(to).or_default() += 1;
@@ -508,11 +509,6 @@ fn char_offset(chars: &[(usize, char)], index: usize, len: usize) -> usize {
     } else {
         len
     }
-}
-
-/// The path of a paired file inside a source.
-fn source_file(source: &str, relative: &str) -> PathBuf {
-    crate::source_base(Path::new(source)).join(relative)
 }
 
 /// Rewrites code identifiers in one file.
