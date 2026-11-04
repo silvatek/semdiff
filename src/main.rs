@@ -4,6 +4,7 @@ mod comment;
 mod dialect;
 mod rename;
 mod semdif;
+mod symbol;
 
 pub(crate) use args::Sources;
 
@@ -28,10 +29,11 @@ fn main() -> ExitCode {
 struct Differences {
     paths: Vec<String>,
     renames: Vec<(String, String)>,
+    symbol_renames: Vec<symbol::SymbolRename>,
     added_comments: Vec<comment::AddedLineComment>,
 }
 
-/// The shared files, renames, and added line comments between the two sources.
+/// The shared files, renames, symbol renames, and added line comments between the two sources.
 ///
 /// Later steps use this result instead of searching the trees again.
 fn find_differences(sources: &Sources) -> Differences {
@@ -41,12 +43,16 @@ fn find_differences(sources: &Sources) -> Differences {
     let renames = rename::file_renames(sources).unwrap_or_else(|message| {
         exit_with_message(message);
     });
+    let symbol_renames = symbol::symbol_renames(sources, &paths).unwrap_or_else(|message| {
+        exit_with_message(message);
+    });
     let added_comments = comment::added_line_comments(sources, &paths).unwrap_or_else(|message| {
         exit_with_message(message);
     });
     Differences {
         paths,
         renames,
+        symbol_renames,
         added_comments,
     }
 }

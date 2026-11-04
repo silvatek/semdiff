@@ -15,6 +15,7 @@ pub(crate) fn write_output(
         env!("CARGO_PKG_VERSION"),
         &utc_timestamp(),
         &differences.renames,
+        &differences.symbol_renames,
         &differences.added_comments,
     );
     if let Err(error) = fs::write(output, document) {
@@ -37,10 +38,11 @@ fn semdif_document(
     version: &str,
     timestamp: &str,
     renames: &[(String, String)],
+    symbol_renames: &[crate::symbol::SymbolRename],
     added_comments: &[crate::comment::AddedLineComment],
 ) -> String {
     let mut document = header_document(version, timestamp);
-    if renames.is_empty() && added_comments.is_empty() {
+    if renames.is_empty() && symbol_renames.is_empty() && added_comments.is_empty() {
         return document;
     }
     document.push_str("changes:\n");
@@ -50,6 +52,13 @@ fn semdif_document(
         document.push_str("    details:\n");
         document.push_str(&format!("      from: {}\n", yaml_string(from)));
         document.push_str(&format!("      to: {}\n", yaml_string(to)));
+    }
+    for rename in symbol_renames {
+        document.push_str(&format!("  - scope: {}\n", yaml_string(&rename.scope)));
+        document.push_str("    type: symbol-renamed\n");
+        document.push_str("    details:\n");
+        document.push_str(&format!("      from: {}\n", yaml_string(&rename.from)));
+        document.push_str(&format!("      to: {}\n", yaml_string(&rename.to)));
     }
     for comment in added_comments {
         document.push_str(&format!("  - scope: {}\n", yaml_string(&comment.scope)));
@@ -91,6 +100,11 @@ pub(crate) enum Change {
         text: String,
     },
     FileRenamed {
+        from: String,
+        to: String,
+    },
+    SymbolRenamed {
+        scope: String,
         from: String,
         to: String,
     },
@@ -183,6 +197,19 @@ impl RawChange {
                     .details
                     .get("to")
                     .ok_or("file-renamed is missing to")?
+                    .clone(),
+            }),
+            "symbol-renamed" => Ok(Change::SymbolRenamed {
+                scope: self.scope,
+                from: self
+                    .details
+                    .get("from")
+                    .ok_or("symbol-renamed is missing from")?
+                    .clone(),
+                to: self
+                    .details
+                    .get("to")
+                    .ok_or("symbol-renamed is missing to")?
                     .clone(),
             }),
             other => Err(format!("unknown change type {other}")),

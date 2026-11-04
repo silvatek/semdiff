@@ -1,12 +1,17 @@
 /// A language semdiff knows how to read.
 ///
-/// Extensions select its files, and the line-comment test selects its comment lines, so
-/// another language can be added without changing the comparison.
+/// Extensions select its files. The line-comment test and the identifier readers select
+/// which lines and names that language contributes, so another language can be added
+/// without changing the comparison.
 pub(crate) struct Dialect {
     /// Extensions that identify this dialect, including the leading dot.
     pub extensions: &'static [&'static str],
     /// Whether one line is a single-line comment in this dialect.
     pub is_line_comment: fn(&str) -> bool,
+    /// Code identifiers, when this dialect can tell them from comments and strings.
+    pub identifiers: Option<fn(&str) -> Vec<String>>,
+    /// Source with one code identifier renamed, when this dialect can tell it from comments and strings.
+    pub rename_identifier: Option<fn(&str, &str, &str) -> String>,
 }
 
 /// The Rust dialect.
@@ -15,6 +20,8 @@ pub(crate) struct Dialect {
 pub(crate) static RUST: Dialect = Dialect {
     extensions: &[".rs"],
     is_line_comment: rust_line_comment,
+    identifiers: Some(crate::symbol::rust_identifiers),
+    rename_identifier: Some(crate::symbol::rust_rename_identifier),
 };
 
 /// The Python dialect.
@@ -23,6 +30,8 @@ pub(crate) static RUST: Dialect = Dialect {
 pub(crate) static PYTHON: Dialect = Dialect {
     extensions: &[".py"],
     is_line_comment: python_line_comment,
+    identifiers: None,
+    rename_identifier: None,
 };
 
 /// The dialect for a paired file, when semdiff knows that language.

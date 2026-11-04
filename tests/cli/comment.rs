@@ -12,7 +12,7 @@ fn records_an_added_rust_line_comment() {
     fs::write(left.join("src/main.rs"), "fn fibonacci() {}\n/// Shared.\n").unwrap();
     fs::write(
         right.join("src/main.rs"),
-        "/// Returns the nth Fibonacci number.\n// Keep this.\nfn fib() {} // trailing\n/// Shared.\n    /// Inner detail.\n",
+        "/// Returns the nth Fibonacci number.\n// Keep this.\nfn fibonacci() {} // trailing\n/// Shared.\n    /// Inner detail.\n",
     )
     .unwrap();
     fs::write(left.join("notes.txt"), "").unwrap();

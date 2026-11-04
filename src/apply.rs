@@ -25,6 +25,9 @@ fn apply_patch(source: &Path, patch: &Path) -> Result<(), String> {
     changes.sort_by(|left, right| change_order(left).cmp(&change_order(right)));
     for change in changes {
         match change {
+            Change::SymbolRenamed { scope, from, to } => {
+                crate::symbol::apply_rename(source, &scope, &from, &to)?;
+            }
             Change::LineCommentAdded { scope, line, text } => {
                 insert_line(&source.join(&scope), line, &text)?;
             }
@@ -34,14 +37,15 @@ fn apply_patch(source: &Path, patch: &Path) -> Result<(), String> {
     Ok(())
 }
 
-/// Puts content edits before renames, and earlier comment lines before later ones.
+/// Puts symbol renames, then added comments, then file renames.
 ///
 /// A comment is recorded against the original path, and its line number assumes earlier
-/// comments are already present.
+/// comments are already present. A symbol rename does not add or remove lines.
 fn change_order(change: &Change) -> (u8, String, usize) {
     match change {
-        Change::LineCommentAdded { scope, line, .. } => (0, scope.clone(), *line),
-        Change::FileRenamed { from, .. } => (1, from.clone(), 0),
+        Change::SymbolRenamed { from, .. } => (0, from.clone(), 0),
+        Change::LineCommentAdded { scope, line, .. } => (1, scope.clone(), *line),
+        Change::FileRenamed { from, .. } => (2, from.clone(), 0),
     }
 }
 
