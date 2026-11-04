@@ -1,9 +1,10 @@
 use std::fs;
 use std::process::ExitCode;
 
-/// Writes the semdiff document to `output` and prints the shared paths.
+/// Saves the semdiff file and lists the shared paths.
 ///
-/// Returns an exit code of 1 when the file cannot be written.
+/// The file is the command's result. The listing shows which files were eligible for
+/// comparison. A failure to save the file returns exit code 1.
 pub(crate) fn write_output(
     output: &str,
     sources: &crate::Sources,
@@ -26,7 +27,10 @@ pub(crate) fn write_output(
     ExitCode::SUCCESS
 }
 
-/// Builds the YAML document, including a `changes` list when any files were renamed.
+/// The semdiff text for one comparison.
+///
+/// The header is always present. Renames are included only when some were found, so an
+/// unchanged pair does not gain an empty change list.
 fn semdiff_document(version: &str, timestamp: &str, renames: &[(String, String)]) -> String {
     let mut document = header_document(version, timestamp);
     if renames.is_empty() {
@@ -43,18 +47,24 @@ fn semdiff_document(version: &str, timestamp: &str, renames: &[(String, String)]
     document
 }
 
-/// Builds the YAML header containing the semdiff version and a UTC timestamp.
+/// The header that identifies a semdiff file.
+///
+/// It records which tool version produced the file and the UTC time it was produced.
 fn header_document(version: &str, timestamp: &str) -> String {
     format!("header:\n  semdiff: \"{version}\"\n  timestamp: \"{timestamp}\"\n")
 }
 
-/// Quotes `value` as a YAML double-quoted scalar.
+/// A YAML-safe form of a text value.
+///
+/// Paths must stay literal when they are written into the semdiff file.
 fn yaml_string(value: &str) -> String {
     let escaped = value.replace('\\', "\\\\").replace('"', "\\\"");
     format!("\"{escaped}\"")
 }
 
-/// Returns the current UTC time as `YYYY-MM-DDTHH:MM:SSZ`.
+/// The UTC time to record in a semdiff header.
+///
+/// Readers can see when the file was produced without depending on a local timezone.
 fn utc_timestamp() -> String {
     chrono::Utc::now().format("%Y-%m-%dT%H:%M:%SZ").to_string()
 }

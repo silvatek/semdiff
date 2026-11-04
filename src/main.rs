@@ -7,7 +7,9 @@ use std::fs;
 use std::path::Path;
 use std::process::ExitCode;
 
-/// Parses the command-line arguments, compares the two directories, and writes the semdiff file.
+/// Compares two directories and writes a semdiff file.
+///
+/// Argument errors stop the command before a comparison starts.
 fn main() -> ExitCode {
     let args = parse_args();
     let differences = find_differences(&args.sources);
@@ -29,10 +31,10 @@ struct Differences {
     renames: Vec<(String, String)>,
 }
 
-/// Reads the left directory, right directory, and output path from the command line.
+/// The directories to compare and where the semdiff file should be written.
 ///
-/// Exits with code 2 when the arguments do not match the usage, and with code 1 when a
-/// path is not a directory.
+/// An unusable invocation stops the command: code 2 for the wrong arguments, and code 1
+/// when a source is not a directory.
 fn parse_args() -> Args {
     match parsed_args(env::args().skip(1)) {
         Ok(args) => args,
@@ -47,7 +49,9 @@ fn parse_args() -> Args {
     }
 }
 
-/// Collects the relative paths present in both sources and the renamed files between them.
+/// The shared files and renames between the two sources.
+///
+/// Later steps use this result instead of searching the trees again.
 fn find_differences(sources: &Sources) -> Differences {
     let paths = paired_files(sources).unwrap_or_else(|message| {
         exit_with_message(message);
@@ -58,7 +62,9 @@ fn find_differences(sources: &Sources) -> Differences {
     Differences { paths, renames }
 }
 
-/// Prints `message` to stderr and exits with code 1.
+/// Stops the command after a comparison failure.
+///
+/// The reason is shown on stderr and the process exits with code 1.
 fn exit_with_message(message: String) -> ! {
     eprintln!("{message}");
     std::process::exit(1);
@@ -69,10 +75,10 @@ enum CliError {
     NotDirectory(String),
 }
 
-/// Turns three path arguments into [`Args`].
+/// The command arguments taken from the three expected paths.
 ///
-/// Returns [`CliError::Usage`] when the argument count is wrong, and
-/// [`CliError::NotDirectory`] when either source path is not a directory.
+/// The wrong number of paths is a usage error. A source that is not a directory is
+/// rejected so the comparison is not attempted.
 fn parsed_args<I>(args: I) -> Result<Args, CliError>
 where
     I: IntoIterator<Item = String>,
@@ -92,7 +98,9 @@ where
     })
 }
 
-/// Accepts `path` when it names a directory.
+/// Confirms that a source path is a directory.
+///
+/// The comparison is defined on two file trees, so a file or a missing path cannot be a source.
 fn require_dir(path: &str) -> Result<(), CliError> {
     if Path::new(path).is_dir() {
         Ok(())
@@ -101,7 +109,9 @@ fn require_dir(path: &str) -> Result<(), CliError> {
     }
 }
 
-/// Returns the sorted relative paths that exist in both source directories.
+/// The files that can be compared in place because they exist in both sources.
+///
+/// The paths are in a stable order so repeated runs list the same files.
 fn paired_files(sources: &Sources) -> Result<Vec<String>, String> {
     let right_files: BTreeSet<_> = collect_files(Path::new(&sources.right))?
         .into_iter()
@@ -115,16 +125,18 @@ fn paired_files(sources: &Sources) -> Result<Vec<String>, String> {
     Ok(shared)
 }
 
-/// Lists the files under `root` as relative paths, skipping directories named `target`.
+/// The project files in a source tree.
+///
+/// Generated build output is omitted so it is not treated as project content.
 pub(crate) fn collect_files(root: &Path) -> Result<Vec<String>, String> {
     let mut files = Vec::new();
     visit_dir(root, root, &mut files)?;
     Ok(files)
 }
 
-/// Walks `dir` and appends file paths relative to `root`.
+/// The files contained in a directory and its subdirectories.
 ///
-/// Directories named `target` are not entered.
+/// Nested source files belong in the comparison, and generated build output does not.
 fn visit_dir(root: &Path, dir: &Path, files: &mut Vec<String>) -> Result<(), String> {
     let entries =
         fs::read_dir(dir).map_err(|error| format!("cannot read {}: {error}", dir.display()))?;

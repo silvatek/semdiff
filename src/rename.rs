@@ -7,10 +7,10 @@ use sha2::{Digest, Sha256};
 
 const HASH_BUFFER_SIZE: usize = 8 * 1024;
 
-/// Finds files that were renamed between the two sources.
+/// Files whose names changed while their contents stayed the same.
 ///
-/// A rename is a relative path that exists on only one side and whose SHA-256 digest
-/// matches exactly one unpaired file on the other side.
+/// A match is reported only when one unpaired file on each side has that content, so
+/// identical copies are not paired by guesswork.
 pub(crate) fn file_renames(sources: &crate::Sources) -> Result<Vec<(String, String)>, String> {
     let left_root = Path::new(&sources.left);
     let right_root = Path::new(&sources.right);
@@ -53,7 +53,9 @@ pub(crate) fn file_renames(sources: &crate::Sources) -> Result<Vec<(String, Stri
     Ok(renames)
 }
 
-/// Streams `relative` under `root` through an 8 KiB buffer and returns its SHA-256 digest.
+/// A content identity for one file.
+///
+/// Rename detection can compare files by this identity instead of holding their bytes.
 fn file_hash(root: &Path, relative: &str) -> Result<[u8; 32], String> {
     let path = root.join(relative);
     let mut file = fs::File::open(&path)
