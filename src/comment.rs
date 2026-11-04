@@ -10,7 +10,7 @@ pub(crate) struct AddedLineComment {
     pub text: String,
 }
 
-/// Rust line comments added in paired Rust files.
+/// Line comments added in paired files whose language semdiff knows.
 ///
 /// A comment line can appear without the file itself being new, so those lines are
 /// reported on their own. A line counts as added only when the right-hand file has
@@ -20,10 +20,18 @@ pub(crate) fn added_line_comments(
     paths: &[String],
 ) -> Result<Vec<AddedLineComment>, String> {
     let mut added = Vec::new();
-    for path in paths.iter().filter(|path| path.ends_with(".rs")) {
+    for path in paths {
+        let Some(dialect) = crate::dialect::for_path(path) else {
+            continue;
+        };
         let left_lines = read_lines(&source_file(&sources.left, path))?;
         let right_lines = read_lines(&source_file(&sources.right, path))?;
-        added.extend(added_comments_in_file(path, &left_lines, &right_lines));
+        added.extend(added_comments_in_file(
+            path,
+            dialect,
+            &left_lines,
+            &right_lines,
+        ));
     }
     Ok(added)
 }
@@ -34,17 +42,21 @@ pub(crate) fn added_line_comments(
 /// file a reader now sees.
 fn added_comments_in_file(
     scope: &str,
+    dialect: &crate::dialect::Dialect,
     left_lines: &[String],
     right_lines: &[String],
 ) -> Vec<AddedLineComment> {
     let mut remaining = HashMap::<&str, usize>::new();
-    for line in left_lines.iter().filter(|line| is_line_comment(line)) {
+    for line in left_lines
+        .iter()
+        .filter(|line| (dialect.is_line_comment)(line))
+    {
         *remaining.entry(line).or_default() += 1;
     }
 
     let mut added = Vec::new();
     for (index, line) in right_lines.iter().enumerate() {
-        if !is_line_comment(line) {
+        if !(dialect.is_line_comment)(line) {
             continue;
         }
         let count = remaining.get(line.as_str()).copied().unwrap_or(0);
@@ -59,14 +71,6 @@ fn added_comments_in_file(
         }
     }
     added
-}
-
-/// Whether a line is a Rust line comment.
-///
-/// Ordinary `//` comments and the `///` and `//!` doc forms are all line comments, so an
-/// added doc comment is still reported. Other edits in a paired file are outside this check.
-fn is_line_comment(line: &str) -> bool {
-    line.trim_start().starts_with("//")
 }
 
 /// The text lines of one source file.

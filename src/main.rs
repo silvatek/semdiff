@@ -1,4 +1,5 @@
 mod comment;
+mod dialect;
 mod output;
 mod rename;
 
