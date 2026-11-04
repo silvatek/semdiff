@@ -8,31 +8,35 @@ use std::path::Path;
 fn applying_the_rust_sample_makes_a_copy_of_v1_match_v2() {
     let manifest = Path::new(env!("CARGO_MANIFEST_DIR"));
     let sample = manifest.join("TestCode/rust/main");
-    let v1 = sample.join("v1");
-    let v2 = sample.join("v2");
+    let v1_source = sample.join("v1");
+    let v2_source = sample.join("v2");
     let root = std::env::temp_dir().join(format!("semdiff-apply-rust-{}", std::process::id()));
-    let applied = root.join("v1");
-    copy_tree(&v1, &applied);
-    let diff = root.join("diff.yml");
+    let target_source = root.join("v1");
+    copy_tree(&v1_source, &target_source);
+    let semdif_file = root.join("diff.yml");
 
     let compared = run(&[
-        v1.to_str().unwrap(),
-        v2.to_str().unwrap(),
-        diff.to_str().unwrap(),
+        v1_source.to_str().unwrap(),
+        v2_source.to_str().unwrap(),
+        semdif_file.to_str().unwrap(),
     ]);
     assert!(
         compared.status.success(),
         "{}",
         String::from_utf8_lossy(&compared.stderr)
     );
-    let applied_output = run(&["--apply", diff.to_str().unwrap(), applied.to_str().unwrap()]);
+    let applied_output = run(&[
+        "--apply",
+        semdif_file.to_str().unwrap(),
+        target_source.to_str().unwrap(),
+    ]);
     assert!(
         applied_output.status.success(),
         "{}",
         String::from_utf8_lossy(&applied_output.stderr)
     );
 
-    assert_eq!(tree_difference(&applied, &v2), "");
+    assert_eq!(tree_difference(&target_source, &v2_source), "");
 
     let _ = fs::remove_dir_all(root);
 }
