@@ -62,15 +62,26 @@ impl ComparedFile {
 
 /// Symbol renames that are complete in one file.
 ///
-/// The file is the scope. The same rename in other files can later share a wider
-/// scope when that scope still covers every use. A comment or a string is not a use.
-pub(crate) fn file_symbol_renames(file: &ComparedFile) -> Vec<SymbolRename> {
-    let edits = if file.left != file.right {
-        identifier_edits(&file.left, &file.right, &file.left_spans, &file.right_spans)
-    } else {
-        Vec::new()
-    };
-    renames_for_scope(std::slice::from_ref(file), &edits)
+/// `edits` are the identifier spans already found in this file. The file is the
+/// scope. The same rename in other files can later share a wider scope when that
+/// scope still covers every use.
+pub(crate) fn renames_in_file(
+    file: &ComparedFile,
+    edits: &[(String, String)],
+) -> Vec<SymbolRename> {
+    renames_for_scope(std::slice::from_ref(file), edits)
+}
+
+impl ComparedFile {
+    /// The classified spans of the old text.
+    pub(crate) fn left_spans(&self) -> &[Span] {
+        &self.left_spans
+    }
+
+    /// The classified spans of the new text.
+    pub(crate) fn right_spans(&self) -> &[Span] {
+        &self.right_spans
+    }
 }
 
 /// Renames one code identifier in every file of `scope`.
@@ -94,7 +105,39 @@ pub(crate) fn apply_rename(root: &Path, scope: &str, from: &str, to: &str) -> Re
 #[derive(Clone, Copy)]
 struct TextLine<'a> {
     start: usize,
+    /// The 1-based line number in the file this line was read from.
+    line: usize,
     text: &'a str,
+}
+
+/// Lines and identifier spans that differ between two versions of a file.
+///
+/// Both come from one comparison, so a comment line and a renamed identifier in the
+/// same file are not discovered separately.
+pub(crate) struct ContentDiff {
+    pub inserted_lines: Vec<(usize, String)>,
+    pub identifier_edits: Vec<(String, String)>,
+}
+
+/// The differing lines and identifier spans in one file.
+///
+/// Inserted lines keep their line number in the new file. Identifier edits are the
+/// renamed names inside lines that changed but were not inserted whole.
+pub(crate) fn content_diff(
+    left: &str,
+    right: &str,
+    left_spans: &[Span],
+    right_spans: &[Span],
+) -> ContentDiff {
+    let diff = line_diff(left, right);
+    ContentDiff {
+        inserted_lines: diff
+            .inserted
+            .iter()
+            .map(|line| (line.line, line.text.to_string()))
+            .collect(),
+        identifier_edits: identifier_edits_in(left, right, left_spans, right_spans, &diff.pairs),
+    }
 }
 
 /// One rename for each name whose every use in these files changed to the same new name.
@@ -187,20 +230,22 @@ fn identifier_uses(source: &str, spans: &[Span], name: &str) -> usize {
         .count()
 }
 
-/// Identifier spans whose text changed between two versions of a file.
+/// Identifier renames inside lines that changed in place.
 ///
-/// A comment or a string can repeat a name without that being a use of the identifier.
-fn identifier_edits(
+/// A span is kept only when both sides read it as an identifier. A comment or a
+/// string can repeat a name without that being a use.
+fn identifier_edits_in(
     left: &str,
     right: &str,
     left_spans: &[Span],
     right_spans: &[Span],
+    pairs: &[(TextLine<'_>, TextLine<'_>)],
 ) -> Vec<(String, String)> {
     let left_code = code_text(left, left_spans);
     let right_code = code_text(right, right_spans);
     let mut edits = Vec::new();
     let mut seen = BTreeSet::new();
-    for (left_line, right_line) in changed_line_pairs(left, right) {
+    for (left_line, right_line) in pairs {
         let left_text = &left_code[left_line.start..left_line.start + left_line.text.len()];
         let right_text = &right_code[right_line.start..right_line.start + right_line.text.len()];
         for (left_range, right_range) in changed_ranges(left_text, right_text) {
@@ -259,39 +304,54 @@ fn changed_token(spans: &[Span], start: usize, end: usize) -> Option<&Span> {
     })
 }
 
-/// Lines whose text differs, paired when they are the same line changed.
+struct LineDiff<'a> {
+    pairs: Vec<(TextLine<'a>, TextLine<'a>)>,
+    inserted: Vec<TextLine<'a>>,
+}
+
+/// Lines whose text differs.
 ///
-/// An inserted comment is not paired with a code line.
-fn changed_line_pairs<'a>(left: &'a str, right: &'a str) -> Vec<(TextLine<'a>, TextLine<'a>)> {
+/// A line that changed in place is paired. A line present only on the right is
+/// inserted, and an inserted comment is not paired with a code line.
+fn line_diff<'a>(left: &'a str, right: &'a str) -> LineDiff<'a> {
     let left_lines = file_lines(left);
     let right_lines = file_lines(right);
     let ops = diff_lines(&left_lines, &right_lines);
     let mut pairs = Vec::new();
+    let mut inserted_lines = Vec::new();
     let mut deleted = Vec::new();
     let mut inserted = Vec::new();
     let flush = |deleted: &mut Vec<TextLine<'a>>,
                  inserted: &mut Vec<TextLine<'a>>,
-                 pairs: &mut Vec<(TextLine<'a>, TextLine<'a>)>| {
-        pairs.extend(pair_changed_lines(deleted, inserted));
+                 pairs: &mut Vec<(TextLine<'a>, TextLine<'a>)>,
+                 inserted_lines: &mut Vec<TextLine<'a>>| {
+        let (paired, unpaired) = pair_changed_lines(deleted, inserted);
+        pairs.extend(paired);
+        inserted_lines.extend(unpaired);
         deleted.clear();
         inserted.clear();
     };
     for op in ops {
         match op {
-            LineOp::Equal => flush(&mut deleted, &mut inserted, &mut pairs),
+            LineOp::Equal => flush(&mut deleted, &mut inserted, &mut pairs, &mut inserted_lines),
             LineOp::Delete(line) => deleted.push(line),
             LineOp::Insert(line) => inserted.push(line),
         }
     }
-    flush(&mut deleted, &mut inserted, &mut pairs);
-    pairs
+    flush(&mut deleted, &mut inserted, &mut pairs, &mut inserted_lines);
+    LineDiff {
+        pairs,
+        inserted: inserted_lines,
+    }
 }
 
 /// Pairs the removed and added lines of one region that are the same line changed.
+///
+/// Added lines that are not the same line changed are returned on their own.
 fn pair_changed_lines<'a>(
     deleted: &[TextLine<'a>],
     inserted: &[TextLine<'a>],
-) -> Vec<(TextLine<'a>, TextLine<'a>)> {
+) -> (Vec<(TextLine<'a>, TextLine<'a>)>, Vec<TextLine<'a>>) {
     let mut candidates = Vec::new();
     for (deleted_index, deleted_line) in deleted.iter().enumerate() {
         for (inserted_index, inserted_line) in inserted.iter().enumerate() {
@@ -318,7 +378,13 @@ fn pair_changed_lines<'a>(
         used_inserted[inserted_index] = true;
         pairs.push((deleted[deleted_index], inserted[inserted_index]));
     }
-    pairs
+    let unpaired = inserted
+        .iter()
+        .enumerate()
+        .filter(|(index, _)| !used_inserted[*index])
+        .map(|(_, line)| *line)
+        .collect();
+    (pairs, unpaired)
 }
 
 /// How much of two lines is the same text.
@@ -353,18 +419,22 @@ fn shared_bytes(left: &[u8], right: &[u8]) -> usize {
 fn file_lines(source: &str) -> Vec<TextLine<'_>> {
     let mut lines = Vec::new();
     let mut start = 0;
+    let mut line = 1;
     for (index, character) in source.char_indices() {
         if character == '\n' {
             lines.push(TextLine {
                 start,
+                line,
                 text: &source[start..index],
             });
             start = index + character.len_utf8();
+            line += 1;
         }
     }
     if start < source.len() {
         lines.push(TextLine {
             start,
+            line,
             text: &source[start..],
         });
     }
@@ -558,14 +628,27 @@ fn replace_identifiers(source: &str, spans: &[Span], from: &str, to: &str) -> St
 
 #[cfg(test)]
 mod tests {
-    use super::{changed_line_pairs, identifier_edits, replace_identifiers, tightest_scope};
+    use super::{content_diff, line_diff, replace_identifiers, tightest_scope};
     use crate::dialect::{Span, SpanKind, RUST};
+
+    #[test]
+    fn one_comparison_finds_an_inserted_comment_and_a_renamed_identifier() {
+        let left = "fn fibonacci() {}\n";
+        let right = "/// note\nfn fib() {}\n";
+        let classify = RUST.spans.unwrap();
+        let diff = content_diff(left, right, &classify(left), &classify(right));
+        assert_eq!(diff.inserted_lines, vec![(1, "/// note".to_string())]);
+        assert_eq!(
+            diff.identifier_edits,
+            vec![("fibonacci".to_string(), "fib".to_string())]
+        );
+    }
 
     #[test]
     fn pairs_a_changed_line_and_not_an_inserted_comment() {
         let left = "fn fibonacci(n: u32) -> u64 {\n    match n {\n";
         let right = "/// where `fib(0)` is 0.\nfn fib(n: u32) -> u64 {\n    match n {\n";
-        let pairs = changed_line_pairs(left, right);
+        let pairs = line_diff(left, right).pairs;
         assert_eq!(pairs.len(), 1);
         assert!(pairs[0].0.text.contains("fibonacci"));
         assert!(pairs[0].1.text.starts_with("fn fib("));
@@ -576,7 +659,7 @@ mod tests {
         let left = "fn fibonacci(n: u32) -> u64 {\n    println!(\"{n}: {}\", fibonacci(n));\n";
         let right = "/// where `fib(0)` is 0.\nfn fib(n: u32) -> u64 {\n    println!(\"{n}: {}\", fib(n));\n";
         let classify = RUST.spans.unwrap();
-        let edits = identifier_edits(left, right, &classify(left), &classify(right));
+        let edits = content_diff(left, right, &classify(left), &classify(right)).identifier_edits;
         assert_eq!(
             edits,
             vec![
@@ -591,7 +674,7 @@ mod tests {
         let left = "fn use_it() { fibonacci(); }\n";
         let right = "fn use_it() { fib(); } // fibonacci\n";
         let classify = RUST.spans.unwrap();
-        let edits = identifier_edits(left, right, &classify(left), &classify(right));
+        let edits = content_diff(left, right, &classify(left), &classify(right)).identifier_edits;
         assert_eq!(edits, vec![("fibonacci".to_string(), "fib".to_string())]);
     }
 

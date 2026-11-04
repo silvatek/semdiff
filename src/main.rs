@@ -67,7 +67,9 @@ fn file_rename_changes(sources: &Sources) -> Result<Vec<Change>, String> {
 
 /// Content changes in the paired files, each at the scope of its own file.
 ///
-/// An unchanged file is kept only so a later collapse can see a use that did not change.
+/// Each file is compared once. The lines that differ are found, then the spans that
+/// differ inside those lines, and each of those differences is classified. An unchanged
+/// file is kept only so a later collapse can see a use that did not change.
 fn changed_content(
     sources: &Sources,
     paths: &[String],
@@ -80,26 +82,56 @@ fn changed_content(
         };
         let left = read_text(&sources.left, path)?;
         let right = read_text(&sources.right, path)?;
+        let file = dialect
+            .spans
+            .map(|classify| symbol::compared_file(path, left.clone(), right.clone(), classify));
         if left != right {
-            changes.extend(
-                comment::added_line_comments(path, dialect, &left, &right)
-                    .into_iter()
-                    .map(|comment| {
-                        Change::line_comment_added(comment.scope, comment.line, comment.text)
-                    }),
-            );
+            changes.extend(classify_file(path, dialect, &left, &right, file.as_ref()));
         }
-        if let Some(classify) = dialect.spans {
-            let file = symbol::compared_file(path, left, right, classify);
-            changes.extend(
-                symbol::file_symbol_renames(&file)
-                    .into_iter()
-                    .map(|rename| Change::symbol_renamed(rename.scope, rename.from, rename.to)),
-            );
+        if let Some(file) = file {
             compared.push(file);
         }
     }
     Ok((changes, compared))
+}
+
+/// The changes in one file whose text differs.
+///
+/// Inserted lines are classified with the dialect's line-comment test. Spans inside
+/// a changed line are classified from the spans the dialect already read, and an
+/// identifier that was renamed becomes a symbol rename when every use in the file changed.
+fn classify_file(
+    path: &str,
+    dialect: &crate::dialect::Dialect,
+    left: &str,
+    right: &str,
+    file: Option<&symbol::ComparedFile>,
+) -> Vec<Change> {
+    let empty = Vec::new();
+    let left_spans = file.map(symbol::ComparedFile::left_spans).unwrap_or(&empty);
+    let right_spans = file
+        .map(symbol::ComparedFile::right_spans)
+        .unwrap_or(&empty);
+    let diff = symbol::content_diff(left, right, left_spans, right_spans);
+    let mut changes = Vec::new();
+    for (line, text) in diff.inserted_lines {
+        if let Some(comment) = comment::inserted_comment(path, line, &text, dialect.is_line_comment)
+        {
+            changes.push(Change::line_comment_added(
+                comment.scope,
+                comment.line,
+                comment.text,
+            ));
+        }
+    }
+    if let Some(file) = file {
+        changes.extend(
+            symbol::renames_in_file(file, &diff.identifier_edits)
+                .into_iter()
+                .map(|rename| Change::symbol_renamed(rename.scope, rename.from, rename.to)),
+        );
+    }
+    changes
 }
 
 /// Joins changes that are the same rename and can share a wider scope.
