@@ -1,3 +1,4 @@
+mod apply;
 mod comment;
 mod dialect;
 mod output;
@@ -9,13 +10,27 @@ use std::fs;
 use std::path::Path;
 use std::process::ExitCode;
 
-/// Compares two sources and writes a semdiff file.
+const USAGE: &str = "\
+Usage: semdiff <left> <right> <output>
+       semdiff --apply <source> <semdiff>
+";
+
+/// Compares two sources, or applies a semdiff file to one source.
 ///
-/// Argument errors stop the command before a comparison starts.
+/// Argument errors stop the command before any comparison or edit starts.
 fn main() -> ExitCode {
-    let args = parse_args();
-    let differences = find_differences(&args.sources);
-    output::write_output(&args.output, &args.sources, &differences)
+    match parse_args() {
+        Command::Compare(args) => {
+            let differences = find_differences(&args.sources);
+            output::write_output(&args.output, &args.sources, &differences)
+        }
+        Command::Apply { source, patch } => apply::apply(&source, &patch),
+    }
+}
+
+enum Command {
+    Compare(Args),
+    Apply { source: String, patch: String },
 }
 
 struct Args {
@@ -34,20 +49,24 @@ struct Differences {
     added_comments: Vec<comment::AddedLineComment>,
 }
 
-/// The sources to compare and where the semdiff file should be written.
+/// The requested command, either a comparison or an apply.
 ///
 /// A source may be a file or a directory. An unusable invocation stops the command:
-/// code 2 for the wrong arguments, and code 1 when a source is missing or the two
-/// sources are different kinds.
-fn parse_args() -> Args {
+/// code 2 for the wrong arguments, and code 1 when a path is missing or the two
+/// comparison sources are different kinds.
+fn parse_args() -> Command {
     match parsed_args(env::args().skip(1)) {
-        Ok(args) => args,
+        Ok(command) => command,
         Err(CliError::Usage) => {
-            eprintln!("Usage: semdiff <left> <right> <output>");
+            eprint!("{USAGE}");
             std::process::exit(2);
         }
         Err(CliError::NotSource(path)) => {
             eprintln!("not a file or directory: {path}");
+            std::process::exit(1);
+        }
+        Err(CliError::NotFile(path)) => {
+            eprintln!("not a file: {path}");
             std::process::exit(1);
         }
         Err(CliError::MixedSources) => {
@@ -88,19 +107,34 @@ fn exit_with_message(message: String) -> ! {
 enum CliError {
     Usage,
     NotSource(String),
+    NotFile(String),
     MixedSources,
 }
 
-/// The command arguments taken from the three expected paths.
+/// The command described by the arguments.
 ///
-/// The wrong number of paths is a usage error. A missing source is rejected, and a file
-/// is not compared with a directory, so the comparison is not attempted.
-fn parsed_args<I>(args: I) -> Result<Args, CliError>
+/// `--apply` edits one source from a semdiff file. Otherwise the three paths are a
+/// comparison. A missing source is rejected, and a file is not compared with a
+/// directory, so the command is not attempted.
+fn parsed_args<I>(args: I) -> Result<Command, CliError>
 where
     I: IntoIterator<Item = String>,
 {
     let mut args = args.into_iter();
-    let left = args.next().ok_or(CliError::Usage)?;
+    let first = args.next().ok_or(CliError::Usage)?;
+    if first == "--apply" {
+        let source = args.next().ok_or(CliError::Usage)?;
+        let patch = args.next().ok_or(CliError::Usage)?;
+        if args.next().is_some() {
+            return Err(CliError::Usage);
+        }
+        require_source(&source)?;
+        if !Path::new(&patch).is_file() {
+            return Err(CliError::NotFile(patch));
+        }
+        return Ok(Command::Apply { source, patch });
+    }
+    let left = first;
     let right = args.next().ok_or(CliError::Usage)?;
     let output = args.next().ok_or(CliError::Usage)?;
     if args.next().is_some() {
@@ -109,10 +143,10 @@ where
     require_source(&left)?;
     require_source(&right)?;
     require_same_kind(&left, &right)?;
-    Ok(Args {
+    Ok(Command::Compare(Args {
         sources: Sources { left, right },
         output,
-    })
+    }))
 }
 
 /// Confirms that a source path is a file or a directory.
