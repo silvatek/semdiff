@@ -199,11 +199,16 @@ fn rebuild_lines(
     for change in batch {
         match change {
             crate::semdif::Change::LineModified { old, text, .. } => {
-                if modified.insert(*old, text.clone()).is_some() {
-                    return Err(format!(
-                        "line {old} is modified more than once in {}",
-                        path.display()
-                    ));
+                for (offset, line) in text.split('\n').enumerate() {
+                    let line_no = old
+                        .checked_add(offset)
+                        .ok_or_else(|| format!("line {old} is outside {}", path.display()))?;
+                    if modified.insert(line_no, line.to_string()).is_some() {
+                        return Err(format!(
+                            "line {line_no} is modified more than once in {}",
+                            path.display()
+                        ));
+                    }
                 }
             }
             crate::semdif::Change::LineRemoved { old, old_end, .. } => {
@@ -223,7 +228,12 @@ fn rebuild_lines(
                 }
             }
             crate::semdif::Change::LineAdded { old, new, text, .. } => {
-                added.push((*old, *new, text.clone()));
+                for (offset, line) in text.split('\n').enumerate() {
+                    let line_no = new.checked_add(offset).ok_or_else(|| {
+                        format!("cannot insert before line {old} in {}", path.display())
+                    })?;
+                    added.push((*old, line_no, line.to_string()));
+                }
             }
             _ => {}
         }

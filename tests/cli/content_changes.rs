@@ -171,6 +171,95 @@ fn merges_adjacent_removed_lines_into_one_span() {
 }
 
 #[test]
+fn merges_adjacent_additions_and_modifications() {
+    let root = std::env::temp_dir().join(format!("semdiff-added-span-{}", std::process::id()));
+    let left = root.join("left");
+    let right = root.join("right");
+    let edited = root.join("edited");
+    fs::create_dir_all(&left).unwrap();
+    fs::create_dir_all(&right).unwrap();
+    fs::create_dir_all(&edited).unwrap();
+    fs::write(left.join("added.txt"), "keep\ntail\n").unwrap();
+    fs::write(right.join("added.txt"), "keep\none\ntwo\nthree\ntail\n").unwrap();
+    fs::write(edited.join("added.txt"), "keep\ntail\n").unwrap();
+    fs::write(left.join("changed.txt"), "keep\nold1\nold2\ntail\n").unwrap();
+    fs::write(right.join("changed.txt"), "keep\nnew1\nnew2\ntail\n").unwrap();
+    fs::write(edited.join("changed.txt"), "keep\nold1\nold2\ntail\n").unwrap();
+    fs::write(left.join("split-added.txt"), "keep\nmid\ntail\n").unwrap();
+    fs::write(right.join("split-added.txt"), "keep\none\nmid\ntwo\ntail\n").unwrap();
+    fs::write(edited.join("split-added.txt"), "keep\nmid\ntail\n").unwrap();
+    fs::write(
+        left.join("split-changed.txt"),
+        "keep\nold1\nmid\nold2\ntail\n",
+    )
+    .unwrap();
+    fs::write(
+        right.join("split-changed.txt"),
+        "keep\nnew1\nmid\nnew2\ntail\n",
+    )
+    .unwrap();
+    fs::write(
+        edited.join("split-changed.txt"),
+        "keep\nold1\nmid\nold2\ntail\n",
+    )
+    .unwrap();
+
+    let output_path = root.join("out.yml");
+    let output_arg = output_path.to_str().unwrap();
+    let compared = run(&[left.to_str().unwrap(), right.to_str().unwrap(), output_arg]);
+    let document = fs::read_to_string(&output_path).expect("failed to read semdiff file");
+
+    assert!(
+        compared.status.success(),
+        "{}",
+        String::from_utf8_lossy(&compared.stderr)
+    );
+    assert!(document.contains(
+        "  - scope: \"added.txt\"\n    type: line-added\n    details:\n      old: 2\n      lines: +3\n      new: 2\n      text: \"one\\ntwo\\nthree\"\n"
+    ));
+    assert!(document.contains(
+        "  - scope: \"changed.txt\"\n    type: line-modified\n    details:\n      old: 2\n      lines: +0\n      new: 2\n      text: \"new1\\nnew2\"\n"
+    ));
+    assert!(document.contains(
+        "  - scope: \"split-added.txt\"\n    type: line-added\n    details:\n      old: 2\n      lines: +1\n      new: 2\n      text: \"one\"\n"
+    ));
+    assert!(document.contains(
+        "  - scope: \"split-added.txt\"\n    type: line-added\n    details:\n      old: 3\n      lines: +1\n      new: 4\n      text: \"two\"\n"
+    ));
+    assert!(document.contains(
+        "  - scope: \"split-changed.txt\"\n    type: line-modified\n    details:\n      old: 2\n      lines: +0\n      new: 2\n      text: \"new1\"\n"
+    ));
+    assert!(document.contains(
+        "  - scope: \"split-changed.txt\"\n    type: line-modified\n    details:\n      old: 4\n      lines: +0\n      new: 4\n      text: \"new2\"\n"
+    ));
+
+    let applied = run(&["--apply", output_arg, edited.to_str().unwrap()]);
+    assert!(
+        applied.status.success(),
+        "{}",
+        String::from_utf8_lossy(&applied.stderr)
+    );
+    assert_eq!(
+        fs::read(edited.join("added.txt")).unwrap(),
+        b"keep\none\ntwo\nthree\ntail\n"
+    );
+    assert_eq!(
+        fs::read(edited.join("changed.txt")).unwrap(),
+        b"keep\nnew1\nnew2\ntail\n"
+    );
+    assert_eq!(
+        fs::read(edited.join("split-added.txt")).unwrap(),
+        b"keep\none\nmid\ntwo\ntail\n"
+    );
+    assert_eq!(
+        fs::read(edited.join("split-changed.txt")).unwrap(),
+        b"keep\nnew1\nmid\nnew2\ntail\n"
+    );
+
+    let _ = fs::remove_dir_all(root);
+}
+
+#[test]
 fn merges_the_adjacent_removals_in_the_rust_sample() {
     let manifest = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
     let sample = manifest.join("TestCode/rust/main");
@@ -195,7 +284,21 @@ fn merges_the_adjacent_removals_in_the_rust_sample() {
     assert!(document.contains(
         "  - scope: \"src/main.rs\"\n    type: line-removed\n    details:\n      old: 49\n      lines: -2\n      new: 49\n      text: \"// This deleted line is first.\\n// This deleted line is second.\"\n"
     ));
+    assert!(document.contains(
+        "  - scope: \"src/main.rs\"\n    type: line-added\n    details:\n      old: 18\n      lines: +1\n      new: 18\n      text: \"// Print Fibonacci numbers.\"\n"
+    ));
+    assert!(document.contains(
+        "  - scope: \"src/main.rs\"\n    type: line-added\n    details:\n      old: 53\n      lines: +2\n      new: 51\n      text: \"// This added line is first.\\n// This added line is second.\"\n"
+    ));
+    assert!(document.contains(
+        "  - scope: \"src/main.rs\"\n    type: line-modified\n    details:\n      old: 46\n      lines: +0\n      new: 46\n      text: \"// Count from one.\"\n"
+    ));
+    assert!(document.contains(
+        "  - scope: \"src/main.rs\"\n    type: line-modified\n    details:\n      old: 55\n      lines: +0\n      new: 55\n      text: \"// New first line.\\n// New second line.\"\n"
+    ));
     assert!(!document.contains("old: 50\n"), "{document}");
+    assert!(!document.contains("new: 52\n"), "{document}");
+    assert!(!document.contains("old: 56\n"), "{document}");
 
     let _ = fs::remove_dir_all(root);
 }

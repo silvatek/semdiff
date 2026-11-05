@@ -87,7 +87,15 @@ fn write_change(document: &mut String, change: &Change) {
             old,
             new,
             text,
-        } => write_line(document, "line-added", path, *old, 1, *new, text),
+        } => write_line(
+            document,
+            "line-added",
+            path,
+            *old,
+            added_lines(text),
+            *new,
+            text,
+        ),
         Change::LineRemoved {
             path,
             old,
@@ -132,9 +140,9 @@ fn write_line(
 
 /// The `lines` value, with its sign written out.
 ///
-/// A removal is negative, so one removed line is `-1`. An addition is
-/// positive, so one added line is `+1`. A modification does not change the
-/// line count, so it is `+0`.
+/// A removal is negative, so one removed line is `-1` and two are `-2`.
+/// An addition is positive, so one added line is `+1` and two are `+2`.
+/// A modification does not change the line count, so it is `+0`.
 fn format_lines(lines: isize) -> String {
     if lines > 0 {
         format!("+{lines}")
@@ -148,6 +156,11 @@ fn format_lines(lines: isize) -> String {
 /// How many old lines a removal covers, as a negative count.
 ///
 /// One line is `-1`. A run of two is `-2`.
+/// How many lines an addition record contains, as a positive count.
+fn added_lines(text: &str) -> isize {
+    text.split('\n').count() as isize
+}
+
 fn removed_lines(old: usize, old_end: usize) -> isize {
     let count = old_end - old + 1;
     -(count as isize)
@@ -366,7 +379,7 @@ impl PartialChange {
             "file-changed" => file_changed(self.scope, self.fields),
             "line-added" => {
                 let text = required(&self.fields, "text", "line-added")?;
-                expect_lines(&self.fields, "line-added", 1, &text)?;
+                expect_added_lines(&self.fields, &text)?;
                 Ok(Change::LineAdded {
                     path: self.scope,
                     old: required_line(&self.fields, "old", "line-added")?,
@@ -387,7 +400,7 @@ impl PartialChange {
             }
             "line-modified" => {
                 let text = required(&self.fields, "text", "line-modified")?;
-                expect_lines(&self.fields, "line-modified", 0, &text)?;
+                expect_modified_lines(&self.fields)?;
                 Ok(Change::LineModified {
                     path: self.scope,
                     old: required_line(&self.fields, "old", "line-modified")?,
@@ -474,18 +487,23 @@ fn removed_end(fields: &BTreeMap<String, String>, old: usize, text: &str) -> Res
         .ok_or_else(|| invalid_lines("line-removed", fields))
 }
 
-/// Checks that `lines` has the expected value and the text is one line.
+/// Checks that an addition's `lines` is the positive count of lines in `text`.
+fn expect_added_lines(fields: &BTreeMap<String, String>, text: &str) -> Result<(), String> {
+    let lines = required_lines(fields, "line-added")?;
+    if lines <= 0 || text.split('\n').count() != lines as usize {
+        return Err(invalid_lines("line-added", fields));
+    }
+    Ok(())
+}
+
+/// Checks that a modification's `lines` is zero.
 ///
-/// An addition is `+1`. A modification is `+0`.
-fn expect_lines(
-    fields: &BTreeMap<String, String>,
-    kind: &str,
-    expected: isize,
-    text: &str,
-) -> Result<(), String> {
-    let lines = required_lines(fields, kind)?;
-    if lines != expected || text.contains('\n') {
-        return Err(invalid_lines(kind, fields));
+/// The text holds the replacement lines. Several updated lines are still `+0`,
+/// because a modification does not change how many lines the file has.
+fn expect_modified_lines(fields: &BTreeMap<String, String>) -> Result<(), String> {
+    let lines = required_lines(fields, "line-modified")?;
+    if lines != 0 {
+        return Err(invalid_lines("line-modified", fields));
     }
     Ok(())
 }

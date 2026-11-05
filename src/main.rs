@@ -39,8 +39,8 @@ struct Differences {
 /// Files that exist on only one side may be a rename, a deletion, or an addition.
 /// Files that exist on both sides are paired and compared in place.
 /// Empty directories that appear or disappear are recorded too, including one
-/// left empty because its files moved. Adjacent removed lines in one file
-/// become one line-removed record before the semdif file is written.
+/// left empty because its files moved. Adjacent removed, added, or modified
+/// lines in one file become one record before the semdif file is written.
 fn find_differences(sources: &Sources) -> Differences {
     let left_files = collect_files(Path::new(&sources.left)).unwrap_or_else(|message| {
         exit_with_message(message);
