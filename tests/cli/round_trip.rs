@@ -46,6 +46,36 @@ fn applying_the_rust_sample_makes_a_copy_of_v1_match_v2() {
         ),
         "{document}"
     );
+    assert!(
+        document.contains(
+            "  - scope: \".\"\n    type: line-removed\n    details:\n      path: \"src/main.rs\"\n      line: 43\n      text: \"// This single line is deleted.\"\n"
+        ),
+        "{document}"
+    );
+    assert!(
+        document.contains(
+            "  - scope: \".\"\n    type: line-modified\n    details:\n      path: \"src/main.rs\"\n      line: 46\n      text: \"// Count from one.\"\n"
+        ),
+        "{document}"
+    );
+    assert!(
+        document.contains(
+            "  - scope: \".\"\n    type: line-removed\n    details:\n      path: \"src/main.rs\"\n      line: 50\n      text: \"// This deleted line is second.\"\n  - scope: \".\"\n    type: line-removed\n    details:\n      path: \"src/main.rs\"\n      line: 49\n      text: \"// This deleted line is first.\"\n"
+        ),
+        "{document}"
+    );
+    assert!(
+        document.contains(
+            "  - scope: \".\"\n    type: line-added\n    details:\n      path: \"src/main.rs\"\n      line: 51\n      text: \"// This added line is first.\"\n  - scope: \".\"\n    type: line-added\n    details:\n      path: \"src/main.rs\"\n      line: 52\n      text: \"// This added line is second.\"\n"
+        ),
+        "{document}"
+    );
+    assert!(
+        document.contains(
+            "  - scope: \".\"\n    type: line-modified\n    details:\n      path: \"src/main.rs\"\n      line: 55\n      text: \"// New first line.\"\n  - scope: \".\"\n    type: line-modified\n    details:\n      path: \"src/main.rs\"\n      line: 56\n      text: \"// New second line.\"\n"
+        ),
+        "{document}"
+    );
     assert!(!document.contains("type: file-changed"), "{document}");
     let applied_output = run(&["--apply", semdif_file_arg, target_source_arg]);
     assert!(
