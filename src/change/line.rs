@@ -1,4 +1,7 @@
-//! Line additions, removals, modifications, and identifier renames.
+//! Line additions, removals, and modifications.
+//!
+//! A line change's scope is the file. A span change names one old line instead,
+//! and lives in its own module.
 
 use std::path::Path;
 
@@ -10,8 +13,7 @@ use crate::filesystem::FileSystem;
 ///
 /// The scope stays on each of those changes. These three differ in how long
 /// the edit is on the old side and the new side, and in whether a following
-/// edit of the same kind can be appended. An identifier rename does not use
-/// this. It also stores the two names, and it stays its own change.
+/// edit of the same kind can be appended.
 struct LineBody {
     old: usize,
     new: usize,
@@ -101,7 +103,7 @@ fn line_start(body: &LineBody) -> LineStart {
 /// another on the new side, so `lines` is `+1` or `+2`. Modifications follow
 /// one another on both sides. They do not change the line count, so `lines`
 /// stays `+0`. The merged change keeps the first line number. Its text keeps
-/// every line, joined by a newline. An identifier rename stays its own change.
+/// every line, joined by a newline. A span change stays its own change.
 pub(crate) fn merge_adjacent(changes: Vec<Box<dyn super::Change>>) -> Vec<Box<dyn super::Change>> {
     let mut merged: Vec<Box<dyn super::Change>> = Vec::new();
     for change in changes {
@@ -379,87 +381,5 @@ impl LineEdit for LineModified {
             plan.replace(file, line_no, line.to_string())?;
         }
         Ok(())
-    }
-}
-
-pub(crate) struct IdentifierRenamed {
-    pub(crate) scope: String,
-    pub(crate) old: usize,
-    pub(crate) new: usize,
-    pub(crate) oldname: String,
-    pub(crate) newname: String,
-}
-
-impl Change for IdentifierRenamed {
-    fn kind(&self) -> &'static str {
-        "identifier-renamed"
-    }
-
-    fn scope(&self) -> &str {
-        &self.scope
-    }
-
-    fn line_edit(&self) -> Option<&dyn LineEdit> {
-        Some(self)
-    }
-
-    fn content(&self) -> Option<&dyn Content> {
-        Some(self)
-    }
-
-    fn write_details(&self, document: &mut String) {
-        crate::semdif::write_plain(document, "old", &self.old.to_string());
-        crate::semdif::write_plain(document, "new", &self.new.to_string());
-        crate::semdif::write_detail(document, "oldname", &self.oldname);
-        crate::semdif::write_detail(document, "newname", &self.newname);
-    }
-
-    fn apply(&self, _fs: &dyn FileSystem, _source: &Path) -> Result<(), String> {
-        applied_with_its_file(self.kind())
-    }
-}
-
-impl Content for IdentifierRenamed {
-    fn file(&self) -> &str {
-        &self.scope
-    }
-}
-
-impl LineEdit for IdentifierRenamed {
-    fn position(&self) -> (usize, usize) {
-        (self.old, self.new)
-    }
-
-    fn rebuild(
-        &self,
-        file: &Path,
-        source_lines: &[String],
-        plan: &mut LinePlan,
-    ) -> Result<(), String> {
-        if self.old == 0 || self.old > source_lines.len() {
-            return Err(format!(
-                "line {} is outside {} which has {} lines",
-                self.old,
-                file.display(),
-                source_lines.len()
-            ));
-        }
-        let replaced = match crate::identifier::replace_name(
-            &self.scope,
-            &source_lines[self.old - 1],
-            &self.oldname,
-            &self.newname,
-        ) {
-            Ok(text) => text,
-            Err(message) => {
-                return Err(format!(
-                    "cannot rename {} on line {} in {}: {message}",
-                    self.oldname,
-                    self.old,
-                    file.display()
-                ));
-            }
-        };
-        plan.replace(file, self.old, replaced)
     }
 }

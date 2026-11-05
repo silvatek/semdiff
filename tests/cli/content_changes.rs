@@ -175,35 +175,26 @@ fn merges_the_adjacent_removals_in_the_rust_sample() {
         "  - scope: \"src/main.rs\"\n    type: line-added\n    details:\n      old: 53\n      lines: +2\n      new: 51\n      text: \"// This added line is first.\\n// This added line is second.\"\n"
     ));
     assert!(document.contains(
-        "  - scope: \"src/main.rs\"\n    type: identifier-renamed\n    details:\n      old: 1\n      new: 1\n      oldname: \"fibonacci\"\n      newname: \"fib\"\n"
+        "  - scope: \"src/main.rs:1-38\"\n    type: identifier-renamed\n    details:\n      oldname: \"fibonacci\"\n      newname: \"fib\"\n"
     ));
     assert!(document.contains(
-        "  - scope: \"src/main.rs\"\n    type: identifier-renamed\n    details:\n      old: 25\n      new: 26\n      oldname: \"fibonacci\"\n      newname: \"fib\"\n"
+        "  - scope: \"src/main.rs:46\"\n    type: identifier-renamed\n    details:\n      new: 46\n      oldname: \"zero\"\n      newname: \"one\"\n"
     ));
     assert!(document.contains(
-        "  - scope: \"src/main.rs\"\n    type: identifier-renamed\n    details:\n      old: 31\n      new: 32\n      oldname: \"fibonacci\"\n      newname: \"fib\"\n"
+        "  - scope: \"src/main.rs:55-56\"\n    type: identifier-renamed\n    details:\n      oldname: \"Old\"\n      newname: \"New\"\n"
     ));
-    assert!(document.contains(
-        "  - scope: \"src/main.rs\"\n    type: identifier-renamed\n    details:\n      old: 35\n      new: 36\n      oldname: \"fibonacci\"\n      newname: \"fib\"\n"
-    ));
-    assert!(document.contains(
-        "  - scope: \"src/main.rs\"\n    type: identifier-renamed\n    details:\n      old: 36\n      new: 37\n      oldname: \"fibonacci\"\n      newname: \"fib\"\n"
-    ));
-    assert!(document.contains(
-        "  - scope: \"src/main.rs\"\n    type: identifier-renamed\n    details:\n      old: 37\n      new: 38\n      oldname: \"fibonacci\"\n      newname: \"fib\"\n"
-    ));
-    assert!(document.contains(
-        "  - scope: \"src/main.rs\"\n    type: identifier-renamed\n    details:\n      old: 38\n      new: 39\n      oldname: \"fibonacci\"\n      newname: \"fib\"\n"
-    ));
-    assert!(document.contains(
-        "  - scope: \"src/main.rs\"\n    type: identifier-renamed\n    details:\n      old: 46\n      new: 46\n      oldname: \"zero\"\n      newname: \"one\"\n"
-    ));
-    assert!(document.contains(
-        "  - scope: \"src/main.rs\"\n    type: identifier-renamed\n    details:\n      old: 55\n      new: 55\n      oldname: \"Old\"\n      newname: \"New\"\n"
-    ));
-    assert!(document.contains(
-        "  - scope: \"src/main.rs\"\n    type: identifier-renamed\n    details:\n      old: 56\n      new: 56\n      oldname: \"Old\"\n      newname: \"New\"\n"
-    ));
+    assert!(
+        !document.contains("scope: \"src/main.rs:25\""),
+        "{document}"
+    );
+    assert!(
+        !document.contains("scope: \"src/main.rs:35\""),
+        "{document}"
+    );
+    assert!(
+        !document.contains("scope: \"src/main.rs:56\""),
+        "{document}"
+    );
     assert!(!document.contains("old: 50\n"), "{document}");
     assert!(!document.contains("new: 52\n"), "{document}");
 }
@@ -305,7 +296,7 @@ fn records_an_identifier_rename_when_one_name_changes() {
     let document = tree.compare("left", "right");
 
     assert!(document.contains(
-        "  - scope: \"src/main.rs\"\n    type: identifier-renamed\n    details:\n      old: 1\n      new: 1\n      oldname: \"fibonacci\"\n      newname: \"fib\"\n"
+        "  - scope: \"src/main.rs:1\"\n    type: identifier-renamed\n    details:\n      new: 1\n      oldname: \"fibonacci\"\n      newname: \"fib\"\n"
     ));
     assert!(document.contains(
         "  - scope: \"src/main.rs\"\n    type: line-modified\n    details:\n      old: 2\n      lines: +0\n      new: 2\n      text: \"    let total = fox + baz;\"\n"
@@ -318,7 +309,7 @@ fn records_an_identifier_rename_when_one_name_changes() {
         "  - scope: \"note.txt\"\n    type: line-modified\n    details:\n      old: 1\n      lines: +0\n      new: 1\n      text: \"hallo\"\n"
     ));
     assert!(document.contains(
-        "  - scope: \"calc.py\"\n    type: identifier-renamed\n    details:\n      old: 1\n      new: 1\n      oldname: \"fibonacci\"\n      newname: \"fib\"\n"
+        "  - scope: \"calc.py:1\"\n    type: identifier-renamed\n    details:\n      new: 1\n      oldname: \"fibonacci\"\n      newname: \"fib\"\n"
     ));
 
     tree.apply("edited", &document).unwrap();
@@ -340,10 +331,9 @@ header:
   semdiff: \"0.1.0\"
   timestamp: \"2020-01-01T00:00:00Z\"
 changes:
-  - scope: \"src/main.rs\"
+  - scope: \"src/main.rs:1\"
     type: identifier-renamed
     details:
-      old: 1
       new: 1
       oldname: \"foo\"
       newname: \"bar\"
@@ -353,6 +343,56 @@ changes:
 
     assert!(message.contains("does not occur once"), "{message}");
     assert_eq!(tree.read("edited/src/main.rs"), b"foo(foo)\n");
+}
+
+#[test]
+fn rejects_an_identifier_rename_whose_scope_has_no_line() {
+    let tree = Tree::new();
+    tree.write("edited/src/main.rs", "fn fibonacci() {}\n");
+    let message = tree
+        .apply(
+            "edited",
+            "\
+header:
+  semdiff: \"0.1.0\"
+  timestamp: \"2020-01-01T00:00:00Z\"
+changes:
+  - scope: \"src/main.rs\"
+    type: identifier-renamed
+    details:
+      new: 1
+      oldname: \"fibonacci\"
+      newname: \"fib\"
+",
+        )
+        .unwrap_err();
+
+    assert!(message.contains("path:line"), "{message}");
+    assert_eq!(tree.read("edited/src/main.rs"), b"fn fibonacci() {}\n");
+}
+
+#[test]
+fn merges_renames_of_one_name_when_the_gap_does_not_keep_that_name() {
+    let tree = Tree::new();
+    let before = "foo one\nkeep\nfoo two\nstill foo\nfoo three\n";
+    let after = "bar one\nkeep\nbar two\nstill foo\nbar three\n";
+    tree.write("left/src/main.rs", before);
+    tree.write("right/src/main.rs", after);
+    tree.write("edited/src/main.rs", before);
+
+    let document = tree.compare("left", "right");
+
+    assert!(document.contains(
+        "  - scope: \"src/main.rs:1-3\"\n    type: identifier-renamed\n    details:\n      oldname: \"foo\"\n      newname: \"bar\"\n"
+    ));
+    assert!(document.contains(
+        "  - scope: \"src/main.rs:5\"\n    type: identifier-renamed\n    details:\n      new: 5\n      oldname: \"foo\"\n      newname: \"bar\"\n"
+    ));
+    assert!(!document.contains("scope: \"src/main.rs:1\""), "{document}");
+    assert!(!document.contains("scope: \"src/main.rs:3\""), "{document}");
+
+    tree.apply("edited", &document).unwrap();
+    assert_eq!(tree.read("edited/src/main.rs"), after.as_bytes());
 }
 
 fn changed_note() -> (Tree, String) {
