@@ -298,13 +298,14 @@ fn parse_identifier_renamed(
     scope: String,
     fields: BTreeMap<String, String>,
 ) -> Result<Box<dyn Change>, String> {
-    Ok(Box::new(crate::change::IdentifierRenamed {
-        scope,
-        old: required_line(&fields, "old", "identifier-renamed")?,
-        new: required_line(&fields, "new", "identifier-renamed")?,
-        oldname: required(&fields, "oldname", "identifier-renamed")?,
-        newname: required(&fields, "newname", "identifier-renamed")?,
-    }))
+    let (path, old) = crate::change::parse_identifier_scope(&scope)?;
+    Ok(Box::new(crate::change::IdentifierRenamed::new(
+        path,
+        old,
+        required_line(&fields, "new", "identifier-renamed")?,
+        required(&fields, "oldname", "identifier-renamed")?,
+        required(&fields, "newname", "identifier-renamed")?,
+    )))
 }
 
 fn parse_directory_added(

@@ -13,7 +13,9 @@ mod line;
 
 pub(crate) use directory::{DirectoryAdded, DirectoryDeleted};
 pub(crate) use file::{FileAdded, FileChanged, FileDeleted, FileRenamed};
-pub(crate) use line::{merge_adjacent, IdentifierRenamed, LineAdded, LineModified, LineRemoved};
+pub(crate) use line::{
+    merge_adjacent, parse_identifier_scope, IdentifierRenamed, LineAdded, LineModified, LineRemoved,
+};
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::Path;
@@ -102,8 +104,9 @@ pub(crate) trait Change {
 /// A change applied with the other edits of one file.
 ///
 /// Apply groups these by [`Content::file`], checks the old hash, builds the
-/// new bytes, checks the new hash, and writes the file once. For a change to
-/// one file, that file is the change's scope.
+/// new bytes, checks the new hash, and writes the file once. For a line
+/// change, that file is the change's scope. For an identifier rename, the
+/// scope is `path:line` and the file is the path.
 pub(crate) trait Content {
     /// The file those edits share.
     fn file(&self) -> &str;

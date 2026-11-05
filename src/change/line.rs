@@ -1,4 +1,8 @@
 //! Line additions, removals, modifications, and identifier renames.
+//!
+//! An addition, removal, or modification is a line change. Its scope is the
+//! file. An identifier rename is a span change. Its scope is `path:line`, and
+//! the line is the old line.
 
 use std::path::Path;
 
@@ -11,7 +15,7 @@ use crate::filesystem::FileSystem;
 /// The scope stays on each of those changes. These three differ in how long
 /// the edit is on the old side and the new side, and in whether a following
 /// edit of the same kind can be appended. An identifier rename does not use
-/// this. It also stores the two names, and it stays its own change.
+/// this. Its scope names the old line, and it stores the two names.
 struct LineBody {
     old: usize,
     new: usize,
@@ -382,12 +386,64 @@ impl LineEdit for LineModified {
     }
 }
 
+/// An identifier rename on one old line.
+///
+/// The scope is `path:line`. Apply edits `path` and replaces the one
+/// occurrence of the old name on that line. `new` is the same line in the
+/// new file. A rename does not add or remove lines, so that number can move
+/// when an earlier line change shifts the file. It stays in the details
+/// until a later step derives it.
 pub(crate) struct IdentifierRenamed {
-    pub(crate) scope: String,
-    pub(crate) old: usize,
-    pub(crate) new: usize,
-    pub(crate) oldname: String,
-    pub(crate) newname: String,
+    scope: String,
+    file: String,
+    old: usize,
+    new: usize,
+    oldname: String,
+    newname: String,
+}
+
+impl IdentifierRenamed {
+    /// A rename of one identifier on the old line `old` in `path`.
+    ///
+    /// `new` is that line's number in the new file. The scope records the
+    /// old line.
+    pub(crate) fn new(
+        path: &str,
+        old: usize,
+        new: usize,
+        oldname: String,
+        newname: String,
+    ) -> Self {
+        Self {
+            scope: format!("{path}:{old}"),
+            file: path.to_string(),
+            old,
+            new,
+            oldname,
+            newname,
+        }
+    }
+}
+
+/// The file and old line named by an identifier-renamed scope.
+///
+/// The scope is `path:line`. The line is a 1-based line in the old file.
+/// The last `:` separates them, so a colon in the path stays in the path.
+pub(crate) fn parse_identifier_scope(scope: &str) -> Result<(&str, usize), String> {
+    let Some((path, line)) = scope.rsplit_once(':') else {
+        return Err(identifier_scope_error(scope));
+    };
+    if path.is_empty() {
+        return Err(identifier_scope_error(scope));
+    }
+    match line.parse::<usize>() {
+        Ok(number) if number >= 1 => Ok((path, number)),
+        _ => Err(identifier_scope_error(scope)),
+    }
+}
+
+fn identifier_scope_error(scope: &str) -> String {
+    format!("identifier-renamed scope must be path:line, not {scope}")
 }
 
 impl Change for IdentifierRenamed {
@@ -408,7 +464,6 @@ impl Change for IdentifierRenamed {
     }
 
     fn write_details(&self, document: &mut String) {
-        crate::semdif::write_plain(document, "old", &self.old.to_string());
         crate::semdif::write_plain(document, "new", &self.new.to_string());
         crate::semdif::write_detail(document, "oldname", &self.oldname);
         crate::semdif::write_detail(document, "newname", &self.newname);
@@ -421,7 +476,7 @@ impl Change for IdentifierRenamed {
 
 impl Content for IdentifierRenamed {
     fn file(&self) -> &str {
-        &self.scope
+        &self.file
     }
 }
 
@@ -445,7 +500,7 @@ impl LineEdit for IdentifierRenamed {
             ));
         }
         let replaced = match crate::identifier::replace_name(
-            &self.scope,
+            &self.file,
             &source_lines[self.old - 1],
             &self.oldname,
             &self.newname,
@@ -461,5 +516,26 @@ impl LineEdit for IdentifierRenamed {
             }
         };
         plan.replace(file, self.old, replaced)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::parse_identifier_scope;
+
+    #[test]
+    fn an_identifier_scope_names_the_file_and_the_old_line() {
+        assert_eq!(
+            parse_identifier_scope("src/main.rs:37").unwrap(),
+            ("src/main.rs", 37)
+        );
+        assert_eq!(
+            parse_identifier_scope("weird:name.rs:4").unwrap(),
+            ("weird:name.rs", 4)
+        );
+        assert!(parse_identifier_scope("src/main.rs").is_err());
+        assert!(parse_identifier_scope("src/main.rs:0").is_err());
+        assert!(parse_identifier_scope("src/main.rs:37-46").is_err());
+        assert!(parse_identifier_scope(":1").is_err());
     }
 }

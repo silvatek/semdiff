@@ -13,7 +13,9 @@ use crate::change::Change;
 /// added line it is the old line the text is inserted before, or one past the
 /// last old line when the text is appended. `new` is a line in the new file.
 /// For a removed line it is the new line that follows the removal, or one past
-/// the last new line when the removal is at the end. The records are ordered by
+/// the last new line when the removal is at the end. An identifier rename
+/// records its old line in the scope, as `path:line`, and still carries `new`.
+/// The records are ordered by
 /// `old`, then `new`, which walks the file from the top. Apply rebuilds the
 /// file from the old positions, so that order is for reading.
 pub(crate) fn line_changes(path: &str, before: &str, after: &str) -> Vec<Box<dyn Change>> {
@@ -236,6 +238,8 @@ fn changes_in_hunk(path: &str, hunk: &Hunk) -> Vec<Box<dyn Change>> {
 }
 
 /// A paired line, recorded as an identifier rename when that is the whole edit.
+///
+/// The rename's scope is `path:line`, with the old line.
 fn modified_line(
     path: &str,
     old: usize,
@@ -244,13 +248,13 @@ fn modified_line(
     new_text: &str,
 ) -> Box<dyn Change> {
     if let Some(rename) = crate::identifier::identifier_rename(path, old_text, new_text) {
-        return Box::new(crate::change::IdentifierRenamed {
-            scope: path.to_string(),
+        return Box::new(crate::change::IdentifierRenamed::new(
+            path,
             old,
             new,
-            oldname: rename.oldname,
-            newname: rename.newname,
-        });
+            rename.oldname,
+            rename.newname,
+        ));
     }
     Box::new(crate::change::LineModified::new(
         path.to_string(),
