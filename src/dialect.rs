@@ -34,11 +34,12 @@ pub(crate) struct Dialect {
     /// `pub async fn` has the prefixes `pub` and `async`. A word that is not
     /// in this list stops the search, so `pub(crate) fn` is not recognized.
     pub block_prefixes: &'static [&'static str],
-    /// Keywords that open a named block.
+    /// Keywords that open a named block, each with its category.
     ///
     /// The identifier after the keyword is the block's name. An empty list
-    /// means this dialect does not record named blocks.
-    pub named_block_keywords: &'static [&'static str],
+    /// means this dialect does not record named blocks. A category that is
+    /// absent here is one this dialect does not support.
+    pub named_block_keywords: &'static [NamedBlockKeyword],
 }
 
 /// ASCII characters that can appear in an identifier.
@@ -67,6 +68,94 @@ pub(crate) struct BlockComment {
     pub end: &'static str,
 }
 
+/// A kind of named block, shared by every dialect.
+///
+/// A dialect maps its keywords onto this list and leaves out the categories
+/// it does not have. `procedure` is a callable that is not a function.
+/// `method` is a function or procedure that belongs to a type. `interface`
+/// covers a Rust trait and a language that spells the same idea `interface`.
+/// `implementation` is a block that supplies a type's methods, such as Rust
+/// `impl`. `enumeration` and `union` are type blocks that are not structures.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum BlockCategory {
+    /// A callable that does not return a value.
+    Procedure,
+    /// A callable that returns a value and is not attached to a type.
+    Function,
+    /// A function or procedure that belongs to a type.
+    Method,
+    /// A product of named fields, such as a Rust struct.
+    Structure,
+    /// A type that combines data and the operations on it.
+    Class,
+    /// A type that is one of a fixed set of variants.
+    Enumeration,
+    /// A type whose fields share one storage location.
+    Union,
+    /// A set of operations a type can promise to provide.
+    Interface,
+    /// A block that supplies the operations of a type.
+    Implementation,
+}
+
+/// Every category a dialect may assign to a named block.
+pub(crate) const BLOCK_CATEGORIES: &[BlockCategory] = &[
+    BlockCategory::Procedure,
+    BlockCategory::Function,
+    BlockCategory::Method,
+    BlockCategory::Structure,
+    BlockCategory::Class,
+    BlockCategory::Enumeration,
+    BlockCategory::Union,
+    BlockCategory::Interface,
+    BlockCategory::Implementation,
+];
+
+impl BlockCategory {
+    /// The semdif value for this category.
+    pub(crate) fn as_str(self) -> &'static str {
+        match self {
+            Self::Procedure => "procedure",
+            Self::Function => "function",
+            Self::Method => "method",
+            Self::Structure => "structure",
+            Self::Class => "class",
+            Self::Enumeration => "enumeration",
+            Self::Union => "union",
+            Self::Interface => "interface",
+            Self::Implementation => "implementation",
+        }
+    }
+
+    /// The category named by a semdif value.
+    ///
+    /// An unknown word is rejected so a record cannot invent a category.
+    pub(crate) fn parse(text: &str) -> Option<Self> {
+        BLOCK_CATEGORIES
+            .iter()
+            .copied()
+            .find(|category| category.as_str() == text)
+    }
+}
+
+/// A keyword that opens a named block, and the category that keyword means.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct NamedBlockKeyword {
+    /// The word in source, such as `fn` or `struct`.
+    pub keyword: &'static str,
+    /// The shared category that keyword selects.
+    pub category: BlockCategory,
+}
+
+/// The name and category of one named block.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct NamedBlock {
+    /// The shared category of this block.
+    pub category: BlockCategory,
+    /// The identifier that names this block.
+    pub name: String,
+}
+
 /// One edge of a block: where it starts, or where it ends.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum BlockEdge {
@@ -86,7 +175,10 @@ pub(crate) enum BlockEdge {
 /// A block of code starts with `{` and ends with `}`. An identifier starts
 /// with a letter or `_` and continues with letters, digits, or `_`. A named
 /// block is opened by `fn`, `struct`, `enum`, `union`, `trait`, or `impl`,
-/// optionally after `pub`, `async`, `unsafe`, or `const`.
+/// optionally after `pub`, `async`, `unsafe`, or `const`. Those keywords are
+/// function, structure, enumeration, union, interface, and implementation.
+/// A method uses `fn` as well, and needs the enclosing type, so a `fn` read
+/// from the added lines alone is a function.
 pub(crate) static RUST: Dialect = Dialect {
     extensions: &[".rs"],
     line_comment: "//",
@@ -101,7 +193,32 @@ pub(crate) static RUST: Dialect = Dialect {
         continue_with: IDENTIFIER_CONTINUE,
     },
     block_prefixes: &["pub", "async", "unsafe", "const"],
-    named_block_keywords: &["fn", "struct", "enum", "union", "trait", "impl"],
+    named_block_keywords: &[
+        NamedBlockKeyword {
+            keyword: "fn",
+            category: BlockCategory::Function,
+        },
+        NamedBlockKeyword {
+            keyword: "struct",
+            category: BlockCategory::Structure,
+        },
+        NamedBlockKeyword {
+            keyword: "enum",
+            category: BlockCategory::Enumeration,
+        },
+        NamedBlockKeyword {
+            keyword: "union",
+            category: BlockCategory::Union,
+        },
+        NamedBlockKeyword {
+            keyword: "trait",
+            category: BlockCategory::Interface,
+        },
+        NamedBlockKeyword {
+            keyword: "impl",
+            category: BlockCategory::Implementation,
+        },
+    ],
 };
 
 /// The Python dialect.
@@ -210,15 +327,16 @@ pub(crate) fn margin_whitespace(path: &str, old_line: &str, new_line: &str) -> b
     introduces_line_comment(dialect, old_line) && introduces_line_comment(dialect, new_line)
 }
 
-/// The name of the named block added by `text`, when this dialect sees one.
+/// The named block added by `text`, when this dialect sees one.
 ///
 /// `text` is one `line-added` record and may hold several lines. Only the
 /// first line is read. Leading spaces and tabs are skipped, then any prefix
 /// words, then a keyword that opens a named block, then the identifier that
-/// names it. A comment, a dialect with no such keywords, and a line that does
-/// not open in that shape have no name. The remainder of the line, and any
-/// following lines, are kept as the block's text and are not inspected.
-pub(crate) fn named_block(path: &str, text: &str) -> Option<String> {
+/// names it. The keyword selects the category. A comment, a dialect with no
+/// such keywords, and a line that does not open in that shape have no block.
+/// The remainder of the line, and any following lines, are kept as the
+/// block's text and are not inspected.
+pub(crate) fn named_block(path: &str, text: &str) -> Option<NamedBlock> {
     let dialect = for_path(path)?;
     if dialect.named_block_keywords.is_empty() {
         return None;
@@ -227,21 +345,25 @@ pub(crate) fn named_block(path: &str, text: &str) -> Option<String> {
     if introduces_line_comment(dialect, line) {
         return None;
     }
-    block_name(dialect, line).map(str::to_string)
+    let opened = block_name(dialect, line)?;
+    Some(NamedBlock {
+        category: opened.category,
+        name: opened.name.to_string(),
+    })
 }
 
-/// The identifier that names the block opened by `line`.
-fn block_name<'a>(dialect: &Dialect, line: &'a str) -> Option<&'a str> {
+/// The category and name of the block opened by `line`.
+fn block_name<'a>(dialect: &Dialect, line: &'a str) -> Option<OpenedBlock<'a>> {
     let mut rest = trim_ascii_blank_start(line);
     loop {
         let (word, after) = next_word(&dialect.identifier_characters, rest)?;
-        if is_listed(dialect.named_block_keywords, word) {
+        if let Some(category) = keyword_category(dialect.named_block_keywords, word) {
             let name_at = trim_ascii_blank_start(after);
             if name_at.len() == after.len() {
                 return None;
             }
             let (name, _) = next_word(&dialect.identifier_characters, name_at)?;
-            return Some(name);
+            return Some(OpenedBlock { category, name });
         }
         if !is_listed(dialect.block_prefixes, word) {
             return None;
@@ -252,6 +374,19 @@ fn block_name<'a>(dialect: &Dialect, line: &'a str) -> Option<&'a str> {
         }
         rest = next;
     }
+}
+
+/// A named block found on one line, before the name is copied.
+struct OpenedBlock<'a> {
+    category: BlockCategory,
+    name: &'a str,
+}
+
+fn keyword_category(keywords: &[NamedBlockKeyword], word: &str) -> Option<BlockCategory> {
+    keywords
+        .iter()
+        .find(|item| item.keyword == word)
+        .map(|item| item.category)
 }
 
 fn is_listed(words: &[&str], word: &str) -> bool {
@@ -307,7 +442,8 @@ fn leading_ascii_blank(line: &str) -> &str {
 mod tests {
     use super::{
         blank_line, for_path, full_line_comment, introduces_line_comment, margin_whitespace,
-        named_block, BlockEdge, IdentifierCharacters, PYTHON, RUST,
+        named_block, BlockCategory, BlockEdge, IdentifierCharacters, NamedBlockKeyword,
+        BLOCK_CATEGORIES, PYTHON, RUST,
     };
 
     fn ascii_identifiers() -> IdentifierCharacters {
@@ -330,7 +466,32 @@ mod tests {
         assert_eq!(RUST.block_prefixes, ["pub", "async", "unsafe", "const"]);
         assert_eq!(
             RUST.named_block_keywords,
-            ["fn", "struct", "enum", "union", "trait", "impl"]
+            [
+                NamedBlockKeyword {
+                    keyword: "fn",
+                    category: BlockCategory::Function,
+                },
+                NamedBlockKeyword {
+                    keyword: "struct",
+                    category: BlockCategory::Structure,
+                },
+                NamedBlockKeyword {
+                    keyword: "enum",
+                    category: BlockCategory::Enumeration,
+                },
+                NamedBlockKeyword {
+                    keyword: "union",
+                    category: BlockCategory::Union,
+                },
+                NamedBlockKeyword {
+                    keyword: "trait",
+                    category: BlockCategory::Interface,
+                },
+                NamedBlockKeyword {
+                    keyword: "impl",
+                    category: BlockCategory::Implementation,
+                },
+            ]
         );
     }
 
@@ -343,7 +504,34 @@ mod tests {
         assert_eq!(PYTHON.block_end, BlockEdge::Indentation);
         assert_eq!(PYTHON.identifier_characters, ascii_identifiers());
         assert_eq!(PYTHON.block_prefixes, [] as [&str; 0]);
-        assert_eq!(PYTHON.named_block_keywords, [] as [&str; 0]);
+        assert_eq!(PYTHON.named_block_keywords, [] as [NamedBlockKeyword; 0]);
+    }
+
+    #[test]
+    fn every_dialect_shares_one_category_list() {
+        let names: Vec<_> = BLOCK_CATEGORIES
+            .iter()
+            .map(|category| category.as_str())
+            .collect();
+        assert_eq!(
+            names,
+            [
+                "procedure",
+                "function",
+                "method",
+                "structure",
+                "class",
+                "enumeration",
+                "union",
+                "interface",
+                "implementation",
+            ]
+        );
+        for category in BLOCK_CATEGORIES {
+            assert_eq!(BlockCategory::parse(category.as_str()), Some(*category));
+        }
+        assert_eq!(BlockCategory::parse("widget"), None);
+        assert_eq!(BlockCategory::parse("fn"), None);
     }
 
     #[test]
@@ -450,47 +638,51 @@ mod tests {
         ));
     }
 
+    fn opened(path: &str, text: &str) -> Option<(BlockCategory, String)> {
+        named_block(path, text).map(|block| (block.category, block.name))
+    }
+
     #[test]
     fn a_rust_addition_names_the_block_it_opens() {
         assert_eq!(
-            named_block("src/main.rs", "fn fib() {}"),
-            Some("fib".to_string())
+            opened("src/main.rs", "fn fib() {}"),
+            Some((BlockCategory::Function, "fib".to_string()))
         );
         assert_eq!(
-            named_block("src/main.rs", "    fn fib() {"),
-            Some("fib".to_string())
+            opened("src/main.rs", "    fn fib() {"),
+            Some((BlockCategory::Function, "fib".to_string()))
         );
         assert_eq!(
-            named_block("src/main.rs", "pub async fn run() {\n    work();\n}"),
-            Some("run".to_string())
+            opened("src/main.rs", "pub async fn run() {\n    work();\n}"),
+            Some((BlockCategory::Function, "run".to_string()))
         );
         assert_eq!(
-            named_block("src/main.rs", "const fn ready() {}"),
-            Some("ready".to_string())
+            opened("src/main.rs", "const fn ready() {}"),
+            Some((BlockCategory::Function, "ready".to_string()))
         );
         assert_eq!(
-            named_block("src/main.rs", "struct Point {"),
-            Some("Point".to_string())
+            opened("src/main.rs", "struct Point {"),
+            Some((BlockCategory::Structure, "Point".to_string()))
         );
         assert_eq!(
-            named_block("src/main.rs", "struct Unit;"),
-            Some("Unit".to_string())
+            opened("src/main.rs", "struct Unit;"),
+            Some((BlockCategory::Structure, "Unit".to_string()))
         );
         assert_eq!(
-            named_block("src/main.rs", "unsafe impl Foo {"),
-            Some("Foo".to_string())
+            opened("src/main.rs", "unsafe impl Foo {"),
+            Some((BlockCategory::Implementation, "Foo".to_string()))
         );
         assert_eq!(
-            named_block("src/main.rs", "pub enum Color {"),
-            Some("Color".to_string())
+            opened("src/main.rs", "pub enum Color {"),
+            Some((BlockCategory::Enumeration, "Color".to_string()))
         );
         assert_eq!(
-            named_block("src/main.rs", "union Raw {"),
-            Some("Raw".to_string())
+            opened("src/main.rs", "union Raw {"),
+            Some((BlockCategory::Union, "Raw".to_string()))
         );
         assert_eq!(
-            named_block("src/main.rs", "trait Draw {"),
-            Some("Draw".to_string())
+            opened("src/main.rs", "trait Draw {"),
+            Some((BlockCategory::Interface, "Draw".to_string()))
         );
     }
 

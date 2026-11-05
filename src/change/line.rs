@@ -187,14 +187,15 @@ fn named_block_from_addition(change: &dyn super::Change) -> Option<NamedBlockAdd
         return None;
     }
     let text = line.text()?;
-    let name = crate::dialect::named_block(change.scope(), text)?;
+    let block = crate::dialect::named_block(change.scope(), text)?;
     let (old, new) = line.position();
     Some(NamedBlockAdded::new(
         change.scope().to_string(),
         old,
         new,
         text.to_string(),
-        name,
+        block.category,
+        block.name,
     ))
 }
 
@@ -304,18 +305,26 @@ impl LineEdit for LineAdded {
 
 /// A line addition that opens a named block.
 ///
-/// The block is a function, method, or structure, and `name` is the identifier
-/// that follows the dialect's keyword. The record keeps the added lines, and
-/// apply inserts them the way a line addition does. It does not join a
-/// neighboring edit: the name belongs to this one block.
+/// `category` is the shared kind of block, and `name` is the identifier that
+/// follows the dialect's keyword. The record keeps the added lines, and apply
+/// inserts them the way a line addition does. It does not join a neighboring
+/// edit: the name belongs to this one block.
 pub(crate) struct NamedBlockAdded {
     scope: String,
     body: LineBody,
+    category: crate::dialect::BlockCategory,
     name: String,
 }
 
 impl NamedBlockAdded {
-    pub(crate) fn new(scope: String, old: usize, new: usize, text: String, name: String) -> Self {
+    pub(crate) fn new(
+        scope: String,
+        old: usize,
+        new: usize,
+        text: String,
+        category: crate::dialect::BlockCategory,
+        name: String,
+    ) -> Self {
         Self {
             scope,
             body: LineBody {
@@ -325,6 +334,7 @@ impl NamedBlockAdded {
                 is_comment: false,
                 is_whitespace: false,
             },
+            category,
             name,
         }
     }
@@ -353,6 +363,7 @@ impl Change for NamedBlockAdded {
 
     fn write_details(&self, document: &mut String) {
         write_line(document, &self.body, line_count(&self.body.text) as isize);
+        crate::semdif::write_detail(document, "category", self.category.as_str());
         crate::semdif::write_detail(document, "name", &self.name);
     }
 
@@ -683,6 +694,7 @@ mod tests {
         assert!(!line.is_whitespace());
         let mut details = String::new();
         merged[0].write_details(&mut details);
+        assert!(details.contains("category: \"function\"\n"), "{details}");
         assert!(details.contains("name: \"added\"\n"), "{details}");
     }
 

@@ -269,7 +269,7 @@ fn records_an_added_rust_function_as_a_named_block() {
     let document = tree.compare("left", "right");
 
     assert!(document.contains(
-        "  - scope: \"src/add.rs\"\n    type: named-block-added\n    details:\n      old: 2\n      lines: +3\n      new: 2\n      text: \"fn added() {\\n    let value = 1;\\n}\"\n      name: \"added\"\n"
+        "  - scope: \"src/add.rs\"\n    type: named-block-added\n    details:\n      old: 2\n      lines: +3\n      new: 2\n      text: \"fn added() {\\n    let value = 1;\\n}\"\n      category: \"function\"\n      name: \"added\"\n"
     ), "{document}");
     assert!(
         !document.contains("scope: \"src/add.rs\"\n    type: line-added"),

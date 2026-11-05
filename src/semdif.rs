@@ -279,8 +279,22 @@ fn parse_named_block_added(
         required_line(&fields, "old", "named-block-added")?,
         required_line(&fields, "new", "named-block-added")?,
         text,
+        required_category(&fields, "named-block-added")?,
         required_name(&fields, "named-block-added")?,
     )))
+}
+
+/// The shared category recorded on a named-block addition.
+///
+/// The value has to be one of the categories every dialect shares. A missing
+/// or unknown category is rejected.
+fn required_category(
+    fields: &BTreeMap<String, String>,
+    kind: &str,
+) -> Result<crate::dialect::BlockCategory, String> {
+    let text = required(fields, "category", kind)?;
+    crate::dialect::BlockCategory::parse(&text)
+        .ok_or_else(|| format!("{kind} has invalid category {text}"))
 }
 
 fn parse_line_removed(
@@ -690,8 +704,8 @@ changes:
     }
 
     #[test]
-    fn a_named_block_needs_a_name() {
-        let missing = "\
+    fn a_named_block_records_its_category_and_name() {
+        let document = "\
 changes:
   - scope: \"src/main.rs\"
     type: named-block-added
@@ -700,28 +714,65 @@ changes:
       lines: +1
       new: 1
       text: \"fn fib() {}\"
+      category: \"function\"
+      name: \"fib\"
 ";
-        let message = match parse_changes(missing) {
+        let changes = parse_changes(document).expect("named block");
+        let mut details = String::new();
+        changes[0].write_details(&mut details);
+        assert!(details.contains("category: \"function\"\n"), "{details}");
+        assert!(details.contains("name: \"fib\"\n"), "{details}");
+
+        let missing_category = "\
+changes:
+  - scope: \"src/main.rs\"
+    type: named-block-added
+    details:
+      old: 1
+      lines: +1
+      new: 1
+      text: \"fn fib() {}\"
+      name: \"fib\"
+";
+        let message = match parse_changes(missing_category) {
+            Err(message) => message,
+            Ok(_) => panic!("missing category was accepted"),
+        };
+        assert!(message.contains("missing category"), "{message}");
+
+        let unknown = "\
+changes:
+  - scope: \"src/main.rs\"
+    type: named-block-added
+    details:
+      old: 1
+      lines: +1
+      new: 1
+      text: \"fn fib() {}\"
+      category: \"widget\"
+      name: \"fib\"
+";
+        let message = match parse_changes(unknown) {
+            Err(message) => message,
+            Ok(_) => panic!("unknown category was accepted"),
+        };
+        assert!(message.contains("invalid category widget"), "{message}");
+
+        let missing_name = "\
+changes:
+  - scope: \"src/main.rs\"
+    type: named-block-added
+    details:
+      old: 1
+      lines: +1
+      new: 1
+      text: \"fn fib() {}\"
+      category: \"function\"
+";
+        let message = match parse_changes(missing_name) {
             Err(message) => message,
             Ok(_) => panic!("missing name was accepted"),
         };
         assert!(message.contains("missing name"), "{message}");
-
-        let empty = "\
-changes:
-  - scope: \"src/main.rs\"
-    type: named-block-added
-    details:
-      old: 1
-      lines: +1
-      new: 1
-      text: \"fn fib() {}\"
-      name: \"\"
-";
-        let message = match parse_changes(empty) {
-            Err(message) => message,
-            Ok(_) => panic!("empty name was accepted"),
-        };
-        assert!(message.contains("invalid name"), "{message}");
     }
 }
