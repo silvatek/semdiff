@@ -57,3 +57,16 @@ mod tests {
 
 // report.rs also calls the function above.
 mod report;
+
+// The next line is indented in v2.
+fn kept() {
+    let value = 1;
+}
+
+// The next line gains trailing space in v2.
+fn marked() {
+    let trailing = 1; 
+}
+
+// A blank line is added below in v2.
+

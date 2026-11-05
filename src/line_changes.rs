@@ -209,7 +209,9 @@ fn indexed(lines: &[String], from: usize, to: usize) -> Vec<IndexedLine> {
 /// Modifications for the paired lines in a hunk, then removals, then additions.
 ///
 /// Pairing runs from the top of the hunk. A line left over on the old side was
-/// removed. A line left over on the new side was added.
+/// removed. A line left over on the new side was added. A blank line, empty
+/// or holding only ASCII spaces and tabs, is whitespace when the file has a
+/// dialect.
 fn changes_in_hunk(path: &str, hunk: &Hunk) -> Vec<Box<dyn Change>> {
     let paired = hunk.old_lines.len().min(hunk.new_lines.len());
     let mut changes: Vec<Box<dyn Change>> = Vec::new();
@@ -229,6 +231,7 @@ fn changes_in_hunk(path: &str, hunk: &Hunk) -> Vec<Box<dyn Change>> {
             hunk.next_new_line,
             line.text.clone(),
             crate::dialect::full_line_comment(path, &line.text),
+            crate::dialect::blank_line(path, &line.text),
         )));
     }
     for line in &hunk.new_lines[paired..] {
@@ -238,6 +241,7 @@ fn changes_in_hunk(path: &str, hunk: &Hunk) -> Vec<Box<dyn Change>> {
             line.index + 1,
             line.text.clone(),
             crate::dialect::full_line_comment(path, &line.text),
+            crate::dialect::blank_line(path, &line.text),
         )));
     }
     changes
@@ -247,7 +251,8 @@ fn changes_in_hunk(path: &str, hunk: &Hunk) -> Vec<Box<dyn Change>> {
 ///
 /// The rename's scope is `path:line`, with the old line. Anything else is a
 /// line modification. It is a full-line comment when both lines open with the
-/// dialect's line comment.
+/// dialect's line comment. It is whitespace when the edit is a blank line or
+/// only an insignificant margin.
 fn modified_line(
     path: &str,
     old: usize,
@@ -270,6 +275,7 @@ fn modified_line(
         new_text.to_string(),
         crate::dialect::full_line_comment(path, old_text)
             && crate::dialect::full_line_comment(path, new_text),
+        crate::dialect::margin_whitespace(path, old_text, new_text),
     ))
 }
 

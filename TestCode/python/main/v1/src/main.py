@@ -55,3 +55,15 @@ import report
 
 if __name__ == "__main__":
     main()
+
+# The next line is indented in v2.
+def kept():
+    x = 1
+
+# The next line gains trailing space in v2.
+trailing = 1
+
+# The next comment is indented in v2.
+# margin
+
+# A blank line is added below in v2.
