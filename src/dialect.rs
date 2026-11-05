@@ -30,10 +30,12 @@ pub(crate) struct Dialect {
     pub block_end: BlockEdge,
     /// Characters that can appear in an identifier.
     pub identifier_characters: IdentifierCharacters,
-    /// Words that may precede the keyword opening a named block.
+    /// Qualifiers that may precede the keyword opening a named block.
     ///
-    /// `pub async fn` has the prefixes `pub` and `async`. A word that is not
-    /// in this list stops the search, so `pub(crate) fn` is not recognized.
+    /// Each entry is matched as written and then ignored. `pub async fn` has
+    /// the qualifiers `pub` and `async`. `pub(crate)` is one entry, so the
+    /// parentheses are not parsed. Text that matches no entry stops the
+    /// search, so `pub(in path)` and an attribute stay unrecognized.
     pub block_prefixes: &'static [&'static str],
     /// Keywords that open a named block, each with its category.
     ///
@@ -179,9 +181,10 @@ pub(crate) enum BlockEdge {
 /// Rust is a C-family language. A block of code starts with `{` and ends with
 /// `}`. An identifier starts with a letter or `_` and continues with letters,
 /// digits, or `_`. A named block is opened by `fn`, `struct`, `enum`, `union`,
-/// `trait`, or `impl`,
-/// optionally after `pub`, `async`, `unsafe`, or `const`. Those keywords are
-/// function, structure, enumeration, union, interface, and implementation.
+/// `trait`, or `impl`, optionally after a listed qualifier: `pub`,
+/// `pub(crate)`, `pub(super)`, `pub(self)`, `async`, `unsafe`, or `const`.
+/// Those keywords are function, structure, enumeration, union, interface, and
+/// implementation.
 /// A method uses `fn` as well, and needs the enclosing type, so a `fn` read
 /// from the added lines alone is a function.
 pub(crate) static RUST: Dialect = Dialect {
@@ -198,7 +201,15 @@ pub(crate) static RUST: Dialect = Dialect {
         start: IDENTIFIER_START,
         continue_with: IDENTIFIER_CONTINUE,
     },
-    block_prefixes: &["pub", "async", "unsafe", "const"],
+    block_prefixes: &[
+        "pub(crate)",
+        "pub(super)",
+        "pub(self)",
+        "pub",
+        "async",
+        "unsafe",
+        "const",
+    ],
     named_block_keywords: &[
         NamedBlockKeyword {
             keyword: "fn",
@@ -300,7 +311,18 @@ mod tests {
         assert_eq!(RUST.block_start, BlockEdge::Token("{"));
         assert_eq!(RUST.block_end, BlockEdge::Token("}"));
         assert_eq!(RUST.identifier_characters, ascii_identifiers());
-        assert_eq!(RUST.block_prefixes, ["pub", "async", "unsafe", "const"]);
+        assert_eq!(
+            RUST.block_prefixes,
+            [
+                "pub(crate)",
+                "pub(super)",
+                "pub(self)",
+                "pub",
+                "async",
+                "unsafe",
+                "const",
+            ]
+        );
         assert_eq!(
             RUST.named_block_keywords,
             [
