@@ -216,6 +216,16 @@ pub(crate) trait LineEdit {
     fn is_comment(&self) -> bool {
         false
     }
+
+    /// Whether this edit is insignificant whitespace.
+    ///
+    /// The semdif writes `isWhitespace: true` and leaves the attribute out when
+    /// this is false. A span change is not a whitespace change. Apply replays
+    /// the line text and does not read this flag. A line may also be a comment.
+    /// Adjacent line edits join only when this flag matches.
+    fn is_whitespace(&self) -> bool {
+        false
+    }
 }
 
 /// A directory removed from the tree.

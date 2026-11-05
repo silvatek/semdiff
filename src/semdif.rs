@@ -263,6 +263,7 @@ fn parse_line_added(
         required_line(&fields, "new", "line-added")?,
         text,
         comment_flag(&fields, "line-added")?,
+        whitespace_flag(&fields, "line-added")?,
     )))
 }
 
@@ -279,6 +280,7 @@ fn parse_line_removed(
         required_line(&fields, "new", "line-removed")?,
         text,
         comment_flag(&fields, "line-removed")?,
+        whitespace_flag(&fields, "line-removed")?,
     )))
 }
 
@@ -294,6 +296,7 @@ fn parse_line_modified(
         required_line(&fields, "new", "line-modified")?,
         text,
         comment_flag(&fields, "line-modified")?,
+        whitespace_flag(&fields, "line-modified")?,
     )))
 }
 
@@ -455,10 +458,31 @@ fn invalid_lines(kind: &str, fields: &BTreeMap<String, String>) -> String {
 /// is not a comment, so a missing value is false. An explicit `false` is the
 /// same. Any other value is rejected.
 fn comment_flag(fields: &BTreeMap<String, String>, kind: &str) -> Result<bool, String> {
-    match fields.get("isComment").map(String::as_str) {
+    recorded_flag(fields, kind, "isComment")
+}
+
+/// The `isWhitespace` detail on a line change.
+///
+/// Insignificant whitespace sets `true`. The attribute is left out when the
+/// change is not whitespace, so a missing value is false. An explicit `false`
+/// is the same. Any other value is rejected. This is separate from
+/// `isComment`, and a line may carry both.
+fn whitespace_flag(fields: &BTreeMap<String, String>, kind: &str) -> Result<bool, String> {
+    recorded_flag(fields, kind, "isWhitespace")
+}
+
+/// A boolean detail that defaults to false.
+///
+/// Missing and `false` are false. `true` is true. Any other value is rejected.
+fn recorded_flag(
+    fields: &BTreeMap<String, String>,
+    kind: &str,
+    name: &str,
+) -> Result<bool, String> {
+    match fields.get(name).map(String::as_str) {
         None | Some("false") => Ok(false),
         Some("true") => Ok(true),
-        Some(other) => Err(format!("{kind} has invalid isComment {other}")),
+        Some(other) => Err(format!("{kind} has invalid {name} {other}")),
     }
 }
 
@@ -538,12 +562,14 @@ fn decode_hex_char(chars: &mut std::str::Chars<'_>, value: &str) -> Result<char,
 mod tests {
     use super::parse_changes;
 
-    fn line_change(kind: &str, lines: &str, flag: &str) -> String {
-        let flag_line = if flag.is_empty() {
-            String::new()
-        } else {
-            format!("      isComment: {flag}\n")
-        };
+    fn line_change(kind: &str, lines: &str, comment: &str, whitespace: &str) -> String {
+        let mut flags = String::new();
+        if !comment.is_empty() {
+            flags.push_str(&format!("      isComment: {comment}\n"));
+        }
+        if !whitespace.is_empty() {
+            flags.push_str(&format!("      isWhitespace: {whitespace}\n"));
+        }
         format!(
             "\
 changes:
@@ -554,21 +580,27 @@ changes:
       lines: {lines}
       new: 1
       text: \"// note\"
-{flag_line}"
+{flags}"
         )
     }
 
-    fn assert_comment(document: &str, is_comment: bool) {
+    fn assert_flags(document: &str, is_comment: bool, is_whitespace: bool) {
         let changes = parse_changes(document).expect("line change");
         assert_eq!(changes.len(), 1);
         let line = changes[0].line_edit().expect("line edit");
         assert_eq!(line.is_comment(), is_comment);
+        assert_eq!(line.is_whitespace(), is_whitespace);
         let mut details = String::new();
         changes[0].write_details(&mut details);
         if is_comment {
-            assert!(details.ends_with("isComment: true\n"), "{details}");
+            assert!(details.contains("isComment: true\n"), "{details}");
         } else {
             assert!(!details.contains("isComment"), "{details}");
+        }
+        if is_whitespace {
+            assert!(details.contains("isWhitespace: true\n"), "{details}");
+        } else {
+            assert!(!details.contains("isWhitespace"), "{details}");
         }
     }
 
@@ -579,18 +611,49 @@ changes:
             ("line-removed", "-1"),
             ("line-modified", "+0"),
         ] {
-            assert_comment(&line_change(kind, lines, "true"), true);
-            assert_comment(&line_change(kind, lines, ""), false);
-            assert_comment(&line_change(kind, lines, "false"), false);
+            assert_flags(&line_change(kind, lines, "true", ""), true, false);
+            assert_flags(&line_change(kind, lines, "", ""), false, false);
+            assert_flags(&line_change(kind, lines, "false", ""), false, false);
         }
     }
 
     #[test]
     fn rejects_an_invalid_comment_flag() {
-        let message = match parse_changes(&line_change("line-added", "+1", "yes")) {
+        let message = match parse_changes(&line_change("line-added", "+1", "yes", "")) {
             Err(message) => message,
             Ok(_) => panic!("invalid isComment was accepted"),
         };
         assert!(message.contains("invalid isComment yes"), "{message}");
+    }
+
+    #[test]
+    fn a_whitespace_flag_round_trips_and_defaults_to_false() {
+        for (kind, lines) in [
+            ("line-added", "+1"),
+            ("line-removed", "-1"),
+            ("line-modified", "+0"),
+        ] {
+            assert_flags(&line_change(kind, lines, "", "true"), false, true);
+            assert_flags(&line_change(kind, lines, "", ""), false, false);
+            assert_flags(&line_change(kind, lines, "", "false"), false, false);
+        }
+    }
+
+    #[test]
+    fn rejects_an_invalid_whitespace_flag() {
+        let message = match parse_changes(&line_change("line-added", "+1", "", "yes")) {
+            Err(message) => message,
+            Ok(_) => panic!("invalid isWhitespace was accepted"),
+        };
+        assert!(message.contains("invalid isWhitespace yes"), "{message}");
+    }
+
+    #[test]
+    fn a_line_can_be_a_comment_and_whitespace() {
+        assert_flags(
+            &line_change("line-modified", "+0", "true", "true"),
+            true,
+            true,
+        );
     }
 }

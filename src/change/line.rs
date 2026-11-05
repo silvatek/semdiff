@@ -2,8 +2,9 @@
 //!
 //! A line change's scope is the file. A span change names one old line instead,
 //! and lives in its own module. The same line record can say that the edit is
-//! a full-line comment. That is `isComment: true` in the semdif. False is the
-//! default and is left out.
+//! a full-line comment, and that it is insignificant whitespace. Those are
+//! `isComment: true` and `isWhitespace: true` in the semdif. False is the
+//! default and is left out. A record may carry both.
 
 use std::path::Path;
 
@@ -24,18 +25,24 @@ struct LineBody {
     ///
     /// Written as `isComment: true`. False is omitted from the semdif.
     is_comment: bool,
+    /// Whether this edit is insignificant whitespace.
+    ///
+    /// Written as `isWhitespace: true`. False is omitted from the semdif.
+    /// Apply replays the line text and does not read this flag.
+    is_whitespace: bool,
 }
 
 fn line_count(text: &str) -> usize {
     text.split('\n').count()
 }
 
-/// Joins `next` onto `current` when it continues the same kind, scope, and comment flag.
+/// Joins `next` onto `current` when it continues the same kind, scope, and flags.
 ///
 /// `old_len` and `new_len` are how far `current` already reaches. The next
 /// change continues it when each side's first line plus that length equals
 /// the next change's first line. The joined text is stored on `current`.
-/// A comment does not join a line that is not a comment, so those stay two records.
+/// A comment does not join a line that is not a comment, and a whitespace
+/// edit does not join a line that is not whitespace, so those stay two records.
 fn extend_following(
     current: &mut dyn Change,
     old_len: usize,
@@ -51,14 +58,19 @@ fn extend_following(
     let Some(following) = line.start() else {
         return false;
     };
-    let (old, new, current_is_comment) = match current.line_edit() {
+    let (old, new, current_is_comment, current_is_whitespace) = match current.line_edit() {
         Some(current_line) => {
             let (old, new) = current_line.position();
-            (old, new, current_line.is_comment())
+            (
+                old,
+                new,
+                current_line.is_comment(),
+                current_line.is_whitespace(),
+            )
         }
         None => return false,
     };
-    if line.is_comment() != current_is_comment {
+    if line.is_comment() != current_is_comment || line.is_whitespace() != current_is_whitespace {
         return false;
     }
     let Some(next_old) = old.checked_add(old_len) else {
@@ -85,13 +97,16 @@ fn append_line(body: &mut LineBody, text: &str) {
     body.text.push_str(text);
 }
 
-fn write_line(document: &mut String, body: &LineBody, lines: isize, is_comment: bool) {
+fn write_line(document: &mut String, body: &LineBody, lines: isize) {
     crate::semdif::write_plain(document, "old", &body.old.to_string());
     crate::semdif::write_plain(document, "lines", &format_lines(lines));
     crate::semdif::write_plain(document, "new", &body.new.to_string());
     crate::semdif::write_detail(document, "text", &body.text);
-    if is_comment {
+    if body.is_comment {
         crate::semdif::write_plain(document, "isComment", "true");
+    }
+    if body.is_whitespace {
+        crate::semdif::write_plain(document, "isWhitespace", "true");
     }
 }
 
@@ -121,7 +136,8 @@ fn line_start(body: &LineBody) -> LineStart {
 /// so `lines` is `+1` or `+2`. Modifications follow one another on both sides.
 /// They do not change the line count, so `lines` stays `+0`. The merged change
 /// keeps the first line number. Its text keeps every line, joined by a newline.
-/// A comment stays apart from a neighboring line that is not a comment. A span
+/// A comment stays apart from a neighboring line that is not a comment. A
+/// whitespace edit stays apart from a line that is not whitespace. A span
 /// change stays its own change.
 pub(crate) fn merge_adjacent(changes: Vec<Box<dyn super::Change>>) -> Vec<Box<dyn super::Change>> {
     let mut merged: Vec<Box<dyn super::Change>> = Vec::new();
@@ -152,6 +168,7 @@ impl LineAdded {
         new: usize,
         text: String,
         is_comment: bool,
+        is_whitespace: bool,
     ) -> Self {
         Self {
             scope,
@@ -160,6 +177,7 @@ impl LineAdded {
                 new,
                 text,
                 is_comment,
+                is_whitespace,
             },
         }
     }
@@ -187,12 +205,7 @@ impl Change for LineAdded {
     }
 
     fn write_details(&self, document: &mut String) {
-        write_line(
-            document,
-            &self.body,
-            line_count(&self.body.text) as isize,
-            self.is_comment(),
-        );
+        write_line(document, &self.body, line_count(&self.body.text) as isize);
     }
 
     fn apply(&self, _fs: &dyn FileSystem, _source: &Path) -> Result<(), String> {
@@ -228,6 +241,10 @@ impl LineEdit for LineAdded {
         self.body.is_comment
     }
 
+    fn is_whitespace(&self) -> bool {
+        self.body.is_whitespace
+    }
+
     fn extend(&mut self, next: &dyn Change) -> bool {
         let new_len = line_count(&self.body.text);
         extend_following(self, 0, new_len, next)
@@ -255,6 +272,7 @@ impl LineRemoved {
         new: usize,
         text: String,
         is_comment: bool,
+        is_whitespace: bool,
     ) -> Self {
         Self {
             scope,
@@ -263,6 +281,7 @@ impl LineRemoved {
                 new,
                 text,
                 is_comment,
+                is_whitespace,
             },
         }
     }
@@ -291,7 +310,7 @@ impl Change for LineRemoved {
 
     fn write_details(&self, document: &mut String) {
         let count = line_count(&self.body.text) as isize;
-        write_line(document, &self.body, -count, self.is_comment());
+        write_line(document, &self.body, -count);
     }
 
     fn apply(&self, _fs: &dyn FileSystem, _source: &Path) -> Result<(), String> {
@@ -327,6 +346,10 @@ impl LineEdit for LineRemoved {
         self.body.is_comment
     }
 
+    fn is_whitespace(&self) -> bool {
+        self.body.is_whitespace
+    }
+
     fn extend(&mut self, next: &dyn Change) -> bool {
         let old_len = line_count(&self.body.text);
         extend_following(self, old_len, 0, next)
@@ -360,6 +383,7 @@ impl LineModified {
         new: usize,
         text: String,
         is_comment: bool,
+        is_whitespace: bool,
     ) -> Self {
         Self {
             scope,
@@ -368,6 +392,7 @@ impl LineModified {
                 new,
                 text,
                 is_comment,
+                is_whitespace,
             },
         }
     }
@@ -395,7 +420,7 @@ impl Change for LineModified {
     }
 
     fn write_details(&self, document: &mut String) {
-        write_line(document, &self.body, 0, self.is_comment());
+        write_line(document, &self.body, 0);
     }
 
     fn apply(&self, _fs: &dyn FileSystem, _source: &Path) -> Result<(), String> {
@@ -431,6 +456,10 @@ impl LineEdit for LineModified {
         self.body.is_comment
     }
 
+    fn is_whitespace(&self) -> bool {
+        self.body.is_whitespace
+    }
+
     fn extend(&mut self, next: &dyn Change) -> bool {
         let count = line_count(&self.body.text);
         extend_following(self, count, count, next)
@@ -450,5 +479,52 @@ impl LineEdit for LineModified {
             plan.replace(file, line_no, line.to_string())?;
         }
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{merge_adjacent, LineAdded};
+
+    /// An added line at one insertion point. `new` is its line in the new file.
+    fn added(new: usize, text: &str, is_comment: bool, is_whitespace: bool) -> LineAdded {
+        LineAdded::new(
+            "src/main.rs".to_string(),
+            1,
+            new,
+            text.to_string(),
+            is_comment,
+            is_whitespace,
+        )
+    }
+
+    #[test]
+    fn a_whitespace_line_stays_apart_from_a_line_that_is_not_whitespace() {
+        let merged = merge_adjacent(vec![
+            Box::new(added(1, "    ", false, true)),
+            Box::new(added(2, "fn main() {}", false, false)),
+        ]);
+
+        assert_eq!(merged.len(), 2);
+        let first = merged[0].line_edit().expect("line edit");
+        let second = merged[1].line_edit().expect("line edit");
+        assert!(first.is_whitespace());
+        assert!(!second.is_whitespace());
+        assert_eq!(first.text(), Some("    "));
+        assert_eq!(second.text(), Some("fn main() {}"));
+    }
+
+    #[test]
+    fn adjacent_whitespace_lines_merge_and_keep_the_flag() {
+        let merged = merge_adjacent(vec![
+            Box::new(added(1, "    ", false, true)),
+            Box::new(added(2, "\t", false, true)),
+        ]);
+
+        assert_eq!(merged.len(), 1);
+        let line = merged[0].line_edit().expect("line edit");
+        assert!(line.is_whitespace());
+        assert!(!line.is_comment());
+        assert_eq!(line.text(), Some("    \n\t"));
     }
 }

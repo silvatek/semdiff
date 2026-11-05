@@ -177,11 +177,11 @@ fn merges_the_adjacent_removals_in_the_rust_sample() {
     assert!(document.contains(
         "  - scope: \"src\"\n    type: identifier-renamed\n    details:\n      oldname: \"fibonacci\"\n      newname: \"fib\"\n"
     ));
-    assert!(!document.contains("scope: \"src/main.rs:1-38\""), "{document}");
     assert!(
-        !document.contains("scope: \"src/report.rs:"),
+        !document.contains("scope: \"src/main.rs:1-38\""),
         "{document}"
     );
+    assert!(!document.contains("scope: \"src/report.rs:"), "{document}");
     assert!(document.contains(
         "  - scope: \"src/main.rs:46\"\n    type: identifier-renamed\n    details:\n      new: 46\n      oldname: \"zero\"\n      newname: \"one\"\n"
     ));
@@ -535,6 +535,73 @@ changes:
         .unwrap_err();
 
     assert!(message.contains("invalid isComment yes"), "{message}");
+    assert_eq!(tree.read("edited/src/main.rs"), b"fn main() {}\n");
+}
+
+#[test]
+fn applies_a_line_addition_marked_as_whitespace() {
+    let tree = Tree::new();
+    tree.write("edited/src/main.rs", "fn main() {}\n");
+    tree.write("edited/src/lib.rs", "fn lib() {}\n");
+
+    tree.apply(
+        "edited",
+        "\
+header:
+  semdiff: \"0.1.0\"
+  timestamp: \"2020-01-01T00:00:00Z\"
+changes:
+  - scope: \"src/main.rs\"
+    type: line-added
+    details:
+      old: 1
+      lines: +1
+      new: 1
+      text: \"    \"
+      isWhitespace: true
+  - scope: \"src/lib.rs\"
+    type: line-added
+    details:
+      old: 1
+      lines: +1
+      new: 1
+      text: \"// note\"
+      isComment: true
+      isWhitespace: true
+",
+    )
+    .unwrap();
+
+    assert_eq!(tree.read("edited/src/main.rs"), b"    \nfn main() {}\n");
+    assert_eq!(tree.read("edited/src/lib.rs"), b"// note\nfn lib() {}\n");
+}
+
+#[test]
+fn rejects_a_line_change_with_an_invalid_whitespace_flag() {
+    let tree = Tree::new();
+    tree.write("edited/src/main.rs", "fn main() {}\n");
+
+    let message = tree
+        .apply(
+            "edited",
+            "\
+header:
+  semdiff: \"0.1.0\"
+  timestamp: \"2020-01-01T00:00:00Z\"
+changes:
+  - scope: \"src/main.rs\"
+    type: line-added
+    details:
+      old: 1
+      lines: +1
+      new: 1
+      text: \"    \"
+      isWhitespace: yes
+",
+        )
+        .unwrap_err();
+
+    assert!(message.contains("invalid isWhitespace yes"), "{message}");
     assert_eq!(tree.read("edited/src/main.rs"), b"fn main() {}\n");
 }
 
