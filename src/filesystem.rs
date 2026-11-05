@@ -18,6 +18,7 @@ pub enum NodeKind {
 /// The operations compare and apply perform on a tree.
 ///
 /// `kind` is `Ok(None)` when the path is absent. `read` drains [`FileSystem::open`].
+/// `read_text` is that read decoded as UTF-8.
 /// `create_dir` creates missing parents. `remove_dir` removes an empty directory
 /// and fails when the directory still contains something. `rename` moves a file;
 /// the caller creates the destination's parent first.
@@ -44,6 +45,17 @@ pub trait FileSystem {
         let mut bytes = Vec::new();
         file.read_to_end(&mut bytes)?;
         Ok(bytes)
+    }
+
+    /// The whole contents of a file, decoded as UTF-8.
+    fn read_text(&self, path: &Path) -> io::Result<String> {
+        let bytes = self.read(path)?;
+        String::from_utf8(bytes).map_err(|_| {
+            io::Error::new(
+                io::ErrorKind::InvalidData,
+                "stream did not contain valid UTF-8",
+            )
+        })
     }
 }
 

@@ -10,7 +10,7 @@ use crate::filesystem::FileSystem;
 /// The semdif file is the record of what changed, so the same edits can be replayed
 /// on another copy of that directory. A problem is reported on stderr.
 pub(crate) fn apply(fs: &dyn FileSystem, semdif: &str, source: &str) -> ExitCode {
-    let document = match read_text(fs, Path::new(semdif)) {
+    let document = match fs.read_text(Path::new(semdif)) {
         Ok(document) => document,
         Err(error) => {
             eprintln!("cannot read {semdif}: {error}");
@@ -55,16 +55,6 @@ pub(crate) fn apply_document(
 /// Performs one structural change in the source directory.
 ///
 /// A content edit is applied with the other edits of its file, in `apply_content`.
-fn read_text(fs: &dyn FileSystem, path: &Path) -> Result<String, std::io::Error> {
-    let bytes = fs.read(path)?;
-    String::from_utf8(bytes).map_err(|_| {
-        std::io::Error::new(
-            std::io::ErrorKind::InvalidData,
-            "stream did not contain valid UTF-8",
-        )
-    })
-}
-
 fn apply_change(fs: &dyn FileSystem, source: &Path, change: &dyn Change) -> Result<(), String> {
     change.apply(fs, source)
 }
