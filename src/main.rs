@@ -123,7 +123,6 @@ fn partition_files(
 /// The directories that belong to a source.
 ///
 /// Empty directories are part of the tree even though they contain no files.
-/// Generated build output is omitted, as it is for files.
 pub(crate) fn collect_directories(root: &Path) -> Result<Vec<String>, String> {
     if root.is_file() {
         return Ok(Vec::new());
@@ -142,9 +141,6 @@ fn visit_directories(root: &Path, dir: &Path, directories: &mut Vec<String>) -> 
         if !path.is_dir() {
             continue;
         }
-        if entry.file_name() == "target" {
-            continue;
-        }
         let relative = path
             .strip_prefix(root)
             .map_err(|_| format!("cannot relativize {}", path.display()))?;
@@ -156,8 +152,7 @@ fn visit_directories(root: &Path, dir: &Path, directories: &mut Vec<String>) -> 
 
 /// The files that belong to a source.
 ///
-/// A directory contributes its project files, and a file contributes itself. Generated
-/// build output is omitted so it is not treated as project content.
+/// A directory contributes its files, and a file contributes itself.
 pub(crate) fn collect_files(root: &Path) -> Result<Vec<String>, String> {
     if root.is_file() {
         let name = root
@@ -172,7 +167,7 @@ pub(crate) fn collect_files(root: &Path) -> Result<Vec<String>, String> {
 
 /// The files contained in a directory and its subdirectories.
 ///
-/// Nested source files belong in the comparison, and generated build output does not.
+/// Nested files belong in the comparison.
 fn visit_dir(root: &Path, dir: &Path, files: &mut Vec<String>) -> Result<(), String> {
     let entries =
         fs::read_dir(dir).map_err(|error| format!("cannot read {}: {error}", dir.display()))?;
@@ -180,9 +175,6 @@ fn visit_dir(root: &Path, dir: &Path, files: &mut Vec<String>) -> Result<(), Str
         let entry = entry.map_err(|error| format!("cannot read {}: {error}", dir.display()))?;
         let path = entry.path();
         if path.is_dir() {
-            if entry.file_name() == "target" {
-                continue;
-            }
             visit_dir(root, &path, files)?;
         } else if path.is_file() {
             let relative = path

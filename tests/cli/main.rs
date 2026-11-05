@@ -26,10 +26,10 @@ fn prints_paths_present_in_both_directories() {
     fs::write(left.join("src/main.rs"), "fn fibonacci() {}\n").unwrap();
     fs::write(right.join("src/main.rs"), "fn fib() {}\n").unwrap();
     fs::write(left.join("only-left.rs"), "").unwrap();
-    fs::create_dir_all(left.join("target")).unwrap();
-    fs::write(left.join("target/skip.txt"), "").unwrap();
-    fs::create_dir_all(right.join("target")).unwrap();
-    fs::write(right.join("target/skip.txt"), "").unwrap();
+    fs::create_dir_all(left.join("nested")).unwrap();
+    fs::write(left.join("nested/shared.txt"), "").unwrap();
+    fs::create_dir_all(right.join("nested")).unwrap();
+    fs::write(right.join("nested/shared.txt"), "").unwrap();
 
     let output_path = root.join("out.yml");
     let left = left.to_str().unwrap();
@@ -42,7 +42,7 @@ fn prints_paths_present_in_both_directories() {
     assert_eq!(
         stdout,
         format!(
-            "Semdiff {}\nComparing {left} and {right}\nsrc/main.rs\n",
+            "Semdiff {}\nComparing {left} and {right}\nnested/shared.txt\nsrc/main.rs\n",
             env!("CARGO_PKG_VERSION")
         )
     );

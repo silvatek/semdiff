@@ -10,10 +10,8 @@ fn records_empty_directories_added_and_removed() {
     let right = root.join("right");
     let edited = root.join("edited");
     fs::create_dir_all(left.join("gone/nested")).unwrap();
-    fs::create_dir_all(left.join("target/skipped")).unwrap();
     fs::create_dir_all(right.join("vacant/nested")).unwrap();
     fs::create_dir_all(edited.join("gone/nested")).unwrap();
-    fs::create_dir_all(edited.join("target/skipped")).unwrap();
     fs::write(left.join("keep.txt"), "same\n").unwrap();
     fs::write(right.join("keep.txt"), "same\n").unwrap();
     fs::write(edited.join("keep.txt"), "same\n").unwrap();
@@ -35,8 +33,6 @@ fn records_empty_directories_added_and_removed() {
         document.split_once("changes:\n").expect("changes list").1,
         "  - scope: \".\"\n    type: directory-deleted\n    details:\n      path: \"gone/nested\"\n  - scope: \".\"\n    type: directory-deleted\n    details:\n      path: \"gone\"\n  - scope: \".\"\n    type: directory-added\n    details:\n      path: \"vacant\"\n  - scope: \".\"\n    type: directory-added\n    details:\n      path: \"vacant/nested\"\n"
     );
-    assert!(!document.contains("target"));
-
     let applied = run(&["--apply", output_arg, edited_arg]);
     assert!(
         applied.status.success(),
@@ -44,7 +40,6 @@ fn records_empty_directories_added_and_removed() {
         String::from_utf8_lossy(&applied.stderr)
     );
     assert!(!edited.join("gone").exists());
-    assert!(edited.join("target/skipped").is_dir());
     assert!(edited.join("vacant/nested").is_dir());
     assert_eq!(fs::read(edited.join("keep.txt")).unwrap(), b"same\n");
 

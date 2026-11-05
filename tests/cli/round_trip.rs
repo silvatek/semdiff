@@ -8,11 +8,13 @@ use std::path::Path;
 fn applying_the_rust_sample_makes_a_copy_of_v1_match_v2() {
     let manifest = Path::new(env!("CARGO_MANIFEST_DIR"));
     let sample = manifest.join("TestCode/rust/main");
-    let v1_source = sample.join("v1");
-    let v2_source = sample.join("v2");
     let tmp_root = std::env::temp_dir().join(format!("semdiff-apply-rust-{}", std::process::id()));
-    let target_source = tmp_root.join("v1");
-    copy_tree(&v1_source, &target_source);
+    let v1_source = tmp_root.join("v1");
+    let v2_source = tmp_root.join("v2");
+    let target_source = tmp_root.join("applied");
+    copy_tree(&sample.join("v1"), &v1_source);
+    copy_tree(&sample.join("v2"), &v2_source);
+    copy_tree(&sample.join("v1"), &target_source);
     let semdif_file = tmp_root.join("diff.yml");
     let v1_source_arg = v1_source.to_str().unwrap();
     let v2_source_arg = v2_source.to_str().unwrap();
@@ -62,6 +64,7 @@ fn copy_tree(from: &Path, to: &Path) {
     fs::create_dir_all(to).unwrap();
     for entry in fs::read_dir(from).unwrap() {
         let entry = entry.unwrap();
+        // Cargo may have built the sample in place. That output is not part of the sample.
         if entry.file_name() == "target" {
             continue;
         }
@@ -116,6 +119,7 @@ fn project_files(root: &Path) -> BTreeSet<String> {
 fn collect_project_files(root: &Path, dir: &Path, files: &mut BTreeSet<String>) {
     for entry in fs::read_dir(dir).unwrap() {
         let entry = entry.unwrap();
+        // Cargo may have built the sample in place. That output is not part of the sample.
         if entry.file_name() == "target" {
             continue;
         }
