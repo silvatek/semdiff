@@ -39,17 +39,37 @@ pub(crate) fn apply_document(
             if !applied_content.insert(path.to_string()) {
                 continue;
             }
-            let batch: Vec<&dyn Change> = changes
-                .iter()
-                .filter(|candidate| candidate.content().is_some_and(|item| item.file() == path))
-                .map(|candidate| candidate.as_ref())
-                .collect();
-            apply_content(fs, source, path, &batch)?;
+            apply_file(fs, source, path, &changes)?;
+        } else if change.directory_scope().is_some() {
+            for path in fs.collect_files(source)? {
+                if !change.edits_file(&path) {
+                    continue;
+                }
+                if !applied_content.insert(path.clone()) {
+                    continue;
+                }
+                apply_file(fs, source, &path, &changes)?;
+            }
         } else {
             apply_change(fs, source, change.as_ref())?;
         }
     }
     Ok(())
+}
+
+/// Applies every edit of one file, including a directory rename that covers it.
+fn apply_file(
+    fs: &dyn FileSystem,
+    source: &Path,
+    path: &str,
+    changes: &[Box<dyn Change>],
+) -> Result<(), String> {
+    let batch: Vec<&dyn Change> = changes
+        .iter()
+        .filter(|candidate| candidate.edits_file(path))
+        .map(|candidate| candidate.as_ref())
+        .collect();
+    apply_content(fs, source, path, &batch)
 }
 
 /// Performs one structural change in the source directory.
@@ -131,20 +151,41 @@ fn new_contents(path: &Path, bytes: &[u8], batch: &[&dyn Change]) -> Result<Vec<
             lines.push(*change);
         }
     }
-    if replacement.is_some() && !lines.is_empty() {
+    if let Some(contents) = replacement {
+        // A directory rename joins every file it covers. A file whose record is
+        // the whole new contents already has the renamed text, so the line edit
+        // is not applied again.
+        if lines.is_empty()
+            || lines
+                .iter()
+                .all(|change| change.directory_scope().is_some())
+        {
+            return Ok(contents);
+        }
         return Err(format!(
             "{} has both line edits and replacement contents",
             path.display()
         ));
     }
-    if let Some(contents) = replacement {
-        return Ok(contents);
-    }
     if lines.is_empty() {
         return Ok(bytes.to_vec());
     }
-    let text = String::from_utf8(bytes.to_vec())
-        .map_err(|_| format!("cannot edit lines in {}: file is not text", path.display()))?;
+    let text = match std::str::from_utf8(bytes) {
+        Ok(text) => text.to_string(),
+        Err(_)
+            if lines
+                .iter()
+                .all(|change| change.directory_scope().is_some()) =>
+        {
+            return Ok(bytes.to_vec());
+        }
+        Err(_) => {
+            return Err(format!(
+                "cannot edit lines in {}: file is not text",
+                path.display()
+            ));
+        }
+    };
     let source_lines = crate::line_changes::split_text(&text);
     // The only place a LinePlan is built. Each line edit adds the lines it
     // changes, then `rebuild` produces the new lines of this file. A
