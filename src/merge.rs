@@ -1,14 +1,19 @@
 /// Collapses adjacent changes before they are written to the semdif file.
 ///
-/// A run of line-removed records is one removal when the records are for one
-/// file, their old lines follow one another, and the same new line follows
-/// them. The merged record keeps the first old line. `lines` is the negative
-/// count, `-1` for one line and `-2` for two. Other kinds of change stay as
-/// they are.
+/// A run of line edits in one file becomes one record. Removals follow one
+/// another on the old side and share the new line that follows them, so
+/// `lines` is `-1` or `-2`. Additions share an insertion point and follow one
+/// another on the new side, so `lines` is `+1` or `+2`. Modifications follow
+/// one another on both sides. They do not change the line count, so `lines`
+/// stays `+0`. The merged record keeps the first line number. Its text keeps
+/// every line, joined by a newline.
 pub(crate) fn merge_adjacent(changes: Vec<crate::semdif::Change>) -> Vec<crate::semdif::Change> {
     let mut merged = Vec::new();
     for change in changes {
-        if extend_removed(&mut merged, &change) {
+        if extend_removed(&mut merged, &change)
+            || extend_added(&mut merged, &change)
+            || extend_modified(&mut merged, &change)
+        {
             continue;
         }
         merged.push(change);
@@ -16,9 +21,16 @@ pub(crate) fn merge_adjacent(changes: Vec<crate::semdif::Change>) -> Vec<crate::
     merged
 }
 
+fn line_count(text: &str) -> usize {
+    text.split('\n').count()
+}
+
+fn append_line(previous: &mut String, text: &str) {
+    previous.push('\n');
+    previous.push_str(text);
+}
+
 /// Adds `change` to the previous line removal when the two are one run.
-///
-/// The removed text keeps every line, joined by a newline.
 fn extend_removed(merged: &mut Vec<crate::semdif::Change>, change: &crate::semdif::Change) -> bool {
     let crate::semdif::Change::LineRemoved {
         path,
@@ -44,7 +56,73 @@ fn extend_removed(merged: &mut Vec<crate::semdif::Change>, change: &crate::semdi
         return false;
     }
     *previous_end = *old_end;
-    previous_text.push('\n');
-    previous_text.push_str(text);
+    append_line(previous_text, text);
+    true
+}
+
+/// Adds `change` to the previous line addition when the two are one run.
+fn extend_added(merged: &mut Vec<crate::semdif::Change>, change: &crate::semdif::Change) -> bool {
+    let crate::semdif::Change::LineAdded {
+        path,
+        old,
+        new,
+        text,
+    } = change
+    else {
+        return false;
+    };
+    let Some(crate::semdif::Change::LineAdded {
+        path: previous_path,
+        old: previous_old,
+        new: previous_new,
+        text: previous_text,
+    }) = merged.last_mut()
+    else {
+        return false;
+    };
+    let Some(next_new) = previous_new.checked_add(line_count(previous_text)) else {
+        return false;
+    };
+    if previous_path != path || previous_old != old || next_new != *new {
+        return false;
+    }
+    append_line(previous_text, text);
+    true
+}
+
+/// Adds `change` to the previous line modification when the two are one run.
+fn extend_modified(
+    merged: &mut Vec<crate::semdif::Change>,
+    change: &crate::semdif::Change,
+) -> bool {
+    let crate::semdif::Change::LineModified {
+        path,
+        old,
+        new,
+        text,
+    } = change
+    else {
+        return false;
+    };
+    let Some(crate::semdif::Change::LineModified {
+        path: previous_path,
+        old: previous_old,
+        new: previous_new,
+        text: previous_text,
+    }) = merged.last_mut()
+    else {
+        return false;
+    };
+    let count = line_count(previous_text);
+    let Some(next_old) = previous_old.checked_add(count) else {
+        return false;
+    };
+    let Some(next_new) = previous_new.checked_add(count) else {
+        return false;
+    };
+    if previous_path != path || next_old != *old || next_new != *new {
+        return false;
+    }
+    append_line(previous_text, text);
     true
 }
