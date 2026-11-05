@@ -146,7 +146,7 @@ fn merges_adjacent_removed_lines_into_one_span() {
         String::from_utf8_lossy(&compared.stderr)
     );
     assert!(document.contains(
-        "  - scope: \".\"\n    type: line-removed\n    details:\n      path: \"span.txt\"\n      old: 2-4\n      new: 2\n      text: \"one\\ntwo\\nthree\"\n"
+        "  - scope: \".\"\n    type: line-removed\n    details:\n      path: \"span.txt\"\n      old: 2\n      lines: -3\n      new: 2\n      text: \"one\\ntwo\\nthree\"\n"
     ));
     assert!(document.contains(
         "  - scope: \".\"\n    type: line-removed\n    details:\n      path: \"gap.txt\"\n      old: 2\n      new: 2\n      text: \"one\"\n"
@@ -193,16 +193,15 @@ fn merges_the_adjacent_removals_in_the_rust_sample() {
         "  - scope: \".\"\n    type: line-removed\n    details:\n      path: \"src/main.rs\"\n      old: 43\n      new: 44\n      text: \"// This single line is deleted.\"\n"
     ));
     assert!(document.contains(
-        "  - scope: \".\"\n    type: line-removed\n    details:\n      path: \"src/main.rs\"\n      old: 49-50\n      new: 49\n      text: \"// This deleted line is first.\\n// This deleted line is second.\"\n"
+        "  - scope: \".\"\n    type: line-removed\n    details:\n      path: \"src/main.rs\"\n      old: 49\n      lines: -2\n      new: 49\n      text: \"// This deleted line is first.\\n// This deleted line is second.\"\n"
     ));
-    assert!(!document.contains("old: 49\n"), "{document}");
     assert!(!document.contains("old: 50\n"), "{document}");
 
     let _ = fs::remove_dir_all(root);
 }
 
 #[test]
-fn rejects_a_removed_line_range_that_runs_backwards() {
+fn rejects_a_line_removal_whose_line_count_is_positive() {
     let root = std::env::temp_dir().join(format!("semdiff-bad-span-{}", std::process::id()));
     let edited = root.join("edited");
     fs::create_dir_all(&edited).unwrap();
@@ -219,7 +218,8 @@ changes:
     type: line-removed
     details:
       path: \"note.txt\"
-      old: 3-1
+      old: 2
+      lines: 2
       new: 2
       text: \"gone\"
 ",
@@ -234,7 +234,7 @@ changes:
     let stderr = String::from_utf8(applied.stderr).unwrap();
 
     assert_eq!(applied.status.code(), Some(1));
-    assert!(stderr.contains("invalid old 3-1"), "{stderr}");
+    assert!(stderr.contains("invalid lines 2"), "{stderr}");
     assert_eq!(fs::read(edited.join("note.txt")).unwrap(), b"keep\ngone\n");
 
     let _ = fs::remove_dir_all(root);

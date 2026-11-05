@@ -93,7 +93,7 @@ fn write_change(document: &mut String, change: &Change) {
             old,
             new,
             text,
-        } => write_line(document, "line-added", path, *old, *new, text),
+        } => write_line(document, "line-added", path, *old, None, *new, text),
         Change::LineRemoved {
             path,
             old,
@@ -104,7 +104,8 @@ fn write_change(document: &mut String, change: &Change) {
             document,
             "line-removed",
             path,
-            line_span(*old, *old_end),
+            *old,
+            removed_lines(*old, *old_end),
             *new,
             text,
         ),
@@ -113,7 +114,7 @@ fn write_change(document: &mut String, change: &Change) {
             old,
             new,
             text,
-        } => write_line(document, "line-modified", path, *old, *new, text),
+        } => write_line(document, "line-modified", path, *old, None, *new, text),
         Change::DirectoryAdded { path } => write_directory(document, "directory-added", path),
         Change::DirectoryDeleted { path } => write_directory(document, "directory-deleted", path),
     }
@@ -123,7 +124,8 @@ fn write_line(
     document: &mut String,
     kind: &str,
     path: &str,
-    old: impl std::fmt::Display,
+    old: usize,
+    lines: Option<isize>,
     new: usize,
     text: &str,
 ) {
@@ -132,19 +134,23 @@ fn write_line(
     document.push_str("    details:\n");
     document.push_str(&format!("      path: {}\n", yaml_string(path)));
     document.push_str(&format!("      old: {old}\n"));
+    if let Some(lines) = lines {
+        document.push_str(&format!("      lines: {lines}\n"));
+    }
     document.push_str(&format!("      new: {new}\n"));
     document.push_str(&format!("      text: {}\n", yaml_string(text)));
 }
 
-/// The `old` value of a line removal.
+/// The `lines` value of a removal, when more than one line was removed.
 ///
-/// One line is its number. A merged run is the first line through the last,
-/// such as `49-50`.
-fn line_span(start: usize, end: usize) -> String {
-    if start == end {
-        format!("{start}")
+/// `old` stays the first removed line. A run of two lines is `-2`. One line
+/// has no `lines` field.
+fn removed_lines(old: usize, old_end: usize) -> Option<isize> {
+    let count = old_end - old + 1;
+    if count == 1 {
+        None
     } else {
-        format!("{start}-{end}")
+        Some(-(count as isize))
     }
 }
 
@@ -250,6 +256,8 @@ pub(crate) enum Change {
         /// First removed line in the old file.
         old: usize,
         /// Last removed line in the old file. Equal to `old` for a single line.
+        ///
+        /// A longer run is written as `lines` with a negative count, such as `-2`.
         old_end: usize,
         new: usize,
         text: String,
@@ -357,11 +365,11 @@ impl PartialChange {
                 text: required(&self.fields, "text", "line-added")?,
             }),
             "line-removed" => {
-                let (old, old_end) = required_span(&self.fields, "old", "line-removed")?;
+                let old = required_line(&self.fields, "old", "line-removed")?;
                 Ok(Change::LineRemoved {
                     path: required(&self.fields, "path", "line-removed")?,
                     old,
-                    old_end,
+                    old_end: removed_end(&self.fields, old)?,
                     new: required_line(&self.fields, "new", "line-removed")?,
                     text: required(&self.fields, "text", "line-removed")?,
                 })
@@ -432,29 +440,21 @@ fn stored_bytes(fields: &BTreeMap<String, String>, kind: &str) -> Result<Vec<u8>
     }
 }
 
-/// A removed-line range recorded in `old`.
+/// The last old line of a removal.
 ///
-/// A single line is `49`. A merged run is `49-50`, first line through last.
-fn required_span(
-    fields: &BTreeMap<String, String>,
-    key: &str,
-    kind: &str,
-) -> Result<(usize, usize), String> {
-    let text = required(fields, key, kind)?;
-    let invalid = || format!("{kind} has invalid {key} {text}");
-    let (start_text, end_text) = text
-        .split_once('-')
-        .unwrap_or((text.as_str(), text.as_str()));
-    if start_text.is_empty() || end_text.is_empty() || end_text.contains('-') {
+/// With no `lines` field, one line at `old` was removed. `lines: -2` removes
+/// `old` and the next line.
+fn removed_end(fields: &BTreeMap<String, String>, old: usize) -> Result<usize, String> {
+    let Some(text) = fields.get("lines") else {
+        return Ok(old);
+    };
+    let invalid = || format!("line-removed has invalid lines {text}");
+    let lines = text.parse::<isize>().map_err(|_| invalid())?;
+    if lines >= 0 {
         return Err(invalid());
     }
-    let start = start_text.parse::<usize>().map_err(|_| invalid())?;
-    let end = end_text.parse::<usize>().map_err(|_| invalid())?;
-    if start >= 1 && end >= start {
-        Ok((start, end))
-    } else {
-        Err(invalid())
-    }
+    let count = lines.checked_neg().ok_or_else(invalid)? as usize;
+    old.checked_add(count - 1).ok_or_else(invalid)
 }
 
 /// A 1-based line number recorded for a line change.
