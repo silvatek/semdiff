@@ -291,6 +291,27 @@ fn merges_the_adjacent_removals_in_the_rust_sample() {
         "  - scope: \"src/main.rs\"\n    type: line-added\n    details:\n      old: 53\n      lines: +2\n      new: 51\n      text: \"// This added line is first.\\n// This added line is second.\"\n"
     ));
     assert!(document.contains(
+        "  - scope: \"src/main.rs\"\n    type: identifier-renamed\n    details:\n      old: 1\n      new: 1\n      oldname: \"fibonacci\"\n      newname: \"fib\"\n"
+    ));
+    assert!(document.contains(
+        "  - scope: \"src/main.rs\"\n    type: identifier-renamed\n    details:\n      old: 25\n      new: 26\n      oldname: \"fibonacci\"\n      newname: \"fib\"\n"
+    ));
+    assert!(document.contains(
+        "  - scope: \"src/main.rs\"\n    type: identifier-renamed\n    details:\n      old: 31\n      new: 32\n      oldname: \"fibonacci\"\n      newname: \"fib\"\n"
+    ));
+    assert!(document.contains(
+        "  - scope: \"src/main.rs\"\n    type: identifier-renamed\n    details:\n      old: 35\n      new: 36\n      oldname: \"fibonacci\"\n      newname: \"fib\"\n"
+    ));
+    assert!(document.contains(
+        "  - scope: \"src/main.rs\"\n    type: identifier-renamed\n    details:\n      old: 36\n      new: 37\n      oldname: \"fibonacci\"\n      newname: \"fib\"\n"
+    ));
+    assert!(document.contains(
+        "  - scope: \"src/main.rs\"\n    type: identifier-renamed\n    details:\n      old: 37\n      new: 38\n      oldname: \"fibonacci\"\n      newname: \"fib\"\n"
+    ));
+    assert!(document.contains(
+        "  - scope: \"src/main.rs\"\n    type: identifier-renamed\n    details:\n      old: 38\n      new: 39\n      oldname: \"fibonacci\"\n      newname: \"fib\"\n"
+    ));
+    assert!(document.contains(
         "  - scope: \"src/main.rs\"\n    type: identifier-renamed\n    details:\n      old: 46\n      new: 46\n      oldname: \"zero\"\n      newname: \"one\"\n"
     ));
     assert!(document.contains(
