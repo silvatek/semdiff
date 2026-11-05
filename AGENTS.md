@@ -43,3 +43,9 @@ The reason is the rest of the line, and it is required. A `semdiff-check: skip` 
 ## Explanations
 
 A new type or function carries a comment that says what it is for.
+
+## When to stop
+
+If you are having to guess at the user's intentions, or thinking things like "Maybe the user...", stop and ask for clarification.
+
+If a lot of complexity is being revealed, stop and create a high-level plan. Review that plan in the agent chat. Once it is agreed, do the low-level design and implementation for the first step only.
