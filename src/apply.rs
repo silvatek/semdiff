@@ -206,12 +206,20 @@ fn rebuild_lines(
                     ));
                 }
             }
-            crate::semdif::Change::LineRemoved { old, .. } => {
-                if !removed.insert(*old) {
+            crate::semdif::Change::LineRemoved { old, old_end, .. } => {
+                if *old_end < *old {
                     return Err(format!(
-                        "line {old} is removed more than once in {}",
+                        "line {old}-{old_end} is not a removal range in {}",
                         path.display()
                     ));
+                }
+                for line in *old..=*old_end {
+                    if !removed.insert(line) {
+                        return Err(format!(
+                            "line {line} is removed more than once in {}",
+                            path.display()
+                        ));
+                    }
                 }
             }
             crate::semdif::Change::LineAdded { old, new, text, .. } => {

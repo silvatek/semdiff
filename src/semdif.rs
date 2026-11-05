@@ -97,9 +97,17 @@ fn write_change(document: &mut String, change: &Change) {
         Change::LineRemoved {
             path,
             old,
+            old_end,
             new,
             text,
-        } => write_line(document, "line-removed", path, *old, *new, text),
+        } => write_line(
+            document,
+            "line-removed",
+            path,
+            line_span(*old, *old_end),
+            *new,
+            text,
+        ),
         Change::LineModified {
             path,
             old,
@@ -111,7 +119,14 @@ fn write_change(document: &mut String, change: &Change) {
     }
 }
 
-fn write_line(document: &mut String, kind: &str, path: &str, old: usize, new: usize, text: &str) {
+fn write_line(
+    document: &mut String,
+    kind: &str,
+    path: &str,
+    old: impl std::fmt::Display,
+    new: usize,
+    text: &str,
+) {
     document.push_str("  - scope: \".\"\n");
     document.push_str(&format!("    type: {kind}\n"));
     document.push_str("    details:\n");
@@ -119,6 +134,18 @@ fn write_line(document: &mut String, kind: &str, path: &str, old: usize, new: us
     document.push_str(&format!("      old: {old}\n"));
     document.push_str(&format!("      new: {new}\n"));
     document.push_str(&format!("      text: {}\n", yaml_string(text)));
+}
+
+/// The `old` value of a line removal.
+///
+/// One line is its number. A merged run is the first line through the last,
+/// such as `49-50`.
+fn line_span(start: usize, end: usize) -> String {
+    if start == end {
+        format!("{start}")
+    } else {
+        format!("{start}-{end}")
+    }
 }
 
 fn write_directory(document: &mut String, kind: &str, path: &str) {
@@ -220,7 +247,10 @@ pub(crate) enum Change {
     },
     LineRemoved {
         path: String,
+        /// First removed line in the old file.
         old: usize,
+        /// Last removed line in the old file. Equal to `old` for a single line.
+        old_end: usize,
         new: usize,
         text: String,
     },
@@ -326,12 +356,16 @@ impl PartialChange {
                 new: required_line(&self.fields, "new", "line-added")?,
                 text: required(&self.fields, "text", "line-added")?,
             }),
-            "line-removed" => Ok(Change::LineRemoved {
-                path: required(&self.fields, "path", "line-removed")?,
-                old: required_line(&self.fields, "old", "line-removed")?,
-                new: required_line(&self.fields, "new", "line-removed")?,
-                text: required(&self.fields, "text", "line-removed")?,
-            }),
+            "line-removed" => {
+                let (old, old_end) = required_span(&self.fields, "old", "line-removed")?;
+                Ok(Change::LineRemoved {
+                    path: required(&self.fields, "path", "line-removed")?,
+                    old,
+                    old_end,
+                    new: required_line(&self.fields, "new", "line-removed")?,
+                    text: required(&self.fields, "text", "line-removed")?,
+                })
+            }
             "line-modified" => Ok(Change::LineModified {
                 path: required(&self.fields, "path", "line-modified")?,
                 old: required_line(&self.fields, "old", "line-modified")?,
@@ -395,6 +429,31 @@ fn stored_bytes(fields: &BTreeMap<String, String>, kind: &str) -> Result<Vec<u8>
             .decode(contents)
             .map_err(|_| format!("{kind} contents are not valid base64")),
         Some(other) => Err(format!("{kind} has unsupported encoding {other}")),
+    }
+}
+
+/// A removed-line range recorded in `old`.
+///
+/// A single line is `49`. A merged run is `49-50`, first line through last.
+fn required_span(
+    fields: &BTreeMap<String, String>,
+    key: &str,
+    kind: &str,
+) -> Result<(usize, usize), String> {
+    let text = required(fields, key, kind)?;
+    let invalid = || format!("{kind} has invalid {key} {text}");
+    let (start_text, end_text) = text
+        .split_once('-')
+        .unwrap_or((text.as_str(), text.as_str()));
+    if start_text.is_empty() || end_text.is_empty() || end_text.contains('-') {
+        return Err(invalid());
+    }
+    let start = start_text.parse::<usize>().map_err(|_| invalid())?;
+    let end = end_text.parse::<usize>().map_err(|_| invalid())?;
+    if start >= 1 && end >= start {
+        Ok((start, end))
+    } else {
+        Err(invalid())
     }
 }
 
