@@ -4,15 +4,13 @@ use std::path::Path;
 
 use super::{applied_with_its_file, Change, Content, LineEdit, LinePlan, LineSpan};
 
-/// The scope, line numbers, and text shared by a line addition, removal, and
-/// modification.
+/// The line numbers and text shared by a line addition, removal, and modification.
 ///
-/// Those three differ in how long the edit is on the old side and the new
-/// side, and in whether a following edit of the same kind can be appended.
-/// An identifier rename does not use this. It also stores the two names, and
-/// it stays its own change.
+/// The scope stays on each of those changes. These three differ in how long
+/// the edit is on the old side and the new side, and in whether a following
+/// edit of the same kind can be appended. An identifier rename does not use
+/// this. It also stores the two names, and it stays its own change.
 struct LineBody {
-    scope: String,
     old: usize,
     new: usize,
     text: String,
@@ -29,12 +27,13 @@ fn line_count(text: &str) -> usize {
 /// start.
 fn extend_span(
     kind: &str,
+    scope: &str,
     body: &mut LineBody,
     old_len: usize,
     new_len: usize,
     next: &dyn Change,
 ) -> bool {
-    if next.kind() != kind || next.scope() != body.scope {
+    if next.kind() != kind || next.scope() != scope {
         return false;
     }
     let Some(line) = next.line_edit() else {
@@ -111,18 +110,15 @@ pub(crate) fn merge_adjacent(changes: Vec<Box<dyn super::Change>>) -> Vec<Box<dy
 }
 
 pub(crate) struct LineAdded {
+    scope: String,
     body: LineBody,
 }
 
 impl LineAdded {
     pub(crate) fn new(scope: String, old: usize, new: usize, text: String) -> Self {
         Self {
-            body: LineBody {
-                scope,
-                old,
-                new,
-                text,
-            },
+            scope,
+            body: LineBody { old, new, text },
         }
     }
 }
@@ -133,7 +129,7 @@ impl Change for LineAdded {
     }
 
     fn scope(&self) -> &str {
-        &self.body.scope
+        &self.scope
     }
 
     fn line_edit(&self) -> Option<&dyn LineEdit> {
@@ -159,7 +155,7 @@ impl Change for LineAdded {
 
 impl Content for LineAdded {
     fn file(&self) -> &str {
-        &self.body.scope
+        &self.scope
     }
 }
 
@@ -178,7 +174,7 @@ impl LineEdit for LineAdded {
 
     fn extend(&mut self, next: &dyn Change) -> bool {
         let new_len = line_count(&self.body.text);
-        extend_span(self.kind(), &mut self.body, 0, new_len, next)
+        extend_span(self.kind(), &self.scope, &mut self.body, 0, new_len, next)
     }
 
     fn rebuild(
@@ -192,18 +188,15 @@ impl LineEdit for LineAdded {
 }
 
 pub(crate) struct LineRemoved {
+    scope: String,
     body: LineBody,
 }
 
 impl LineRemoved {
     pub(crate) fn new(scope: String, old: usize, new: usize, text: String) -> Self {
         Self {
-            body: LineBody {
-                scope,
-                old,
-                new,
-                text,
-            },
+            scope,
+            body: LineBody { old, new, text },
         }
     }
 }
@@ -214,7 +207,7 @@ impl Change for LineRemoved {
     }
 
     fn scope(&self) -> &str {
-        &self.body.scope
+        &self.scope
     }
 
     fn line_edit(&self) -> Option<&dyn LineEdit> {
@@ -241,7 +234,7 @@ impl Change for LineRemoved {
 
 impl Content for LineRemoved {
     fn file(&self) -> &str {
-        &self.body.scope
+        &self.scope
     }
 }
 
@@ -260,7 +253,7 @@ impl LineEdit for LineRemoved {
 
     fn extend(&mut self, next: &dyn Change) -> bool {
         let old_len = line_count(&self.body.text);
-        extend_span(self.kind(), &mut self.body, old_len, 0, next)
+        extend_span(self.kind(), &self.scope, &mut self.body, old_len, 0, next)
     }
 
     fn rebuild(
@@ -280,18 +273,15 @@ impl LineEdit for LineRemoved {
 }
 
 pub(crate) struct LineModified {
+    scope: String,
     body: LineBody,
 }
 
 impl LineModified {
     pub(crate) fn new(scope: String, old: usize, new: usize, text: String) -> Self {
         Self {
-            body: LineBody {
-                scope,
-                old,
-                new,
-                text,
-            },
+            scope,
+            body: LineBody { old, new, text },
         }
     }
 }
@@ -302,7 +292,7 @@ impl Change for LineModified {
     }
 
     fn scope(&self) -> &str {
-        &self.body.scope
+        &self.scope
     }
 
     fn line_edit(&self) -> Option<&dyn LineEdit> {
@@ -328,7 +318,7 @@ impl Change for LineModified {
 
 impl Content for LineModified {
     fn file(&self) -> &str {
-        &self.body.scope
+        &self.scope
     }
 }
 
@@ -347,7 +337,7 @@ impl LineEdit for LineModified {
 
     fn extend(&mut self, next: &dyn Change) -> bool {
         let count = line_count(&self.body.text);
-        extend_span(self.kind(), &mut self.body, count, count, next)
+        extend_span(self.kind(), &self.scope, &mut self.body, count, count, next)
     }
 
     fn rebuild(
