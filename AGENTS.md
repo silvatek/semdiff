@@ -35,3 +35,11 @@ semdiff-check: skip <why this change cannot be verified>
 ```
 
 The reason is the rest of the line, and it is required. A `semdiff-check: skip` line with nothing after it does not count. Leave the line in the body so a later CI check can recognize the same opt-out.
+
+## Scope of a change
+
+`docs/uncaptured-changes.md` records which gaps are fixed, still to do, deferred, or left as they are. Honor the status column. A `Leave` row stays as it is. A `Fix later` row waits.
+
+## Explanations
+
+A new type or function carries a comment that says what it is for.
