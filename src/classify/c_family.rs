@@ -19,10 +19,11 @@ pub(super) fn margin_whitespace(old_line: &str, new_line: &str) -> bool {
 /// The named block added by `text`, when this dialect's keywords say so.
 ///
 /// Only the first line is read. Leading spaces and tabs are skipped, then any
-/// prefix words, then a keyword, then the identifier that names the block.
-/// The keyword selects the category. A comment, a dialect with no such
-/// keywords, and a line that does not open in that shape have no block. The
-/// remainder of the line, and any following lines, stay the block's text.
+/// listed qualifiers, then a keyword, then the identifier that names the
+/// block. A qualifier is matched as written. The keyword selects the
+/// category. A comment, a dialect with no such keywords, and a line that does
+/// not open in that shape have no block. The remainder of the line, and any
+/// following lines, stay the block's text.
 pub(super) fn named_block(dialect: &Dialect, text: &str) -> Option<NamedBlock> {
     if dialect.named_block_keywords.is_empty() {
         return None;
@@ -42,18 +43,22 @@ pub(super) fn named_block(dialect: &Dialect, text: &str) -> Option<NamedBlock> {
 fn block_name<'a>(dialect: &Dialect, line: &'a str) -> Option<OpenedBlock<'a>> {
     let mut rest = trim_ascii_blank_start(line);
     loop {
-        let (word, after) = next_word(&dialect.identifier_characters, rest)?;
-        if let Some(category) = keyword_category(dialect.named_block_keywords, word) {
-            let name_at = trim_ascii_blank_start(after);
-            if name_at.len() == after.len() {
-                return None;
+        if let Some((word, after)) = next_word(&dialect.identifier_characters, rest) {
+            if let Some(category) = keyword_category(dialect.named_block_keywords, word) {
+                let name_at = trim_ascii_blank_start(after);
+                if name_at.len() == after.len() {
+                    return None;
+                }
+                let (name, _) = next_word(&dialect.identifier_characters, name_at)?;
+                return Some(OpenedBlock { category, name });
             }
-            let (name, _) = next_word(&dialect.identifier_characters, name_at)?;
-            return Some(OpenedBlock { category, name });
         }
-        if !is_listed(dialect.block_prefixes, word) {
+        let Some(qualifier) =
+            super::matching_qualifier(&dialect.identifier_characters, dialect.block_prefixes, rest)
+        else {
             return None;
-        }
+        };
+        let after = &rest[qualifier.len()..];
         let next = trim_ascii_blank_start(after);
         if next.len() == after.len() {
             return None;
@@ -73,10 +78,6 @@ fn keyword_category(keywords: &[NamedBlockKeyword], word: &str) -> Option<BlockC
         .iter()
         .find(|item| item.keyword == word)
         .map(|item| item.category)
-}
-
-fn is_listed(words: &[&str], word: &str) -> bool {
-    words.iter().any(|candidate| *candidate == word)
 }
 
 /// The next identifier in `line`, and the text that follows it.

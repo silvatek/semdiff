@@ -7,7 +7,7 @@
 mod c_family;
 mod python;
 
-use crate::dialect::{for_path, BlockCategory, Dialect, Family};
+use crate::dialect::{for_path, BlockCategory, Dialect, Family, IdentifierCharacters};
 
 /// The name and category of one named block.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -74,6 +74,31 @@ pub(crate) fn margin_whitespace(path: &str, old_line: &str, new_line: &str) -> b
         Family::CFamily => c_family::margin_whitespace(old_line, new_line),
         Family::Python => python::margin_whitespace(dialect, old_line, new_line),
     }
+}
+
+/// The longest listed qualifier that `rest` starts with.
+///
+/// The match ends on a token boundary, so `pub` matches `pub fn` and does not
+/// match `public`. A longer entry wins, so `pub(crate)` is taken ahead of
+/// `pub`. The qualifier is the text to skip; the caller reads what follows.
+pub(super) fn matching_qualifier<'a>(
+    characters: &IdentifierCharacters,
+    qualifiers: &[&str],
+    rest: &'a str,
+) -> Option<&'a str> {
+    qualifiers
+        .iter()
+        .filter(|qualifier| {
+            let Some(after) = rest.strip_prefix(*qualifier) else {
+                return false;
+            };
+            match after.chars().next() {
+                Some(character) => !characters.continues(character),
+                None => true,
+            }
+        })
+        .max_by_key(|qualifier| qualifier.len())
+        .map(|qualifier| &rest[..qualifier.len()])
 }
 
 /// The named block added by `text`, when the dialect's reader sees one.
@@ -214,6 +239,18 @@ mod tests {
             Some((BlockCategory::Function, "ready".to_string()))
         );
         assert_eq!(
+            opened("src/main.rs", "pub(crate) fn hidden() {}"),
+            Some((BlockCategory::Function, "hidden".to_string()))
+        );
+        assert_eq!(
+            opened("src/main.rs", "pub(super) fn hidden() {}"),
+            Some((BlockCategory::Function, "hidden".to_string()))
+        );
+        assert_eq!(
+            opened("src/main.rs", "pub(self) async fn hidden() {}"),
+            Some((BlockCategory::Function, "hidden".to_string()))
+        );
+        assert_eq!(
             opened("src/main.rs", "struct Point {"),
             Some((BlockCategory::Structure, "Point".to_string()))
         );
@@ -251,10 +288,12 @@ mod tests {
     fn an_addition_that_does_not_open_a_named_block_stays_unnamed() {
         assert_eq!(named_block("src/main.rs", "let value = 1;"), None);
         assert_eq!(named_block("src/main.rs", "const VALUE: i32 = 1;"), None);
+        assert_eq!(named_block("src/main.rs", "public fn hidden() {}"), None);
         assert_eq!(
-            named_block("src/main.rs", "pub(crate) fn hidden() {}"),
+            named_block("src/main.rs", "pub(in crate::util) fn hidden() {}"),
             None
         );
+        assert_eq!(named_block("src/main.rs", "pub(crate)fn hidden() {}"), None);
         assert_eq!(
             named_block("src/main.rs", "#[derive(Debug)]\nstruct Foo {}"),
             None
