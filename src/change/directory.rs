@@ -2,14 +2,14 @@
 
 use std::path::Path;
 
-use super::{GenericChange, RemovedDirectory};
+use super::{Change, RemovedDirectory};
 
 pub(crate) struct DirectoryAdded {
     pub(crate) scope: String,
     pub(crate) path: String,
 }
 
-impl GenericChange for DirectoryAdded {
+impl Change for DirectoryAdded {
     fn kind(&self) -> &'static str {
         "directory-added"
     }
@@ -36,7 +36,7 @@ pub(crate) struct DirectoryDeleted {
     pub(crate) path: String,
 }
 
-impl GenericChange for DirectoryDeleted {
+impl Change for DirectoryDeleted {
     fn kind(&self) -> &'static str {
         "directory-deleted"
     }

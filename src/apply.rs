@@ -3,7 +3,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
-use crate::change::LinePlan;
+use crate::change::{Change, LinePlan};
 
 /// Edits `source` so it gains the changes recorded in `semdif`.
 ///
@@ -30,13 +30,14 @@ fn apply_changes(semdif: &Path, source: &Path) -> Result<(), String> {
             if !applied_content.insert(path.to_string()) {
                 continue;
             }
-            let batch: Vec<_> = changes
+            let batch: Vec<&dyn Change> = changes
                 .iter()
                 .filter(|candidate| candidate.content().is_some_and(|item| item.file() == path))
+                .map(|candidate| candidate.as_ref())
                 .collect();
             apply_content(source, path, &batch)?;
         } else {
-            apply_change(source, change)?;
+            apply_change(source, change.as_ref())?;
         }
     }
     Ok(())
@@ -45,7 +46,7 @@ fn apply_changes(semdif: &Path, source: &Path) -> Result<(), String> {
 /// Performs one structural change in the source directory.
 ///
 /// A content edit is applied with the other edits of its file, in `apply_content`.
-fn apply_change(source: &Path, change: &crate::semdif::Change) -> Result<(), String> {
+fn apply_change(source: &Path, change: &dyn Change) -> Result<(), String> {
     change.apply(source)
 }
 
@@ -70,11 +71,7 @@ pub(crate) fn remove_directory(root: &Path, relative: &str) -> Result<(), String
 ///
 /// The old hash is checked against the file as it is. The new hash is checked
 /// against the bytes about to be written, so a mismatch leaves the file unchanged.
-fn apply_content(
-    root: &Path,
-    relative: &str,
-    batch: &[&crate::semdif::Change],
-) -> Result<(), String> {
+fn apply_content(root: &Path, relative: &str, batch: &[&dyn Change]) -> Result<(), String> {
     let path = path_inside(root, relative)?;
     let bytes =
         fs::read(&path).map_err(|error| format!("cannot read {}: {error}", path.display()))?;
@@ -93,7 +90,7 @@ fn apply_content(
     Ok(())
 }
 
-fn file_digest(batch: &[&crate::semdif::Change]) -> Result<Option<(String, String)>, String> {
+fn file_digest(batch: &[&dyn Change]) -> Result<Option<(String, String)>, String> {
     let mut found = None;
     for change in batch {
         let hashes = change
@@ -123,11 +120,7 @@ fn check_hash(path: &Path, bytes: &[u8], expected: &str, side: &str) -> Result<(
     Ok(())
 }
 
-fn new_contents(
-    path: &Path,
-    bytes: &[u8],
-    batch: &[&crate::semdif::Change],
-) -> Result<Vec<u8>, String> {
+fn new_contents(path: &Path, bytes: &[u8], batch: &[&dyn Change]) -> Result<Vec<u8>, String> {
     let mut replacement = None;
     let mut lines = Vec::new();
     for change in batch {

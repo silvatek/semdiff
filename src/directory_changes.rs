@@ -1,5 +1,7 @@
 use std::collections::BTreeSet;
 
+use crate::change::Change;
+
 /// Directories added or removed between the two sources.
 ///
 /// A directory that exists only on the right, and holds no files, was added.
@@ -11,7 +13,7 @@ pub(crate) fn directory_changes(
     left_dirs: &[String],
     right_dirs: &[String],
     right_files: &[String],
-) -> Vec<crate::semdif::Change> {
+) -> Vec<Box<dyn Change>> {
     let left_names: BTreeSet<_> = left_dirs.iter().collect();
     let right_names: BTreeSet<_> = right_dirs.iter().collect();
     let mut removed: Vec<_> = left_dirs
@@ -35,7 +37,7 @@ pub(crate) fn directory_changes(
             .then(left.cmp(right))
     });
 
-    let mut changes: Vec<crate::semdif::Change> = Vec::new();
+    let mut changes: Vec<Box<dyn Change>> = Vec::new();
     for path in removed {
         changes.push(Box::new(crate::change::DirectoryDeleted {
             scope: crate::change::TREE_SCOPE.to_string(),
@@ -55,9 +57,7 @@ pub(crate) fn directory_changes(
 ///
 /// The file cannot be written while its path is still a directory. Deleting the
 /// files inside, then the directory, leaves the path free for the new file.
-pub(crate) fn place_replacement_files(
-    changes: Vec<crate::semdif::Change>,
-) -> Vec<crate::semdif::Change> {
+pub(crate) fn place_replacement_files(changes: Vec<Box<dyn Change>>) -> Vec<Box<dyn Change>> {
     let removed: BTreeSet<_> = changes
         .iter()
         .filter_map(|change| {

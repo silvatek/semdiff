@@ -2,7 +2,7 @@
 
 use std::path::Path;
 
-use super::{applied_with_its_file, Content, GenericChange, LineEdit, LinePlan, LineSpan};
+use super::{applied_with_its_file, Change, Content, LineEdit, LinePlan, LineSpan};
 
 /// The scope, line numbers, and text shared by a line addition, removal, and
 /// modification.
@@ -32,7 +32,7 @@ fn extend_span(
     body: &mut LineBody,
     old_len: usize,
     new_len: usize,
-    next: &dyn GenericChange,
+    next: &dyn Change,
 ) -> bool {
     if next.kind() != kind || next.scope() != body.scope {
         return false;
@@ -93,8 +93,8 @@ fn span(body: &LineBody) -> LineSpan {
 /// one another on both sides. They do not change the line count, so `lines`
 /// stays `+0`. The merged change keeps the first line number. Its text keeps
 /// every line, joined by a newline. An identifier rename stays its own change.
-pub(crate) fn merge_adjacent(changes: Vec<super::Change>) -> Vec<super::Change> {
-    let mut merged: Vec<super::Change> = Vec::new();
+pub(crate) fn merge_adjacent(changes: Vec<Box<dyn super::Change>>) -> Vec<Box<dyn super::Change>> {
+    let mut merged: Vec<Box<dyn super::Change>> = Vec::new();
     for change in changes {
         let extended = match merged
             .last_mut()
@@ -127,7 +127,7 @@ impl LineAdded {
     }
 }
 
-impl GenericChange for LineAdded {
+impl Change for LineAdded {
     fn kind(&self) -> &'static str {
         "line-added"
     }
@@ -176,7 +176,7 @@ impl LineEdit for LineAdded {
         Some(&self.body.text)
     }
 
-    fn extend(&mut self, next: &dyn GenericChange) -> bool {
+    fn extend(&mut self, next: &dyn Change) -> bool {
         let new_len = line_count(&self.body.text);
         extend_span(self.kind(), &mut self.body, 0, new_len, next)
     }
@@ -208,7 +208,7 @@ impl LineRemoved {
     }
 }
 
-impl GenericChange for LineRemoved {
+impl Change for LineRemoved {
     fn kind(&self) -> &'static str {
         "line-removed"
     }
@@ -258,7 +258,7 @@ impl LineEdit for LineRemoved {
         Some(&self.body.text)
     }
 
-    fn extend(&mut self, next: &dyn GenericChange) -> bool {
+    fn extend(&mut self, next: &dyn Change) -> bool {
         let old_len = line_count(&self.body.text);
         extend_span(self.kind(), &mut self.body, old_len, 0, next)
     }
@@ -296,7 +296,7 @@ impl LineModified {
     }
 }
 
-impl GenericChange for LineModified {
+impl Change for LineModified {
     fn kind(&self) -> &'static str {
         "line-modified"
     }
@@ -345,7 +345,7 @@ impl LineEdit for LineModified {
         Some(&self.body.text)
     }
 
-    fn extend(&mut self, next: &dyn GenericChange) -> bool {
+    fn extend(&mut self, next: &dyn Change) -> bool {
         let count = line_count(&self.body.text);
         extend_span(self.kind(), &mut self.body, count, count, next)
     }
@@ -375,7 +375,7 @@ pub(crate) struct IdentifierRenamed {
     pub(crate) newname: String,
 }
 
-impl GenericChange for IdentifierRenamed {
+impl Change for IdentifierRenamed {
     fn kind(&self) -> &'static str {
         "identifier-renamed"
     }

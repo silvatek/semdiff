@@ -2,7 +2,7 @@ use std::collections::BTreeMap;
 use std::fs;
 use std::process::ExitCode;
 
-pub(crate) use crate::change::Change;
+use crate::change::Change;
 
 use base64::engine::general_purpose::STANDARD;
 use base64::Engine;
@@ -37,19 +37,19 @@ pub(crate) fn write_output(
 ///
 /// The header is always present. Changes are included only when some were found, so an
 /// unchanged pair does not gain an empty change list.
-fn semdif_document(version: &str, timestamp: &str, changes: &[Change]) -> String {
+fn semdif_document(version: &str, timestamp: &str, changes: &[Box<dyn Change>]) -> String {
     let mut document = header_document(version, timestamp);
     if changes.is_empty() {
         return document;
     }
     document.push_str("changes:\n");
     for change in changes {
-        write_change(&mut document, change);
+        write_change(&mut document, change.as_ref());
     }
     document
 }
 
-fn write_change(document: &mut String, change: &Change) {
+fn write_change(document: &mut String, change: &dyn Change) {
     document.push_str(&format!("  - scope: {}\n", yaml_string(change.scope())));
     document.push_str(&format!("    type: {}\n", change.kind()));
     document.push_str("    details:\n");
@@ -127,7 +127,7 @@ fn utc_timestamp() -> String {
 ///
 /// The header is not needed to replay the edits. A change whose kind is not known
 /// is rejected so an unsupported edit is not skipped.
-pub(crate) fn parse_changes(document: &str) -> Result<Vec<Change>, String> {
+pub(crate) fn parse_changes(document: &str) -> Result<Vec<Box<dyn Change>>, String> {
     let mut lines = document.lines();
     if lines.find(|line| line.trim() == "changes:").is_none() {
         return Ok(Vec::new());
@@ -188,7 +188,7 @@ impl PartialChange {
         Ok(())
     }
 
-    fn finish(self) -> Result<Change, String> {
+    fn finish(self) -> Result<Box<dyn Change>, String> {
         if self.scope.is_empty() {
             return Err("change is missing a scope".to_string());
         }
@@ -214,9 +214,12 @@ impl PartialChange {
     }
 }
 
-type Parser = fn(String, BTreeMap<String, String>) -> Result<Change, String>;
+type Parser = fn(String, BTreeMap<String, String>) -> Result<Box<dyn Change>, String>;
 
-fn parse_file_renamed(scope: String, fields: BTreeMap<String, String>) -> Result<Change, String> {
+fn parse_file_renamed(
+    scope: String,
+    fields: BTreeMap<String, String>,
+) -> Result<Box<dyn Change>, String> {
     Ok(Box::new(crate::change::FileRenamed {
         scope,
         from: required(&fields, "from", "file-renamed")?,
@@ -224,14 +227,20 @@ fn parse_file_renamed(scope: String, fields: BTreeMap<String, String>) -> Result
     }))
 }
 
-fn parse_file_deleted(scope: String, fields: BTreeMap<String, String>) -> Result<Change, String> {
+fn parse_file_deleted(
+    scope: String,
+    fields: BTreeMap<String, String>,
+) -> Result<Box<dyn Change>, String> {
     Ok(Box::new(crate::change::FileDeleted {
         scope,
         path: required(&fields, "path", "file-deleted")?,
     }))
 }
 
-fn parse_file_added(scope: String, fields: BTreeMap<String, String>) -> Result<Change, String> {
+fn parse_file_added(
+    scope: String,
+    fields: BTreeMap<String, String>,
+) -> Result<Box<dyn Change>, String> {
     Ok(Box::new(crate::change::FileAdded {
         scope,
         path: required(&fields, "path", "file-added")?,
@@ -239,7 +248,10 @@ fn parse_file_added(scope: String, fields: BTreeMap<String, String>) -> Result<C
     }))
 }
 
-fn parse_line_added(scope: String, fields: BTreeMap<String, String>) -> Result<Change, String> {
+fn parse_line_added(
+    scope: String,
+    fields: BTreeMap<String, String>,
+) -> Result<Box<dyn Change>, String> {
     let text = required(&fields, "text", "line-added")?;
     expect_added_lines(&fields, &text)?;
     Ok(Box::new(crate::change::LineAdded::new(
@@ -250,7 +262,10 @@ fn parse_line_added(scope: String, fields: BTreeMap<String, String>) -> Result<C
     )))
 }
 
-fn parse_line_removed(scope: String, fields: BTreeMap<String, String>) -> Result<Change, String> {
+fn parse_line_removed(
+    scope: String,
+    fields: BTreeMap<String, String>,
+) -> Result<Box<dyn Change>, String> {
     let old = required_line(&fields, "old", "line-removed")?;
     let text = required(&fields, "text", "line-removed")?;
     expect_removed_lines(&fields, old, &text)?;
@@ -262,7 +277,10 @@ fn parse_line_removed(scope: String, fields: BTreeMap<String, String>) -> Result
     )))
 }
 
-fn parse_line_modified(scope: String, fields: BTreeMap<String, String>) -> Result<Change, String> {
+fn parse_line_modified(
+    scope: String,
+    fields: BTreeMap<String, String>,
+) -> Result<Box<dyn Change>, String> {
     let text = required(&fields, "text", "line-modified")?;
     expect_modified_lines(&fields)?;
     Ok(Box::new(crate::change::LineModified::new(
@@ -276,7 +294,7 @@ fn parse_line_modified(scope: String, fields: BTreeMap<String, String>) -> Resul
 fn parse_identifier_renamed(
     scope: String,
     fields: BTreeMap<String, String>,
-) -> Result<Change, String> {
+) -> Result<Box<dyn Change>, String> {
     Ok(Box::new(crate::change::IdentifierRenamed {
         scope,
         old: required_line(&fields, "old", "identifier-renamed")?,
@@ -289,7 +307,7 @@ fn parse_identifier_renamed(
 fn parse_directory_added(
     scope: String,
     fields: BTreeMap<String, String>,
-) -> Result<Change, String> {
+) -> Result<Box<dyn Change>, String> {
     Ok(Box::new(crate::change::DirectoryAdded {
         scope,
         path: required(&fields, "path", "directory-added")?,
@@ -299,7 +317,7 @@ fn parse_directory_added(
 fn parse_directory_deleted(
     scope: String,
     fields: BTreeMap<String, String>,
-) -> Result<Change, String> {
+) -> Result<Box<dyn Change>, String> {
     Ok(Box::new(crate::change::DirectoryDeleted {
         scope,
         path: required(&fields, "path", "directory-deleted")?,
@@ -310,7 +328,10 @@ fn parse_directory_deleted(
 ///
 /// The file path is the change's scope. Hashes are `old` and `new`. A
 /// replacement has `contents` instead. Both are the same change type.
-fn file_changed(scope: String, fields: BTreeMap<String, String>) -> Result<Change, String> {
+fn file_changed(
+    scope: String,
+    fields: BTreeMap<String, String>,
+) -> Result<Box<dyn Change>, String> {
     if fields.contains_key("contents") {
         return Ok(Box::new(crate::change::FileChanged::contents(
             scope,

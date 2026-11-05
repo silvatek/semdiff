@@ -2,7 +2,7 @@
 
 use std::path::Path;
 
-use super::{applied_with_its_file, AddedFile, Content, Digest, GenericChange, Replacement};
+use super::{applied_with_its_file, AddedFile, Change, Content, Digest, Replacement};
 
 pub(crate) struct FileRenamed {
     pub(crate) scope: String,
@@ -10,7 +10,7 @@ pub(crate) struct FileRenamed {
     pub(crate) to: String,
 }
 
-impl GenericChange for FileRenamed {
+impl Change for FileRenamed {
     fn kind(&self) -> &'static str {
         "file-renamed"
     }
@@ -38,7 +38,7 @@ pub(crate) struct FileDeleted {
     pub(crate) path: String,
 }
 
-impl GenericChange for FileDeleted {
+impl Change for FileDeleted {
     fn kind(&self) -> &'static str {
         "file-deleted"
     }
@@ -66,7 +66,7 @@ pub(crate) struct FileAdded {
     pub(crate) contents: Vec<u8>,
 }
 
-impl GenericChange for FileAdded {
+impl Change for FileAdded {
     fn kind(&self) -> &'static str {
         "file-added"
     }
@@ -139,7 +139,7 @@ impl FileChanged {
     }
 }
 
-impl GenericChange for FileChanged {
+impl Change for FileChanged {
     fn kind(&self) -> &'static str {
         "file-changed"
     }

@@ -1,13 +1,15 @@
 use std::fs;
 use std::path::Path;
 
+use crate::change::Change;
+
 /// Content changes for files present on both sides.
 ///
 /// Each paired path is compared on its own. Only pairs whose contents differ are recorded.
 pub(crate) fn content_changes(
     sources: &crate::Sources,
     paired_files: &[String],
-) -> Result<Vec<crate::semdif::Change>, String> {
+) -> Result<Vec<Box<dyn Change>>, String> {
     let left_root = crate::source_base(Path::new(&sources.left));
     let right_root = crate::source_base(Path::new(&sources.right));
     let mut changes = Vec::new();
@@ -27,7 +29,7 @@ fn content_change(
     left_root: &Path,
     right_root: &Path,
     path: &str,
-) -> Result<Vec<crate::semdif::Change>, String> {
+) -> Result<Vec<Box<dyn Change>>, String> {
     let before = read_file(left_root, path)?;
     let after = read_file(right_root, path)?;
     if before == after {
@@ -37,7 +39,7 @@ fn content_change(
         path.to_string(),
         crate::file_change::sha256_hex(&before),
         crate::file_change::sha256_hex(&after),
-    )) as crate::semdif::Change];
+    )) as Box<dyn Change>];
     match (std::str::from_utf8(&before), std::str::from_utf8(&after)) {
         (Ok(before_text), Ok(after_text)) => {
             let line_edits = crate::line_changes::line_changes(path, before_text, after_text);

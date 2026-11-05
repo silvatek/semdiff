@@ -1,10 +1,11 @@
 //! One change in a semdif file.
 //!
-//! Each kind of change is its own type and implements [`GenericChange`]. That
-//! trait is only what every kind has: its semdif type, how widely it applies,
-//! the details it writes, and how it is replayed on its own. A kind that also
-//! edits lines, replaces a file, or removes a directory implements that
-//! narrower trait and reveals it from [`GenericChange`].
+//! Each kind of change is its own type and implements [`Change`]. That trait is
+//! what every kind has: its semdif type, how widely it applies, the details it
+//! writes, and how it is replayed on its own. A list holds `Box<dyn Change>` so
+//! every kind can sit together. A kind that also edits lines, replaces a file,
+//! or removes a directory implements that narrower trait and reveals it from
+//! [`Change`].
 
 mod directory;
 mod file;
@@ -25,17 +26,12 @@ use std::path::Path;
 /// regular expression, stores the scope that says how widely it applies.
 pub(crate) const TREE_SCOPE: &str = ".";
 
-/// A change a semdif file can record.
-///
-/// The value is a trait object so the list can hold every kind. The concrete
-/// type supplies the fields and the operations that differ.
-pub(crate) type Change = Box<dyn GenericChange>;
-
 /// What every change has.
 ///
-/// A kind reveals the narrower traits it implements. The defaults say that
-/// this kind does not.
-pub(crate) trait GenericChange {
+/// A list of changes holds `Box<dyn Change>`, so a rename, a line edit, and a
+/// directory deletion can sit together. A kind reveals the narrower traits it
+/// implements. The defaults say that this kind does not.
+pub(crate) trait Change {
     /// The semdif type name, such as `line-removed`.
     fn kind(&self) -> &'static str;
 
@@ -142,7 +138,7 @@ pub(crate) trait LineEdit {
     ) -> Result<(), String>;
 
     /// Joins `next` onto this edit when the two are one adjacent run.
-    fn extend(&mut self, _next: &dyn GenericChange) -> bool {
+    fn extend(&mut self, _next: &dyn Change) -> bool {
         false
     }
 

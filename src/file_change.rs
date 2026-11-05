@@ -5,6 +5,8 @@ use std::path::Path;
 
 use sha2::{Digest, Sha256};
 
+use crate::change::Change;
+
 const HASH_BUFFER_SIZE: usize = 8 * 1024;
 
 /// Renames, deletions, and additions among the files that exist on only one side.
@@ -17,7 +19,7 @@ pub(crate) fn file_changes(
     sources: &crate::Sources,
     left_only: &[String],
     right_only: &[String],
-) -> Result<Vec<crate::semdif::Change>, String> {
+) -> Result<Vec<Box<dyn Change>>, String> {
     let left_root = crate::source_base(Path::new(&sources.left));
     let right_root = crate::source_base(Path::new(&sources.right));
     let mut left_hashes = HashMap::<[u8; 32], Vec<&String>>::new();
@@ -35,7 +37,7 @@ pub(crate) fn file_changes(
             .push(path);
     }
 
-    let mut changes: Vec<crate::semdif::Change> = Vec::new();
+    let mut changes: Vec<Box<dyn Change>> = Vec::new();
     let mut renamed_from = HashSet::new();
     let mut renamed_to = HashSet::new();
     for (hash, from_paths) in left_hashes {

@@ -31,7 +31,7 @@ fn main() -> ExitCode {
 
 struct Differences {
     paths: Vec<String>,
-    changes: Vec<semdif::Change>,
+    changes: Vec<Box<dyn change::Change>>,
 }
 
 /// The shared files and file changes between the two sources.
