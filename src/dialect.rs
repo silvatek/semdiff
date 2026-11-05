@@ -1,15 +1,16 @@
 //! Languages semdiff can read.
 //!
 //! The comparison does not consult these descriptions yet. They record how a
-//! language writes comments and blocks, so the next semantic step can ask.
+//! language writes comments, blocks, and identifiers, so the next semantic
+//! step can ask.
 
 #![cfg_attr(not(test), allow(dead_code))]
 
 /// A language semdiff knows how to read.
 ///
-/// Extensions select its files. The comment markers and the block edges say
-/// what the text means, so a later comparison can tell a comment from code
-/// and can see where a block starts and ends.
+/// Extensions select its files. The comment markers, the block edges, and the
+/// identifier characters say what the text means, so a later comparison can
+/// tell a comment from code and can see where a name or a block starts and ends.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) struct Dialect {
     /// Extensions that identify this dialect, including the leading dot.
@@ -22,7 +23,26 @@ pub(crate) struct Dialect {
     pub block_start: BlockEdge,
     /// How a block of code ends.
     pub block_end: BlockEdge,
+    /// Characters that can appear in an identifier.
+    pub identifier_characters: IdentifierCharacters,
 }
+
+/// ASCII characters that can appear in an identifier.
+///
+/// `start` can open a name. `continue_with` is every valid character, including
+/// `start` and the digits, which cannot open a name. A character outside this
+/// list can still belong to a name when Unicode treats it as an identifier
+/// character: `XID_Start` to open, `XID_Continue` to follow.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct IdentifierCharacters {
+    /// ASCII characters that can begin an identifier.
+    pub start: &'static str,
+    /// ASCII characters that can continue an identifier, including `start`.
+    pub continue_with: &'static str,
+}
+
+const IDENTIFIER_START: &str = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz_";
+const IDENTIFIER_CONTINUE: &str = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz_0123456789";
 
 /// The opening and closing text of a comment that can span lines.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -49,7 +69,8 @@ pub(crate) enum BlockEdge {
 ///
 /// Rust files use `.rs`. A line comment starts with `//`, which also covers
 /// the doc forms `///` and `//!`. A block comment runs from `/*` to `*/`.
-/// A block of code starts with `{` and ends with `}`.
+/// A block of code starts with `{` and ends with `}`. An identifier starts
+/// with a letter or `_` and continues with letters, digits, or `_`.
 pub(crate) static RUST: Dialect = Dialect {
     extensions: &[".rs"],
     line_comment: "//",
@@ -59,6 +80,10 @@ pub(crate) static RUST: Dialect = Dialect {
     }),
     block_start: BlockEdge::Token("{"),
     block_end: BlockEdge::Token("}"),
+    identifier_characters: IdentifierCharacters {
+        start: IDENTIFIER_START,
+        continue_with: IDENTIFIER_CONTINUE,
+    },
 };
 
 /// The Python dialect.
@@ -66,13 +91,18 @@ pub(crate) static RUST: Dialect = Dialect {
 /// Python files use `.py`. A comment starts with `#` and ends at the end of
 /// the line. Python does not denote a multi-line comment: a triple-quoted
 /// string is a string. A block starts by indenting and ends when the
-/// indentation returns.
+/// indentation returns. An identifier starts with a letter or `_` and
+/// continues with letters, digits, or `_`.
 pub(crate) static PYTHON: Dialect = Dialect {
     extensions: &[".py"],
     line_comment: "#",
     block_comment: None,
     block_start: BlockEdge::Indentation,
     block_end: BlockEdge::Indentation,
+    identifier_characters: IdentifierCharacters {
+        start: IDENTIFIER_START,
+        continue_with: IDENTIFIER_CONTINUE,
+    },
 };
 
 /// Every dialect semdiff knows.
@@ -93,7 +123,14 @@ pub(crate) fn for_path(path: &str) -> Option<&'static Dialect> {
 
 #[cfg(test)]
 mod tests {
-    use super::{for_path, BlockEdge, PYTHON, RUST};
+    use super::{for_path, BlockEdge, IdentifierCharacters, PYTHON, RUST};
+
+    fn ascii_identifiers() -> IdentifierCharacters {
+        IdentifierCharacters {
+            start: "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz_",
+            continue_with: "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz_0123456789",
+        }
+    }
 
     #[test]
     fn rust_uses_slashes_and_braces() {
@@ -104,6 +141,7 @@ mod tests {
         assert_eq!(comment.end, "*/");
         assert_eq!(RUST.block_start, BlockEdge::Token("{"));
         assert_eq!(RUST.block_end, BlockEdge::Token("}"));
+        assert_eq!(RUST.identifier_characters, ascii_identifiers());
     }
 
     #[test]
@@ -113,6 +151,7 @@ mod tests {
         assert_eq!(PYTHON.block_comment, None);
         assert_eq!(PYTHON.block_start, BlockEdge::Indentation);
         assert_eq!(PYTHON.block_end, BlockEdge::Indentation);
+        assert_eq!(PYTHON.identifier_characters, ascii_identifiers());
     }
 
     #[test]
