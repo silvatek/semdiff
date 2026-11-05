@@ -6,16 +6,19 @@
 //! every kind can sit together. A kind that also edits lines, replaces a file,
 //! or removes a directory implements that narrower trait and reveals it from
 //! [`Change`].
+//!
+//! Directory changes, file changes, line changes, and span changes live in
+//! their own modules. A span is a portion of one line. Its scope is `path:line`.
 
 mod directory;
 mod file;
 mod line;
+mod span;
 
 pub(crate) use directory::{DirectoryAdded, DirectoryDeleted};
 pub(crate) use file::{FileAdded, FileChanged, FileDeleted, FileRenamed};
-pub(crate) use line::{
-    merge_adjacent, parse_span_scope, IdentifierRenamed, LineAdded, LineModified, LineRemoved,
-};
+pub(crate) use line::{merge_adjacent, LineAdded, LineModified, LineRemoved};
+pub(crate) use span::{parse_span_scope, IdentifierRenamed, SpanScope};
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::Path;
@@ -26,8 +29,10 @@ use crate::filesystem::FileSystem;
 ///
 /// A rename, an added or deleted file, and an added or deleted directory use
 /// this scope. A change to the lines or bytes of one file is scoped to that
-/// file. A later change that spans several files, such as renaming files by a
-/// regular expression, stores the scope that says how widely it applies.
+/// file. A span change is scoped to one old line of that file, written
+/// `path:line`. A later change that spans several files, such as renaming
+/// files by a regular expression, stores the scope that says how widely it
+/// applies.
 pub(crate) const TREE_SCOPE: &str = ".";
 
 /// What every change has.
@@ -105,8 +110,8 @@ pub(crate) trait Change {
 ///
 /// Apply groups these by [`Content::file`], checks the old hash, builds the
 /// new bytes, checks the new hash, and writes the file once. For a line
-/// change, that file is the change's scope. For an identifier rename, the
-/// scope is `path:line` and the file is the path.
+/// change, that file is the change's scope. For a span change, the scope is
+/// `path:line` and the file is the path.
 pub(crate) trait Content {
     /// The file those edits share.
     fn file(&self) -> &str;
@@ -126,7 +131,7 @@ pub(crate) trait Replacement {
 /// An edit of one or more lines.
 ///
 /// `extend` stays separate unless this kind joins an adjacent run of the same
-/// kind. An identifier rename does not.
+/// kind. A span change does not.
 pub(crate) trait LineEdit {
     /// `old`, then `new`.
     fn position(&self) -> (usize, usize);
@@ -161,8 +166,8 @@ pub(crate) trait LineEdit {
     /// Appends one following line onto this edit.
     ///
     /// The text of a joined run is stored as one string, with a newline between
-    /// lines. A kind that does not join, such as an identifier rename, leaves
-    /// its text unchanged and returns false.
+    /// lines. A kind that does not join, such as a span change, leaves its
+    /// text unchanged and returns false.
     fn append_text(&mut self, _text: &str) -> bool {
         false
     }

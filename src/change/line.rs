@@ -1,8 +1,7 @@
-//! Line additions, removals, modifications, and identifier renames.
+//! Line additions, removals, and modifications.
 //!
-//! An addition, removal, or modification is a line change. Its scope is the
-//! file. An identifier rename is a span change. Its scope is `path:line`, and
-//! the line is the old line.
+//! A line change's scope is the file. A span change names one old line instead,
+//! and lives in its own module.
 
 use std::path::Path;
 
@@ -14,8 +13,7 @@ use crate::filesystem::FileSystem;
 ///
 /// The scope stays on each of those changes. These three differ in how long
 /// the edit is on the old side and the new side, and in whether a following
-/// edit of the same kind can be appended. An identifier rename does not use
-/// this. Its scope names the old line, and it stores the two names.
+/// edit of the same kind can be appended.
 struct LineBody {
     old: usize,
     new: usize,
@@ -105,7 +103,7 @@ fn line_start(body: &LineBody) -> LineStart {
 /// another on the new side, so `lines` is `+1` or `+2`. Modifications follow
 /// one another on both sides. They do not change the line count, so `lines`
 /// stays `+0`. The merged change keeps the first line number. Its text keeps
-/// every line, joined by a newline. An identifier rename stays its own change.
+/// every line, joined by a newline. A span change stays its own change.
 pub(crate) fn merge_adjacent(changes: Vec<Box<dyn super::Change>>) -> Vec<Box<dyn super::Change>> {
     let mut merged: Vec<Box<dyn super::Change>> = Vec::new();
     for change in changes {
@@ -383,159 +381,5 @@ impl LineEdit for LineModified {
             plan.replace(file, line_no, line.to_string())?;
         }
         Ok(())
-    }
-}
-
-/// An identifier rename on one old line.
-///
-/// The scope is `path:line`. Apply edits `path` and replaces the one
-/// occurrence of the old name on that line. `new` is the same line in the
-/// new file. A rename does not add or remove lines, so that number can move
-/// when an earlier line change shifts the file. It stays in the details
-/// until a later step derives it.
-pub(crate) struct IdentifierRenamed {
-    scope: String,
-    file: String,
-    old: usize,
-    new: usize,
-    oldname: String,
-    newname: String,
-}
-
-impl IdentifierRenamed {
-    /// A rename of one identifier on the old line `old` in `path`.
-    ///
-    /// `new` is that line's number in the new file. The scope records the
-    /// old line.
-    pub(crate) fn new(
-        path: &str,
-        old: usize,
-        new: usize,
-        oldname: String,
-        newname: String,
-    ) -> Self {
-        Self {
-            scope: format!("{path}:{old}"),
-            file: path.to_string(),
-            old,
-            new,
-            oldname,
-            newname,
-        }
-    }
-}
-
-/// The file and old line named by a span scope.
-///
-/// The scope is `path:line`. The line is a 1-based line in the old file.
-/// The last `:` separates them, so a colon in the path stays in the path.
-pub(crate) fn parse_span_scope(scope: &str) -> Result<(&str, usize), String> {
-    let Some((path, line)) = scope.rsplit_once(':') else {
-        return Err(identifier_scope_error(scope));
-    };
-    if path.is_empty() {
-        return Err(identifier_scope_error(scope));
-    }
-    match line.parse::<usize>() {
-        Ok(number) if number >= 1 => Ok((path, number)),
-        _ => Err(identifier_scope_error(scope)),
-    }
-}
-
-fn identifier_scope_error(scope: &str) -> String {
-    format!("identifier-renamed scope must be path:line, not {scope}")
-}
-
-impl Change for IdentifierRenamed {
-    fn kind(&self) -> &'static str {
-        "identifier-renamed"
-    }
-
-    fn scope(&self) -> &str {
-        &self.scope
-    }
-
-    fn line_edit(&self) -> Option<&dyn LineEdit> {
-        Some(self)
-    }
-
-    fn content(&self) -> Option<&dyn Content> {
-        Some(self)
-    }
-
-    fn write_details(&self, document: &mut String) {
-        crate::semdif::write_plain(document, "new", &self.new.to_string());
-        crate::semdif::write_detail(document, "oldname", &self.oldname);
-        crate::semdif::write_detail(document, "newname", &self.newname);
-    }
-
-    fn apply(&self, _fs: &dyn FileSystem, _source: &Path) -> Result<(), String> {
-        applied_with_its_file(self.kind())
-    }
-}
-
-impl Content for IdentifierRenamed {
-    fn file(&self) -> &str {
-        &self.file
-    }
-}
-
-impl LineEdit for IdentifierRenamed {
-    fn position(&self) -> (usize, usize) {
-        (self.old, self.new)
-    }
-
-    fn rebuild(
-        &self,
-        file: &Path,
-        source_lines: &[String],
-        plan: &mut LinePlan,
-    ) -> Result<(), String> {
-        if self.old == 0 || self.old > source_lines.len() {
-            return Err(format!(
-                "line {} is outside {} which has {} lines",
-                self.old,
-                file.display(),
-                source_lines.len()
-            ));
-        }
-        let replaced = match crate::identifier::replace_name(
-            &self.file,
-            &source_lines[self.old - 1],
-            &self.oldname,
-            &self.newname,
-        ) {
-            Ok(text) => text,
-            Err(message) => {
-                return Err(format!(
-                    "cannot rename {} on line {} in {}: {message}",
-                    self.oldname,
-                    self.old,
-                    file.display()
-                ));
-            }
-        };
-        plan.replace(file, self.old, replaced)
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::parse_span_scope;
-
-    #[test]
-    fn an_identifier_scope_names_the_file_and_the_old_line() {
-        assert_eq!(
-            parse_span_scope("src/main.rs:37").unwrap(),
-            ("src/main.rs", 37)
-        );
-        assert_eq!(
-            parse_span_scope("weird:name.rs:4").unwrap(),
-            ("weird:name.rs", 4)
-        );
-        assert!(parse_span_scope("src/main.rs").is_err());
-        assert!(parse_span_scope("src/main.rs:0").is_err());
-        assert!(parse_span_scope("src/main.rs:37-46").is_err());
-        assert!(parse_span_scope(":1").is_err());
     }
 }

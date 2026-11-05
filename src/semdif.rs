@@ -298,10 +298,9 @@ fn parse_identifier_renamed(
     scope: String,
     fields: BTreeMap<String, String>,
 ) -> Result<Box<dyn Change>, String> {
-    let (path, old) = crate::change::parse_span_scope(&scope)?;
+    let span = crate::change::parse_span_scope(&scope)?;
     Ok(Box::new(crate::change::IdentifierRenamed::new(
-        path,
-        old,
+        span,
         required_line(&fields, "new", "identifier-renamed")?,
         required(&fields, "oldname", "identifier-renamed")?,
         required(&fields, "newname", "identifier-renamed")?,
