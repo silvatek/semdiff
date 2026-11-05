@@ -205,6 +205,49 @@ fn merges_the_adjacent_removals_in_the_rust_sample() {
 }
 
 #[test]
+fn flags_whitespace_in_the_samples() {
+    let manifest = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let rust = semdiff::compare_sources(
+        &semdiff::StdFileSystem::new(),
+        manifest.join("TestCode/rust/main/v1").to_str().unwrap(),
+        manifest.join("TestCode/rust/main/v2").to_str().unwrap(),
+    )
+    .unwrap();
+    let python = semdiff::compare_sources(
+        &semdiff::StdFileSystem::new(),
+        manifest.join("TestCode/python/main/v1").to_str().unwrap(),
+        manifest.join("TestCode/python/main/v2").to_str().unwrap(),
+    )
+    .unwrap();
+
+    assert!(rust.contains(
+        "  - scope: \"src/main.rs\"\n    type: line-modified\n    details:\n      old: 63\n      lines: +0\n      new: 63\n      text: \"    let value = 1;\"\n      isWhitespace: true\n"
+    ), "{rust}");
+    assert!(rust.contains(
+        "  - scope: \"src/main.rs\"\n    type: line-modified\n    details:\n      old: 68\n      lines: +0\n      new: 68\n      text: \"    let trailing = 1; \"\n      isWhitespace: true\n"
+    ), "{rust}");
+    assert!(rust.contains(
+        "  - scope: \"src/main.rs\"\n    type: line-added\n    details:\n      old: 72\n      lines: +1\n      new: 72\n      text: \"\"\n      isWhitespace: true\n"
+    ), "{rust}");
+    assert!(
+        !follows_with_whitespace(
+            &python,
+            "  - scope: \"src/main.py\"\n    type: line-modified\n    details:\n      old: 61\n      lines: +0\n      new: 61\n      text: \"        x = 1\"\n"
+        ),
+        "{python}"
+    );
+    assert!(python.contains(
+        "  - scope: \"src/main.py\"\n    type: line-modified\n    details:\n      old: 64\n      lines: +0\n      new: 64\n      text: \"trailing = 1 \"\n      isWhitespace: true\n"
+    ), "{python}");
+    assert!(python.contains(
+        "  - scope: \"src/main.py\"\n    type: line-modified\n    details:\n      old: 67\n      lines: +0\n      new: 67\n      text: \"    # margin\"\n      isComment: true\n      isWhitespace: true\n"
+    ), "{python}");
+    assert!(python.contains(
+        "  - scope: \"src/main.py\"\n    type: line-added\n    details:\n      old: 70\n      lines: +1\n      new: 70\n      text: \"\"\n      isWhitespace: true\n"
+    ), "{python}");
+}
+
+#[test]
 fn rejects_a_line_removal_whose_line_count_is_positive() {
     let tree = Tree::new();
     tree.write("edited/note.txt", "keep\ngone\n");
