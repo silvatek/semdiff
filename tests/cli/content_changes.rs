@@ -175,8 +175,13 @@ fn merges_the_adjacent_removals_in_the_rust_sample() {
         "  - scope: \"src/main.rs\"\n    type: line-added\n    details:\n      old: 53\n      lines: +2\n      new: 51\n      text: \"// This added line is first.\\n// This added line is second.\"\n"
     ));
     assert!(document.contains(
-        "  - scope: \"src/main.rs:1-38\"\n    type: identifier-renamed\n    details:\n      oldname: \"fibonacci\"\n      newname: \"fib\"\n"
+        "  - scope: \"src\"\n    type: identifier-renamed\n    details:\n      oldname: \"fibonacci\"\n      newname: \"fib\"\n"
     ));
+    assert!(!document.contains("scope: \"src/main.rs:1-38\""), "{document}");
+    assert!(
+        !document.contains("scope: \"src/report.rs:"),
+        "{document}"
+    );
     assert!(document.contains(
         "  - scope: \"src/main.rs:46\"\n    type: identifier-renamed\n    details:\n      new: 46\n      oldname: \"zero\"\n      newname: \"one\"\n"
     ));
@@ -296,8 +301,10 @@ fn records_an_identifier_rename_when_one_name_changes() {
     let document = tree.compare("left", "right");
 
     assert!(document.contains(
-        "  - scope: \"src/main.rs:1\"\n    type: identifier-renamed\n    details:\n      new: 1\n      oldname: \"fibonacci\"\n      newname: \"fib\"\n"
+        "  - scope: \".\"\n    type: identifier-renamed\n    details:\n      oldname: \"fibonacci\"\n      newname: \"fib\"\n"
     ));
+    assert!(!document.contains("scope: \"src/main.rs:1\""), "{document}");
+    assert!(!document.contains("scope: \"calc.py:1\""), "{document}");
     assert!(document.contains(
         "  - scope: \"src/main.rs\"\n    type: line-modified\n    details:\n      old: 2\n      lines: +0\n      new: 2\n      text: \"    let total = fox + baz;\"\n"
     ));
@@ -308,10 +315,6 @@ fn records_an_identifier_rename_when_one_name_changes() {
     assert!(document.contains(
         "  - scope: \"note.txt\"\n    type: line-modified\n    details:\n      old: 1\n      lines: +0\n      new: 1\n      text: \"hallo\"\n"
     ));
-    assert!(document.contains(
-        "  - scope: \"calc.py:1\"\n    type: identifier-renamed\n    details:\n      new: 1\n      oldname: \"fibonacci\"\n      newname: \"fib\"\n"
-    ));
-
     tree.apply("edited", &document).unwrap();
     assert_eq!(tree.read("edited/src/main.rs"), after.as_bytes());
     assert_eq!(tree.read("edited/src/twice.rs"), twice_after.as_bytes());
@@ -346,7 +349,7 @@ changes:
 }
 
 #[test]
-fn rejects_an_identifier_rename_whose_scope_has_no_line() {
+fn rejects_an_identifier_rename_whose_line_is_zero() {
     let tree = Tree::new();
     tree.write("edited/src/main.rs", "fn fibonacci() {}\n");
     let message = tree
@@ -357,18 +360,102 @@ header:
   semdiff: \"0.1.0\"
   timestamp: \"2020-01-01T00:00:00Z\"
 changes:
-  - scope: \"src/main.rs\"
+  - scope: \"src/main.rs:0\"
     type: identifier-renamed
     details:
       new: 1
-      oldname: \"fibonacci\"
-      newname: \"fib\"
+      oldname: \"fibonacci\"\n      newname: \"fib\"
 ",
         )
         .unwrap_err();
 
     assert!(message.contains("path:line"), "{message}");
     assert_eq!(tree.read("edited/src/main.rs"), b"fn fibonacci() {}\n");
+}
+
+#[test]
+fn merges_renames_of_one_name_across_files_in_one_directory() {
+    let tree = Tree::new();
+    tree.write("left/src/a.rs", "fn foo() {}\n");
+    tree.write("right/src/a.rs", "fn bar() {}\n");
+    tree.write("edited/src/a.rs", "fn foo() {}\n");
+    tree.write("left/src/b.rs", "foo();\n");
+    tree.write("right/src/b.rs", "bar();\n");
+    tree.write("edited/src/b.rs", "foo();\n");
+    tree.write("left/tests/c.rs", "fn foo() {}\n");
+    tree.write("right/tests/c.rs", "fn foo() {}\n");
+    tree.write("edited/tests/c.rs", "fn foo() {}\n");
+
+    let document = tree.compare("left", "right");
+
+    assert!(document.contains(
+        "  - scope: \"src\"\n    type: identifier-renamed\n    details:\n      oldname: \"foo\"\n      newname: \"bar\"\n"
+    ));
+    assert!(!document.contains("scope: \"src/a.rs:"), "{document}");
+    assert!(!document.contains("scope: \"src/b.rs:"), "{document}");
+    assert!(!document.contains("scope: \"tests/c.rs\""), "{document}");
+
+    tree.apply("edited", &document).unwrap();
+    assert_eq!(tree.read("edited/src/a.rs"), b"fn bar() {}\n");
+    assert_eq!(tree.read("edited/src/b.rs"), b"bar();\n");
+    assert_eq!(tree.read("edited/tests/c.rs"), b"fn foo() {}\n");
+}
+
+#[test]
+fn a_tree_rename_leaves_a_binary_file_to_its_own_record() {
+    let tree = Tree::new();
+    let binary = b"\x00\xff";
+    tree.write("left/a.rs", "fn foo() {}\n");
+    tree.write("right/a.rs", "fn bar() {}\n");
+    tree.write("edited/a.rs", "fn foo() {}\n");
+    tree.write("left/b.rs", "foo();\n");
+    tree.write("right/b.rs", "bar();\n");
+    tree.write("edited/b.rs", "foo();\n");
+    tree.write("left/data.bin", b"old");
+    tree.write("right/data.bin", binary);
+    tree.write("edited/data.bin", b"old");
+
+    let document = tree.compare("left", "right");
+
+    assert!(document.contains(
+        "  - scope: \".\"\n    type: identifier-renamed\n    details:\n      oldname: \"foo\"\n      newname: \"bar\"\n"
+    ));
+    assert!(document.contains("scope: \"data.bin\""));
+    assert!(document.contains("encoding: \"base64\""));
+
+    tree.apply("edited", &document).unwrap();
+    assert_eq!(tree.read("edited/a.rs"), b"fn bar() {}\n");
+    assert_eq!(tree.read("edited/b.rs"), b"bar();\n");
+    assert_eq!(tree.read("edited/data.bin"), binary);
+}
+
+#[test]
+fn keeps_file_renames_when_the_directory_still_has_the_name() {
+    let tree = Tree::new();
+    tree.write("left/src/a.rs", "fn foo() {}\n");
+    tree.write("right/src/a.rs", "fn bar() {}\n");
+    tree.write("edited/src/a.rs", "fn foo() {}\n");
+    tree.write("left/src/b.rs", "foo();\n");
+    tree.write("right/src/b.rs", "bar();\n");
+    tree.write("edited/src/b.rs", "foo();\n");
+    tree.write("left/src/c.rs", "fn foo() {}\n");
+    tree.write("right/src/c.rs", "fn foo() {}\n");
+    tree.write("edited/src/c.rs", "fn foo() {}\n");
+
+    let document = tree.compare("left", "right");
+
+    assert!(document.contains(
+        "  - scope: \"src/a.rs:1\"\n    type: identifier-renamed\n    details:\n      new: 1\n      oldname: \"foo\"\n      newname: \"bar\"\n"
+    ));
+    assert!(document.contains(
+        "  - scope: \"src/b.rs:1\"\n    type: identifier-renamed\n    details:\n      new: 1\n      oldname: \"foo\"\n      newname: \"bar\"\n"
+    ));
+    assert!(!document.contains("scope: \"src\""), "{document}");
+
+    tree.apply("edited", &document).unwrap();
+    assert_eq!(tree.read("edited/src/a.rs"), b"fn bar() {}\n");
+    assert_eq!(tree.read("edited/src/b.rs"), b"bar();\n");
+    assert_eq!(tree.read("edited/src/c.rs"), b"fn foo() {}\n");
 }
 
 #[test]

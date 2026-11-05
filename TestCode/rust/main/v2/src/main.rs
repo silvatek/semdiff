@@ -54,3 +54,6 @@ mod tests {
 // Two lines below are changed in v2.
 // New first line.
 // New second line.
+
+// report.rs also calls the function above.
+mod report;

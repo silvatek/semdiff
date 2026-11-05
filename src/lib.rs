@@ -65,6 +65,8 @@ struct Differences {
 /// Empty directories that appear or disappear are recorded too, including one
 /// left empty because its files moved. Adjacent removed, added, or modified
 /// lines in one file become one record before the semdif file is written.
+/// Identifier renames of one name then join across files when the directory
+/// that covers them has no other occurrence of that name.
 fn find_differences(fs: &dyn FileSystem, sources: &Sources) -> Result<Differences, String> {
     let left_files = fs.collect_files(Path::new(&sources.left))?;
     let right_files = fs.collect_files(Path::new(&sources.right))?;
@@ -84,10 +86,38 @@ fn find_differences(fs: &dyn FileSystem, sources: &Sources) -> Result<Difference
     ));
     let changes = directory_changes::place_replacement_files(changes);
     let changes = change::merge_adjacent(changes);
+    let left_root = fs.source_base(Path::new(&sources.left));
+    let texts = source_texts(fs, left_root, &left_files)?;
+    let changes = change::merge_identifier_files(&texts, changes);
     Ok(Differences {
         paths: paired_files,
         changes,
     })
+}
+
+/// The old text of each file, so a rename can see every occurrence of a name.
+///
+/// A file that is not text has no lines. It holds no identifiers.
+fn source_texts(
+    fs: &dyn FileSystem,
+    root: &Path,
+    files: &[String],
+) -> Result<Vec<change::SourceText>, String> {
+    let mut texts = Vec::new();
+    for path in files {
+        let bytes = fs
+            .read(&root.join(path))
+            .map_err(|error| format!("cannot read {}: {error}", root.join(path).display()))?;
+        let lines = match std::str::from_utf8(&bytes) {
+            Ok(text) => line_changes::split_text(text).lines,
+            Err(_) => Vec::new(),
+        };
+        texts.push(change::SourceText {
+            path: path.clone(),
+            lines,
+        });
+    }
+    Ok(texts)
 }
 
 /// Files only on the left, only on the right, and present under the same path on both sides.
