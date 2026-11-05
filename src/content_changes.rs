@@ -21,7 +21,8 @@ pub(crate) fn content_changes(
 ///
 /// Matching copies are left out. Text is recorded as one change per added,
 /// removed, or modified line. Bytes that are not text stay one whole-file change,
-/// because they have no lines to compare.
+/// because they have no lines to compare. Every changed file also records the
+/// SHA-256 of the old bytes and the new bytes, so apply can check both.
 fn content_change(
     left_root: &Path,
     right_root: &Path,
@@ -32,24 +33,31 @@ fn content_change(
     if before == after {
         return Ok(Vec::new());
     }
+    let mut changes = vec![crate::semdif::Change::FileDigest {
+        path: path.to_string(),
+        old_hash: crate::file_change::sha256_hex(&before),
+        new_hash: crate::file_change::sha256_hex(&after),
+    }];
     match (std::str::from_utf8(&before), std::str::from_utf8(&after)) {
         (Ok(before_text), Ok(after_text)) => {
-            let changes = crate::line_changes::line_changes(path, before_text, after_text);
+            let line_edits = crate::line_changes::line_changes(path, before_text, after_text);
             // The line lists match, and the bytes still differ. That difference is
             // the final newline, which is not itself a line.
-            if changes.is_empty() {
-                return Ok(vec![crate::semdif::Change::FileChanged {
+            if line_edits.is_empty() {
+                changes.push(crate::semdif::Change::FileChanged {
                     path: path.to_string(),
                     contents: after,
-                }]);
+                });
+            } else {
+                changes.extend(line_edits);
             }
-            Ok(changes)
         }
-        _ => Ok(vec![crate::semdif::Change::FileChanged {
+        _ => changes.push(crate::semdif::Change::FileChanged {
             path: path.to_string(),
             contents: after,
-        }]),
+        }),
     }
+    Ok(changes)
 }
 
 fn read_file(root: &Path, relative: &str) -> Result<Vec<u8>, String> {

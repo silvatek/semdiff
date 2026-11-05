@@ -76,6 +76,18 @@ fn write_change(document: &mut String, change: &Change) {
             document.push_str(&format!("      path: {}\n", yaml_string(path)));
             write_file_contents(document, contents);
         }
+        Change::FileDigest {
+            path,
+            old_hash,
+            new_hash,
+        } => {
+            document.push_str("  - scope: \".\"\n");
+            document.push_str("    type: file-changed\n");
+            document.push_str("    details:\n");
+            document.push_str(&format!("      path: {}\n", yaml_string(path)));
+            document.push_str(&format!("      old: {}\n", yaml_string(old_hash)));
+            document.push_str(&format!("      new: {}\n", yaml_string(new_hash)));
+        }
         Change::LineAdded {
             path,
             old,
@@ -195,6 +207,11 @@ pub(crate) enum Change {
         path: String,
         contents: Vec<u8>,
     },
+    FileDigest {
+        path: String,
+        old_hash: String,
+        new_hash: String,
+    },
     LineAdded {
         path: String,
         old: usize,
@@ -302,10 +319,7 @@ impl PartialChange {
                 path: required(&self.fields, "path", "file-added")?,
                 contents: stored_bytes(&self.fields, "file-added")?,
             }),
-            "file-changed" => Ok(Change::FileChanged {
-                path: required(&self.fields, "path", "file-changed")?,
-                contents: stored_bytes(&self.fields, "file-changed")?,
-            }),
+            "file-changed" => file_changed(self.fields),
             "line-added" => Ok(Change::LineAdded {
                 path: required(&self.fields, "path", "line-added")?,
                 old: required_line(&self.fields, "old", "line-added")?,
@@ -333,6 +347,39 @@ impl PartialChange {
             "" => Err("change is missing a type".to_string()),
             other => Err(format!("unknown change type {other}")),
         }
+    }
+}
+
+/// A whole-file replacement, or the old and new SHA-256 hashes of a changed file.
+///
+/// The hash record has `old` and `new`. A replacement has `contents` instead.
+fn file_changed(fields: BTreeMap<String, String>) -> Result<Change, String> {
+    let path = required(&fields, "path", "file-changed")?;
+    if fields.contains_key("contents") {
+        return Ok(Change::FileChanged {
+            path,
+            contents: stored_bytes(&fields, "file-changed")?,
+        });
+    }
+    Ok(Change::FileDigest {
+        path,
+        old_hash: required_hash(&fields, "old", "file-changed")?,
+        new_hash: required_hash(&fields, "new", "file-changed")?,
+    })
+}
+
+/// A SHA-256 hex digest recorded for a changed file.
+fn required_hash(
+    fields: &BTreeMap<String, String>,
+    key: &str,
+    kind: &str,
+) -> Result<String, String> {
+    let text = required(fields, key, kind)?;
+    let hex = text.to_ascii_lowercase();
+    if hex.len() == 64 && hex.bytes().all(|byte| byte.is_ascii_hexdigit()) {
+        Ok(hex)
+    } else {
+        Err(format!("{kind} has invalid {key}"))
     }
 }
 
