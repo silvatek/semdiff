@@ -35,7 +35,7 @@ pub(crate) fn file_changes(
             .push(path);
     }
 
-    let mut changes = Vec::new();
+    let mut changes: Vec<crate::semdif::Change> = Vec::new();
     let mut renamed_from = HashSet::new();
     let mut renamed_to = HashSet::new();
     for (hash, from_paths) in left_hashes {
@@ -45,43 +45,27 @@ pub(crate) fn file_changes(
         if from_paths.len() == 1 && to_paths.len() == 1 {
             renamed_from.insert(from_paths[0].as_str());
             renamed_to.insert(to_paths[0].as_str());
-            changes.push(crate::semdif::Change::FileRenamed {
+            changes.push(Box::new(crate::change::FileRenamed {
                 from: from_paths[0].clone(),
                 to: to_paths[0].clone(),
-            });
+            }));
         }
     }
     for path in left_only {
         if !renamed_from.contains(path.as_str()) {
-            changes.push(crate::semdif::Change::FileDeleted { path: path.clone() });
+            changes.push(Box::new(crate::change::FileDeleted { path: path.clone() }));
         }
     }
     for path in right_only {
         if !renamed_to.contains(path.as_str()) {
-            changes.push(crate::semdif::Change::FileAdded {
+            changes.push(Box::new(crate::change::FileAdded {
                 path: path.clone(),
                 contents: read_file(right_root, path)?,
-            });
+            }));
         }
     }
-    changes.sort_by(|left, right| change_key(left).cmp(&change_key(right)));
+    changes.sort_by(|left, right| left.sort_key().cmp(&right.sort_key()));
     Ok(changes)
-}
-
-fn change_key(change: &crate::semdif::Change) -> (&str, &str) {
-    match change {
-        crate::semdif::Change::FileRenamed { from, to } => (from, to),
-        crate::semdif::Change::FileDeleted { path }
-        | crate::semdif::Change::FileAdded { path, .. }
-        | crate::semdif::Change::FileChanged { path, .. }
-        | crate::semdif::Change::FileDigest { path, .. }
-        | crate::semdif::Change::LineAdded { path, .. }
-        | crate::semdif::Change::LineRemoved { path, .. }
-        | crate::semdif::Change::LineModified { path, .. }
-        | crate::semdif::Change::IdentifierRenamed { path, .. }
-        | crate::semdif::Change::DirectoryAdded { path }
-        | crate::semdif::Change::DirectoryDeleted { path } => (path, ""),
-    }
 }
 
 fn read_file(root: &Path, relative: &str) -> Result<Vec<u8>, String> {

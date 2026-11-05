@@ -35,12 +35,12 @@ pub(crate) fn directory_changes(
             .then(left.cmp(right))
     });
 
-    let mut changes = Vec::new();
+    let mut changes: Vec<crate::semdif::Change> = Vec::new();
     for path in removed {
-        changes.push(crate::semdif::Change::DirectoryDeleted { path });
+        changes.push(Box::new(crate::change::DirectoryDeleted { path }));
     }
     for path in added {
-        changes.push(crate::semdif::Change::DirectoryAdded { path });
+        changes.push(Box::new(crate::change::DirectoryAdded { path }));
     }
     changes
 }
@@ -54,19 +54,18 @@ pub(crate) fn place_replacement_files(
 ) -> Vec<crate::semdif::Change> {
     let removed: BTreeSet<_> = changes
         .iter()
-        .filter_map(|change| match change {
-            crate::semdif::Change::DirectoryDeleted { path } => Some(path.clone()),
-            _ => None,
-        })
+        .filter_map(|change| change.removed_directory().map(str::to_string))
         .collect();
     let mut kept = Vec::new();
     let mut replacements = Vec::new();
     for change in changes {
-        match &change {
-            crate::semdif::Change::FileAdded { path, .. } if removed.contains(path) => {
-                replacements.push(change);
-            }
-            _ => kept.push(change),
+        if change
+            .added_file_path()
+            .is_some_and(|path| removed.contains(path))
+        {
+            replacements.push(change);
+        } else {
+            kept.push(change);
         }
     }
     kept.extend(replacements);

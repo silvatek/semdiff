@@ -2,6 +2,8 @@ use std::collections::BTreeMap;
 use std::fs;
 use std::process::ExitCode;
 
+pub(crate) use crate::change::Change;
+
 use base64::engine::general_purpose::STANDARD;
 use base64::Engine;
 
@@ -48,160 +50,20 @@ fn semdif_document(version: &str, timestamp: &str, changes: &[Change]) -> String
 }
 
 fn write_change(document: &mut String, change: &Change) {
-    match change {
-        Change::FileRenamed { from, to } => {
-            document.push_str("  - scope: \".\"\n");
-            document.push_str("    type: file-renamed\n");
-            document.push_str("    details:\n");
-            document.push_str(&format!("      from: {}\n", yaml_string(from)));
-            document.push_str(&format!("      to: {}\n", yaml_string(to)));
-        }
-        Change::FileDeleted { path } => {
-            document.push_str("  - scope: \".\"\n");
-            document.push_str("    type: file-deleted\n");
-            document.push_str("    details:\n");
-            document.push_str(&format!("      path: {}\n", yaml_string(path)));
-        }
-        Change::FileAdded { path, contents } => {
-            document.push_str("  - scope: \".\"\n");
-            document.push_str("    type: file-added\n");
-            document.push_str("    details:\n");
-            document.push_str(&format!("      path: {}\n", yaml_string(path)));
-            write_file_contents(document, contents);
-        }
-        Change::FileChanged { path, contents } => {
-            write_content(document, path, "file-changed");
-            write_file_contents(document, contents);
-        }
-        Change::FileDigest {
-            path,
-            old_hash,
-            new_hash,
-        } => {
-            write_content(document, path, "file-changed");
-            document.push_str(&format!("      old: {}\n", yaml_string(old_hash)));
-            document.push_str(&format!("      new: {}\n", yaml_string(new_hash)));
-        }
-        Change::LineAdded {
-            path,
-            old,
-            new,
-            text,
-        } => write_line(
-            document,
-            "line-added",
-            path,
-            *old,
-            added_lines(text),
-            *new,
-            text,
-        ),
-        Change::LineRemoved {
-            path,
-            old,
-            old_end,
-            new,
-            text,
-        } => write_line(
-            document,
-            "line-removed",
-            path,
-            *old,
-            removed_lines(*old, *old_end),
-            *new,
-            text,
-        ),
-        Change::LineModified {
-            path,
-            old,
-            new,
-            text,
-        } => write_line(document, "line-modified", path, *old, 0, *new, text),
-        Change::IdentifierRenamed {
-            path,
-            old,
-            new,
-            oldname,
-            newname,
-        } => write_identifier(document, path, *old, *new, oldname, newname),
-        Change::DirectoryAdded { path } => write_directory(document, "directory-added", path),
-        Change::DirectoryDeleted { path } => write_directory(document, "directory-deleted", path),
-    }
-}
-
-fn write_identifier(
-    document: &mut String,
-    path: &str,
-    old: usize,
-    new: usize,
-    oldname: &str,
-    newname: &str,
-) {
-    write_content(document, path, "identifier-renamed");
-    document.push_str(&format!("      old: {old}\n"));
-    document.push_str(&format!("      new: {new}\n"));
-    document.push_str(&format!("      oldname: {}\n", yaml_string(oldname)));
-    document.push_str(&format!("      newname: {}\n", yaml_string(newname)));
-}
-
-fn write_line(
-    document: &mut String,
-    kind: &str,
-    path: &str,
-    old: usize,
-    lines: isize,
-    new: usize,
-    text: &str,
-) {
-    write_content(document, path, kind);
-    document.push_str(&format!("      old: {old}\n"));
-    document.push_str(&format!("      lines: {}\n", format_lines(lines)));
-    document.push_str(&format!("      new: {new}\n"));
-    document.push_str(&format!("      text: {}\n", yaml_string(text)));
-}
-
-/// The `lines` value, with its sign written out.
-///
-/// A removal is negative, so one removed line is `-1` and two are `-2`.
-/// An addition is positive, so one added line is `+1` and two are `+2`.
-/// A modification does not change the line count, so it is `+0`.
-fn format_lines(lines: isize) -> String {
-    if lines > 0 {
-        format!("+{lines}")
-    } else if lines == 0 {
-        "+0".to_string()
-    } else {
-        lines.to_string()
-    }
-}
-
-/// How many old lines a removal covers, as a negative count.
-///
-/// One line is `-1`. A run of two is `-2`.
-/// How many lines an addition record contains, as a positive count.
-fn added_lines(text: &str) -> isize {
-    text.split('\n').count() as isize
-}
-
-fn removed_lines(old: usize, old_end: usize) -> isize {
-    let count = old_end - old + 1;
-    -(count as isize)
-}
-
-/// The start of a change to a file's contents.
-///
-/// The scope is that file. The path is not repeated inside the details.
-fn write_content(document: &mut String, path: &str, kind: &str) {
-    document.push_str(&format!("  - scope: {}\n", yaml_string(path)));
-    document.push_str(&format!("    type: {kind}\n"));
+    document.push_str(&format!("  - scope: {}\n", yaml_string(change.scope())));
+    document.push_str(&format!("    type: {}\n", change.kind()));
     document.push_str("    details:\n");
+    change.write_details(document);
 }
 
-fn write_directory(document: &mut String, kind: &str, path: &str) {
-    document.push_str("  - scope: \".\"\n");
-    document.push_str(&format!("    type: {kind}\n"));
-    document.push_str("    details:\n");
-    document.push_str(&format!("      path: {}\n", yaml_string(path)));
+/// One named detail whose value is quoted.
+pub(crate) fn write_detail(document: &mut String, key: &str, value: &str) {
+    document.push_str(&format!("      {key}: {}\n", yaml_string(value)));
+}
+
+/// One named detail whose value is already in the form the file should show.
+pub(crate) fn write_plain(document: &mut String, key: &str, value: &str) {
+    document.push_str(&format!("      {key}: {value}\n"));
 }
 
 /// Stores one file's bytes inside the semdif.
@@ -209,7 +71,7 @@ fn write_directory(document: &mut String, kind: &str, path: &str) {
 /// Text stays in the record as a quoted value, with quotes and line breaks escaped so
 /// they do not change the record. Bytes that are not text are encoded, because a YAML
 /// text value cannot hold them, and the original bytes still have to be restored.
-fn write_file_contents(document: &mut String, contents: &[u8]) {
+pub(crate) fn write_file_contents(document: &mut String, contents: &[u8]) {
     match std::str::from_utf8(contents) {
         Ok(text) => {
             document.push_str(&format!("      contents: {}\n", yaml_string(text)));
@@ -259,73 +121,6 @@ fn yaml_string(value: &str) -> String {
 /// Readers can see when the file was produced without depending on a local timezone.
 fn utc_timestamp() -> String {
     chrono::Utc::now().format("%Y-%m-%dT%H:%M:%SZ").to_string()
-}
-
-/// One change recorded in a semdif file.
-///
-/// File and directory changes are replayed in the order they were recorded.
-/// Line changes for one path are applied together from their old line numbers,
-/// so those records can be listed in line order. Each kind carries the details
-/// that kind needs.
-pub(crate) enum Change {
-    FileRenamed {
-        from: String,
-        to: String,
-    },
-    FileDeleted {
-        path: String,
-    },
-    FileAdded {
-        path: String,
-        contents: Vec<u8>,
-    },
-    FileChanged {
-        path: String,
-        contents: Vec<u8>,
-    },
-    FileDigest {
-        path: String,
-        old_hash: String,
-        new_hash: String,
-    },
-    LineAdded {
-        path: String,
-        old: usize,
-        new: usize,
-        text: String,
-    },
-    LineRemoved {
-        path: String,
-        /// First removed line in the old file.
-        old: usize,
-        /// Last removed line in the old file. Equal to `old` when `lines` is `-1`.
-        old_end: usize,
-        new: usize,
-        text: String,
-    },
-    LineModified {
-        path: String,
-        old: usize,
-        new: usize,
-        text: String,
-    },
-    /// One identifier on a line was renamed.
-    ///
-    /// The rest of the line is unchanged, and `oldname` occurs once on the old
-    /// line. The record does not carry a column.
-    IdentifierRenamed {
-        path: String,
-        old: usize,
-        new: usize,
-        oldname: String,
-        newname: String,
-    },
-    DirectoryAdded {
-        path: String,
-    },
-    DirectoryDeleted {
-        path: String,
-    },
 }
 
 /// The changes recorded in a semdif file.
@@ -397,67 +192,113 @@ impl PartialChange {
         if self.scope.is_empty() {
             return Err("change is missing a scope".to_string());
         }
-        match self.kind.as_str() {
-            "file-renamed" => Ok(Change::FileRenamed {
-                from: required(&self.fields, "from", "file-renamed")?,
-                to: required(&self.fields, "to", "file-renamed")?,
-            }),
-            "file-deleted" => Ok(Change::FileDeleted {
-                path: required(&self.fields, "path", "file-deleted")?,
-            }),
-            "file-added" => Ok(Change::FileAdded {
-                path: required(&self.fields, "path", "file-added")?,
-                contents: stored_bytes(&self.fields, "file-added")?,
-            }),
-            "file-changed" => file_changed(self.scope, self.fields),
-            "line-added" => {
-                let text = required(&self.fields, "text", "line-added")?;
-                expect_added_lines(&self.fields, &text)?;
-                Ok(Change::LineAdded {
-                    path: self.scope,
-                    old: required_line(&self.fields, "old", "line-added")?,
-                    new: required_line(&self.fields, "new", "line-added")?,
-                    text,
-                })
-            }
-            "line-removed" => {
-                let old = required_line(&self.fields, "old", "line-removed")?;
-                let text = required(&self.fields, "text", "line-removed")?;
-                Ok(Change::LineRemoved {
-                    path: self.scope,
-                    old,
-                    old_end: removed_end(&self.fields, old, &text)?,
-                    new: required_line(&self.fields, "new", "line-removed")?,
-                    text,
-                })
-            }
-            "line-modified" => {
-                let text = required(&self.fields, "text", "line-modified")?;
-                expect_modified_lines(&self.fields)?;
-                Ok(Change::LineModified {
-                    path: self.scope,
-                    old: required_line(&self.fields, "old", "line-modified")?,
-                    new: required_line(&self.fields, "new", "line-modified")?,
-                    text,
-                })
-            }
-            "identifier-renamed" => Ok(Change::IdentifierRenamed {
-                path: self.scope,
-                old: required_line(&self.fields, "old", "identifier-renamed")?,
-                new: required_line(&self.fields, "new", "identifier-renamed")?,
-                oldname: required(&self.fields, "oldname", "identifier-renamed")?,
-                newname: required(&self.fields, "newname", "identifier-renamed")?,
-            }),
-            "directory-added" => Ok(Change::DirectoryAdded {
-                path: required(&self.fields, "path", "directory-added")?,
-            }),
-            "directory-deleted" => Ok(Change::DirectoryDeleted {
-                path: required(&self.fields, "path", "directory-deleted")?,
-            }),
-            "" => Err("change is missing a type".to_string()),
-            other => Err(format!("unknown change type {other}")),
+        if self.kind.is_empty() {
+            return Err("change is missing a type".to_string());
+        }
+        let parsers: &[(&str, Parser)] = &[
+            ("file-renamed", parse_file_renamed),
+            ("file-deleted", parse_file_deleted),
+            ("file-added", parse_file_added),
+            ("file-changed", file_changed),
+            ("line-added", parse_line_added),
+            ("line-removed", parse_line_removed),
+            ("line-modified", parse_line_modified),
+            ("identifier-renamed", parse_identifier_renamed),
+            ("directory-added", parse_directory_added),
+            ("directory-deleted", parse_directory_deleted),
+        ];
+        match parsers.iter().find(|(kind, _)| *kind == self.kind) {
+            Some((_, parse)) => parse(self.scope, self.fields),
+            None => Err(format!("unknown change type {}", self.kind)),
         }
     }
+}
+
+type Parser = fn(String, BTreeMap<String, String>) -> Result<Change, String>;
+
+fn parse_file_renamed(_scope: String, fields: BTreeMap<String, String>) -> Result<Change, String> {
+    Ok(Box::new(crate::change::FileRenamed {
+        from: required(&fields, "from", "file-renamed")?,
+        to: required(&fields, "to", "file-renamed")?,
+    }))
+}
+
+fn parse_file_deleted(_scope: String, fields: BTreeMap<String, String>) -> Result<Change, String> {
+    Ok(Box::new(crate::change::FileDeleted {
+        path: required(&fields, "path", "file-deleted")?,
+    }))
+}
+
+fn parse_file_added(_scope: String, fields: BTreeMap<String, String>) -> Result<Change, String> {
+    Ok(Box::new(crate::change::FileAdded {
+        path: required(&fields, "path", "file-added")?,
+        contents: stored_bytes(&fields, "file-added")?,
+    }))
+}
+
+fn parse_line_added(scope: String, fields: BTreeMap<String, String>) -> Result<Change, String> {
+    let text = required(&fields, "text", "line-added")?;
+    expect_added_lines(&fields, &text)?;
+    Ok(Box::new(crate::change::LineAdded::new(
+        scope,
+        required_line(&fields, "old", "line-added")?,
+        required_line(&fields, "new", "line-added")?,
+        text,
+    )))
+}
+
+fn parse_line_removed(scope: String, fields: BTreeMap<String, String>) -> Result<Change, String> {
+    let old = required_line(&fields, "old", "line-removed")?;
+    let text = required(&fields, "text", "line-removed")?;
+    expect_removed_lines(&fields, old, &text)?;
+    Ok(Box::new(crate::change::LineRemoved::new(
+        scope,
+        old,
+        required_line(&fields, "new", "line-removed")?,
+        text,
+    )))
+}
+
+fn parse_line_modified(scope: String, fields: BTreeMap<String, String>) -> Result<Change, String> {
+    let text = required(&fields, "text", "line-modified")?;
+    expect_modified_lines(&fields)?;
+    Ok(Box::new(crate::change::LineModified::new(
+        scope,
+        required_line(&fields, "old", "line-modified")?,
+        required_line(&fields, "new", "line-modified")?,
+        text,
+    )))
+}
+
+fn parse_identifier_renamed(
+    scope: String,
+    fields: BTreeMap<String, String>,
+) -> Result<Change, String> {
+    Ok(Box::new(crate::change::IdentifierRenamed {
+        path: scope,
+        old: required_line(&fields, "old", "identifier-renamed")?,
+        new: required_line(&fields, "new", "identifier-renamed")?,
+        oldname: required(&fields, "oldname", "identifier-renamed")?,
+        newname: required(&fields, "newname", "identifier-renamed")?,
+    }))
+}
+
+fn parse_directory_added(
+    _scope: String,
+    fields: BTreeMap<String, String>,
+) -> Result<Change, String> {
+    Ok(Box::new(crate::change::DirectoryAdded {
+        path: required(&fields, "path", "directory-added")?,
+    }))
+}
+
+fn parse_directory_deleted(
+    _scope: String,
+    fields: BTreeMap<String, String>,
+) -> Result<Change, String> {
+    Ok(Box::new(crate::change::DirectoryDeleted {
+        path: required(&fields, "path", "directory-deleted")?,
+    }))
 }
 
 /// A whole-file replacement, or the old and new SHA-256 hashes of a changed file.
@@ -466,16 +307,16 @@ impl PartialChange {
 /// A replacement has `contents` instead.
 fn file_changed(path: String, fields: BTreeMap<String, String>) -> Result<Change, String> {
     if fields.contains_key("contents") {
-        return Ok(Change::FileChanged {
+        return Ok(Box::new(crate::change::FileChanged {
             path,
             contents: stored_bytes(&fields, "file-changed")?,
-        });
+        }));
     }
-    Ok(Change::FileDigest {
+    Ok(Box::new(crate::change::FileDigest {
         path,
         old_hash: required_hash(&fields, "old", "file-changed")?,
         new_hash: required_hash(&fields, "new", "file-changed")?,
-    })
+    }))
 }
 
 /// A SHA-256 hex digest recorded for a changed file.
@@ -508,11 +349,15 @@ fn stored_bytes(fields: &BTreeMap<String, String>, kind: &str) -> Result<Vec<u8>
     }
 }
 
-/// The last old line of a removal.
+/// Checks that a removal's `lines` is the negative count of lines in `text`.
 ///
-/// `lines: -1` removes the line at `old`. `lines: -2` removes `old` and the
-/// next line. The text holds that many lines.
-fn removed_end(fields: &BTreeMap<String, String>, old: usize, text: &str) -> Result<usize, String> {
+/// `lines: -1` removes one line. `lines: -2` removes two. The text holds
+/// that many lines.
+fn expect_removed_lines(
+    fields: &BTreeMap<String, String>,
+    old: usize,
+    text: &str,
+) -> Result<(), String> {
     let lines = required_lines(fields, "line-removed")?;
     if lines >= 0 {
         return Err(invalid_lines("line-removed", fields));
@@ -524,7 +369,8 @@ fn removed_end(fields: &BTreeMap<String, String>, old: usize, text: &str) -> Res
         return Err(invalid_lines("line-removed", fields));
     }
     old.checked_add(count - 1)
-        .ok_or_else(|| invalid_lines("line-removed", fields))
+        .ok_or_else(|| invalid_lines("line-removed", fields))?;
+    Ok(())
 }
 
 /// Checks that an addition's `lines` is the positive count of lines in `text`.

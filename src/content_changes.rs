@@ -33,29 +33,29 @@ fn content_change(
     if before == after {
         return Ok(Vec::new());
     }
-    let mut changes = vec![crate::semdif::Change::FileDigest {
+    let mut changes = vec![Box::new(crate::change::FileDigest {
         path: path.to_string(),
         old_hash: crate::file_change::sha256_hex(&before),
         new_hash: crate::file_change::sha256_hex(&after),
-    }];
+    }) as crate::semdif::Change];
     match (std::str::from_utf8(&before), std::str::from_utf8(&after)) {
         (Ok(before_text), Ok(after_text)) => {
             let line_edits = crate::line_changes::line_changes(path, before_text, after_text);
             // The line lists match, and the bytes still differ. That difference is
             // the final newline, which is not itself a line.
             if line_edits.is_empty() {
-                changes.push(crate::semdif::Change::FileChanged {
+                changes.push(Box::new(crate::change::FileChanged {
                     path: path.to_string(),
                     contents: after,
-                });
+                }));
             } else {
                 changes.extend(line_edits);
             }
         }
-        _ => changes.push(crate::semdif::Change::FileChanged {
+        _ => changes.push(Box::new(crate::change::FileChanged {
             path: path.to_string(),
             contents: after,
-        }),
+        })),
     }
     Ok(changes)
 }

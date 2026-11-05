@@ -18,7 +18,7 @@ pub(crate) fn line_changes(path: &str, before: &str, after: &str) -> Vec<crate::
     let old_lines = split_text(before);
     let new_lines = split_text(after);
     let matches = longest_common_subsequence(&old_lines.lines, &new_lines.lines);
-    let mut changes = Vec::new();
+    let mut changes: Vec<crate::semdif::Change> = Vec::new();
     for hunk in hunks(&old_lines.lines, &new_lines.lines, &matches) {
         changes.extend(changes_in_hunk(path, &hunk));
     }
@@ -204,7 +204,7 @@ fn indexed(lines: &[String], from: usize, to: usize) -> Vec<IndexedLine> {
 /// removed. A line left over on the new side was added.
 fn changes_in_hunk(path: &str, hunk: &Hunk) -> Vec<crate::semdif::Change> {
     let paired = hunk.old_lines.len().min(hunk.new_lines.len());
-    let mut changes = Vec::new();
+    let mut changes: Vec<crate::semdif::Change> = Vec::new();
     for offset in 0..paired {
         changes.push(modified_line(
             path,
@@ -215,21 +215,20 @@ fn changes_in_hunk(path: &str, hunk: &Hunk) -> Vec<crate::semdif::Change> {
         ));
     }
     for line in &hunk.old_lines[paired..] {
-        changes.push(crate::semdif::Change::LineRemoved {
-            path: path.to_string(),
-            old: line.index + 1,
-            old_end: line.index + 1,
-            new: hunk.next_new_line,
-            text: line.text.clone(),
-        });
+        changes.push(Box::new(crate::change::LineRemoved::new(
+            path.to_string(),
+            line.index + 1,
+            hunk.next_new_line,
+            line.text.clone(),
+        )));
     }
     for line in &hunk.new_lines[paired..] {
-        changes.push(crate::semdif::Change::LineAdded {
-            path: path.to_string(),
-            old: hunk.next_old_line,
-            new: line.index + 1,
-            text: line.text.clone(),
-        });
+        changes.push(Box::new(crate::change::LineAdded::new(
+            path.to_string(),
+            hunk.next_old_line,
+            line.index + 1,
+            line.text.clone(),
+        )));
     }
     changes
 }
@@ -243,29 +242,23 @@ fn modified_line(
     new_text: &str,
 ) -> crate::semdif::Change {
     if let Some(rename) = crate::identifier::identifier_rename(path, old_text, new_text) {
-        return crate::semdif::Change::IdentifierRenamed {
+        return Box::new(crate::change::IdentifierRenamed {
             path: path.to_string(),
             old,
             new,
             oldname: rename.oldname,
             newname: rename.newname,
-        };
+        });
     }
-    crate::semdif::Change::LineModified {
-        path: path.to_string(),
+    Box::new(crate::change::LineModified::new(
+        path.to_string(),
         old,
         new,
-        text: new_text.to_string(),
-    }
+        new_text.to_string(),
+    ))
 }
 
 /// `old`, then `new`, so the records walk the file from the top.
 fn line_position(change: &crate::semdif::Change) -> (usize, usize) {
-    match change {
-        crate::semdif::Change::LineAdded { old, new, .. }
-        | crate::semdif::Change::LineRemoved { old, new, .. }
-        | crate::semdif::Change::LineModified { old, new, .. }
-        | crate::semdif::Change::IdentifierRenamed { old, new, .. } => (*old, *new),
-        _ => (0, 0),
-    }
+    change.line_position().unwrap_or((0, 0))
 }

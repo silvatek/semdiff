@@ -1,5 +1,6 @@
 mod apply;
 mod args;
+mod change;
 mod content_changes;
 mod dialect;
 mod directory_changes;
