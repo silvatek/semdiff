@@ -156,7 +156,7 @@ fn merges_the_adjacent_removals_in_the_rust_sample() {
     let manifest = Path::new(env!("CARGO_MANIFEST_DIR"));
     let sample = manifest.join("TestCode/rust/main");
     let document = semdiff::compare_sources(
-        &semdiff::StdFileSystem,
+        &semdiff::StdFileSystem::new(),
         sample.join("v1").to_str().unwrap(),
         sample.join("v2").to_str().unwrap(),
     )

@@ -14,6 +14,12 @@ impl Tree {
         }
     }
 
+    pub fn with_ignores(ignores: impl IntoIterator<Item = impl Into<String>>) -> Self {
+        Self {
+            fs: MemoryFileSystem::with_ignores(ignores),
+        }
+    }
+
     pub fn write(&self, path: &str, contents: impl AsRef<[u8]>) {
         let path = Path::new(path);
         if let Some(parent) = path.parent() {

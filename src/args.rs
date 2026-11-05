@@ -1,7 +1,7 @@
 use std::env;
 use std::path::Path;
 
-use crate::filesystem::{FileSystem, NodeKind, StdFileSystem};
+use crate::filesystem::{FileSystem, StdFileSystem};
 
 const USAGE: &str = "\
 Usage: semdiff <left> <right> <output>
@@ -84,11 +84,11 @@ where
         if args.next().is_some() {
             return Err(CliError::Usage);
         }
-        let fs = StdFileSystem;
-        if !is_file(&fs, &semdif) {
+        let fs = StdFileSystem::new();
+        if !fs.is_file(Path::new(&semdif)) {
             return Err(CliError::NotFile(semdif));
         }
-        if !is_dir(&fs, &source) {
+        if !fs.is_dir(Path::new(&source)) {
             return Err(CliError::NotDirectory(source));
         }
         return Ok(Command::Apply { semdif, source });
@@ -112,34 +112,20 @@ where
 ///
 /// A missing path cannot be compared.
 fn require_source(path: &str) -> Result<(), CliError> {
-    let fs = StdFileSystem;
-    if is_file(&fs, path) || is_dir(&fs, path) {
+    let fs = StdFileSystem::new();
+    if fs.is_file(Path::new(path)) || fs.is_dir(Path::new(path)) {
         Ok(())
     } else {
         Err(CliError::NotSource(path.to_string()))
     }
 }
 
-fn is_file(fs: &dyn FileSystem, path: &str) -> bool {
-    matches!(
-        fs.kind(Path::new(path)).ok().flatten(),
-        Some(NodeKind::File)
-    )
-}
-
-fn is_dir(fs: &dyn FileSystem, path: &str) -> bool {
-    matches!(
-        fs.kind(Path::new(path)).ok().flatten(),
-        Some(NodeKind::Directory)
-    )
-}
-
 /// Confirms that both sources are files or both are directories.
 ///
 /// A file and a directory are different comparison units, so they are not paired.
 fn require_same_kind(left: &str, right: &str) -> Result<(), CliError> {
-    let fs = StdFileSystem;
-    if is_dir(&fs, left) == is_dir(&fs, right) {
+    let fs = StdFileSystem::new();
+    if fs.is_dir(Path::new(left)) == fs.is_dir(Path::new(right)) {
         Ok(())
     } else {
         Err(CliError::MixedSources)

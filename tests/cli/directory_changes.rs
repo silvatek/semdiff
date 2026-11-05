@@ -28,6 +28,31 @@ fn records_empty_directories_added_and_removed() {
 }
 
 #[test]
+fn ignores_the_target_path_and_keeps_a_nested_directory_named_target() {
+    let tree = Tree::new();
+    tree.write("left/target/skip.txt", "old\n");
+    tree.write("right/target/skip.txt", "new\n");
+    tree.write("left/src/target/lib.rs", "old\n");
+    tree.write("right/src/target/lib.rs", "new\n");
+    tree.write("left/targeting/note.txt", "old\n");
+    tree.write("right/targeting/note.txt", "new\n");
+    tree.write("left/keep.txt", "same\n");
+    tree.write("right/keep.txt", "same\n");
+
+    let document = tree.compare("left", "right");
+
+    assert!(!document.contains("target/skip.txt"), "{document}");
+    assert!(document.contains("src/target/lib.rs"), "{document}");
+    assert!(document.contains("targeting/note.txt"), "{document}");
+
+    let open = Tree::with_ignores(std::iter::empty::<&str>());
+    open.write("left/target/skip.txt", "old\n");
+    open.write("right/target/skip.txt", "new\n");
+    let document = open.compare("left", "right");
+    assert!(document.contains("target/skip.txt"), "{document}");
+}
+
+#[test]
 fn replaces_a_directory_with_a_different_file() {
     let tree = Tree::new();
     tree.dir("left/notes/sub");

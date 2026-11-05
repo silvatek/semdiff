@@ -6,7 +6,9 @@
 
 use std::collections::BTreeMap;
 use std::io::{self, Read};
-use std::path::{Component, Path};
+use std::path::{Component, Path, PathBuf};
+
+use sha2::{Digest, Sha256};
 
 /// A file or a directory.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -17,11 +19,14 @@ pub enum NodeKind {
 
 /// The operations compare and apply perform on a tree.
 ///
-/// `kind` is `Ok(None)` when the path is absent. `read` drains [`FileSystem::open`].
-/// `read_text` is that read decoded as UTF-8.
+/// `kind` is `Ok(None)` when the path is absent. A `kind` error counts as neither
+/// a file nor a directory. `read` drains [`FileSystem::open`]. `read_text` is that
+/// read decoded as UTF-8. [`FileSystem::ignores`] lists relative paths a source
+/// walk leaves out. An entry matches that path and everything under it.
 /// `create_dir` creates missing parents. `remove_dir` removes an empty directory
-/// and fails when the directory still contains something. `rename` moves a file;
-/// the caller creates the destination's parent first.
+/// and fails when the directory still contains something. `rename` moves a file.
+/// The edit methods reject a path that leaves the source. `write_file` and
+/// `rename_file` create the destination's parent and leave the source root alone.
 pub trait FileSystem {
     fn kind(&self, path: &Path) -> io::Result<Option<NodeKind>>;
 
@@ -39,12 +44,149 @@ pub trait FileSystem {
 
     fn rename(&self, from: &Path, to: &Path) -> io::Result<()>;
 
+    /// Relative paths a source walk leaves out.
+    ///
+    /// An entry uses `/`. It matches that path and everything under it.
+    /// `kind`, `read`, `write`, and the edit methods still see the path.
+    fn ignores(&self) -> &[String];
+
     /// The whole contents of a file.
     fn read(&self, path: &Path) -> io::Result<Vec<u8>> {
         let mut file = self.open(path)?;
         let mut bytes = Vec::new();
         file.read_to_end(&mut bytes)?;
         Ok(bytes)
+    }
+
+    /// The SHA-256 of a file, read in chunks through [`FileSystem::open`].
+    fn hash(&self, path: &Path) -> io::Result<[u8; 32]> {
+        let mut file = self.open(path)?;
+        let mut hasher = Sha256::new();
+        let mut buffer = [0_u8; HASH_BUFFER_SIZE];
+        loop {
+            let count = file.read(&mut buffer)?;
+            if count == 0 {
+                break;
+            }
+            hasher.update(&buffer[..count]);
+        }
+        Ok(hasher.finalize().into())
+    }
+
+    /// Whether `kind` reports a file. An error counts as no.
+    fn is_file(&self, path: &Path) -> bool {
+        matches!(self.kind(path).ok().flatten(), Some(NodeKind::File))
+    }
+
+    /// Whether `kind` reports a directory. An error counts as no.
+    fn is_dir(&self, path: &Path) -> bool {
+        matches!(self.kind(path).ok().flatten(), Some(NodeKind::Directory))
+    }
+
+    /// Whether a source-relative path is covered by [`FileSystem::ignores`].
+    fn is_ignored(&self, relative: &str) -> bool {
+        self.ignores().iter().any(|ignore| {
+            relative == ignore
+                || relative
+                    .strip_prefix(ignore.as_str())
+                    .is_some_and(|rest| rest.starts_with('/'))
+        })
+    }
+
+    /// The directory from which a source's relative paths are read.
+    ///
+    /// A single file and a directory tree can then be read in the same way.
+    fn source_base<'a>(&self, path: &'a Path) -> &'a Path {
+        if self.is_file(path) {
+            path.parent()
+                .filter(|parent| !parent.as_os_str().is_empty())
+                .unwrap_or(Path::new("."))
+        } else {
+            path
+        }
+    }
+
+    /// The files that belong to a source.
+    ///
+    /// A directory contributes the files under it, and a file contributes itself.
+    /// A path on [`FileSystem::ignores`] is omitted, along with everything under it.
+    fn collect_files(&self, root: &Path) -> Result<Vec<String>, String> {
+        if self.is_file(root) {
+            let name = root
+                .file_name()
+                .ok_or_else(|| format!("cannot name {}", root.display()))?;
+            return Ok(vec![name.to_string_lossy().into_owned()]);
+        }
+        let mut files = Vec::new();
+        visit_files(self, root, root, &mut files)?;
+        Ok(files)
+    }
+
+    /// The directories that belong to a source.
+    ///
+    /// Empty directories are part of the tree even though they contain no files.
+    /// A path on [`FileSystem::ignores`] is omitted, along with everything under it.
+    fn collect_directories(&self, root: &Path) -> Result<Vec<String>, String> {
+        if self.is_file(root) {
+            return Ok(Vec::new());
+        }
+        let mut directories = Vec::new();
+        visit_directories(self, root, root, &mut directories)?;
+        Ok(directories)
+    }
+
+    /// Writes one file in the source directory.
+    ///
+    /// An added file is created. A changed file is replaced with the recorded bytes.
+    fn write_file(&self, root: &Path, relative: &str, contents: &[u8]) -> Result<(), String> {
+        let path = path_inside(root, relative)?;
+        create_parent(self, root, &path)?;
+        self.write(&path, contents)
+            .map_err(|error| format!("cannot write {}: {error}", path.display()))
+    }
+
+    /// Removes one file from the source directory.
+    ///
+    /// The semdif records the path relative to that directory.
+    fn delete_file(&self, root: &Path, relative: &str) -> Result<(), String> {
+        let path = path_inside(root, relative)?;
+        self.remove_file(&path)
+            .map_err(|error| format!("cannot delete {}: {error}", path.display()))
+    }
+
+    /// Moves one file inside the source directory.
+    ///
+    /// The semdif records the old and new paths relative to that directory.
+    fn rename_file(&self, root: &Path, from: &str, to: &str) -> Result<(), String> {
+        let from_path = path_inside(root, from)?;
+        let to_path = path_inside(root, to)?;
+        create_parent(self, root, &to_path)?;
+        self.rename(&from_path, &to_path).map_err(|error| {
+            format!(
+                "cannot rename {} to {}: {error}",
+                from_path.display(),
+                to_path.display()
+            )
+        })
+    }
+
+    /// Creates one directory in the source.
+    ///
+    /// The semdif records an empty directory that exists only on the other side.
+    fn add_directory(&self, root: &Path, relative: &str) -> Result<(), String> {
+        let path = path_inside(root, relative)?;
+        self.create_dir(&path)
+            .map_err(|error| format!("cannot create {}: {error}", path.display()))
+    }
+
+    /// Removes one empty directory from the source.
+    ///
+    /// Files inside it have already been moved or deleted. A directory that still
+    /// holds something is left in place and reported.
+    fn remove_directory(&self, root: &Path, relative: &str) -> Result<(), String> {
+        let path = path_inside(root, relative)?;
+        self.remove_dir(&path)
+            .map_err(|error| format!("cannot remove {}: {error}", path.display()))
     }
 
     /// The whole contents of a file, decoded as UTF-8.
@@ -59,10 +201,32 @@ pub trait FileSystem {
     }
 }
 
+const HASH_BUFFER_SIZE: usize = 8 * 1024;
+
 /// The operating system's files.
-pub struct StdFileSystem;
+///
+/// A new filesystem ignores `target`. [`StdFileSystem::with_ignores`] sets another list.
+pub struct StdFileSystem {
+    ignores: Vec<String>,
+}
+
+impl StdFileSystem {
+    pub fn new() -> Self {
+        Self::with_ignores(["target"])
+    }
+
+    pub fn with_ignores(ignores: impl IntoIterator<Item = impl Into<String>>) -> Self {
+        Self {
+            ignores: ignore_list(ignores),
+        }
+    }
+}
 
 impl FileSystem for StdFileSystem {
+    fn ignores(&self) -> &[String] {
+        &self.ignores
+    }
+
     fn kind(&self, path: &Path) -> io::Result<Option<NodeKind>> {
         match std::fs::metadata(path) {
             Ok(metadata) if metadata.is_dir() => Ok(Some(NodeKind::Directory)),
@@ -115,6 +279,7 @@ impl FileSystem for StdFileSystem {
 /// Paths are a sequence of names. A leading slash does not start a second tree.
 pub struct MemoryFileSystem {
     root: std::cell::RefCell<Node>,
+    ignores: Vec<String>,
 }
 
 enum Node {
@@ -123,14 +288,24 @@ enum Node {
 }
 
 impl MemoryFileSystem {
+    /// A tree that ignores `target`.
     pub fn new() -> Self {
+        Self::with_ignores(["target"])
+    }
+
+    pub fn with_ignores(ignores: impl IntoIterator<Item = impl Into<String>>) -> Self {
         Self {
             root: std::cell::RefCell::new(Node::Dir(BTreeMap::new())),
+            ignores: ignore_list(ignores),
         }
     }
 }
 
 impl FileSystem for MemoryFileSystem {
+    fn ignores(&self) -> &[String] {
+        &self.ignores
+    }
+
     fn kind(&self, path: &Path) -> io::Result<Option<NodeKind>> {
         let parts = components(path);
         let root = self.root.borrow();
@@ -261,6 +436,95 @@ impl Node {
     }
 }
 
+fn ignore_list(ignores: impl IntoIterator<Item = impl Into<String>>) -> Vec<String> {
+    ignores
+        .into_iter()
+        .map(|entry| entry.into().replace('\\', "/"))
+        .collect()
+}
+
+fn visit_files(
+    fs: &(impl FileSystem + ?Sized),
+    root: &Path,
+    dir: &Path,
+    files: &mut Vec<String>,
+) -> Result<(), String> {
+    let entries = fs
+        .read_dir(dir)
+        .map_err(|error| format!("cannot read {}: {error}", dir.display()))?;
+    for (name, kind) in entries {
+        let path = dir.join(&name);
+        let relative = relative_to(root, &path)?;
+        if fs.is_ignored(&relative) {
+            continue;
+        }
+        match kind {
+            NodeKind::Directory => visit_files(fs, root, &path, files)?,
+            NodeKind::File => files.push(relative),
+        }
+    }
+    Ok(())
+}
+
+fn visit_directories(
+    fs: &(impl FileSystem + ?Sized),
+    root: &Path,
+    dir: &Path,
+    directories: &mut Vec<String>,
+) -> Result<(), String> {
+    let entries = fs
+        .read_dir(dir)
+        .map_err(|error| format!("cannot read {}: {error}", dir.display()))?;
+    for (name, kind) in entries {
+        if kind != NodeKind::Directory {
+            continue;
+        }
+        let path = dir.join(&name);
+        let relative = relative_to(root, &path)?;
+        if fs.is_ignored(&relative) {
+            continue;
+        }
+        directories.push(relative);
+        visit_directories(fs, root, &path, directories)?;
+    }
+    Ok(())
+}
+
+fn relative_to(root: &Path, path: &Path) -> Result<String, String> {
+    let relative = path
+        .strip_prefix(root)
+        .map_err(|_| format!("cannot relativize {}", path.display()))?;
+    Ok(relative.to_string_lossy().replace('\\', "/"))
+}
+
+fn create_parent(fs: &(impl FileSystem + ?Sized), root: &Path, path: &Path) -> Result<(), String> {
+    if let Some(parent) = path.parent() {
+        if parent != root && !parent.as_os_str().is_empty() {
+            fs.create_dir(parent)
+                .map_err(|error| format!("cannot create {}: {error}", parent.display()))?;
+        }
+    }
+    Ok(())
+}
+
+/// A path that stays inside the source directory.
+///
+/// Change paths come from the semdif file, so a path that leaves the directory is rejected.
+pub(crate) fn path_inside(root: &Path, relative: &str) -> Result<PathBuf, String> {
+    let path = Path::new(relative);
+    if relative.is_empty()
+        || path.is_absolute()
+        || path
+            .components()
+            .any(|component| matches!(component, Component::ParentDir))
+    {
+        return Err(format!(
+            "change path must stay inside the source directory: {relative}"
+        ));
+    }
+    Ok(root.join(path))
+}
+
 fn components(path: &Path) -> Vec<String> {
     let mut parts = Vec::new();
     for component in path.components() {
@@ -384,5 +648,18 @@ mod tests {
         assert_eq!(first, 8 * 1024);
         assert_eq!(rest.len(), 9_000 - 8 * 1024);
         assert_eq!(rest[8_500 - 8 * 1024], 7);
+    }
+
+    #[test]
+    fn an_ignore_path_covers_that_path_and_its_children() {
+        let fs = MemoryFileSystem::new();
+        assert!(fs.is_ignored("target"));
+        assert!(fs.is_ignored("target/skip.txt"));
+        assert!(!fs.is_ignored("src/target"));
+        assert!(!fs.is_ignored("src/target/lib.rs"));
+        assert!(!fs.is_ignored("targeting"));
+        let open = MemoryFileSystem::with_ignores(Vec::<String>::new());
+        assert!(!open.is_ignored("target"));
+        assert!(!open.is_ignored("target/skip.txt"));
     }
 }

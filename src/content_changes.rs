@@ -11,8 +11,8 @@ pub(crate) fn content_changes(
     sources: &crate::Sources,
     paired_files: &[String],
 ) -> Result<Vec<Box<dyn Change>>, String> {
-    let left_root = crate::source_base(fs, Path::new(&sources.left));
-    let right_root = crate::source_base(fs, Path::new(&sources.right));
+    let left_root = fs.source_base(Path::new(&sources.left));
+    let right_root = fs.source_base(Path::new(&sources.right));
     let mut changes = Vec::new();
     for path in paired_files {
         changes.extend(content_change(fs, left_root, right_root, path)?);

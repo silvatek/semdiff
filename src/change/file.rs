@@ -31,7 +31,7 @@ impl Change for FileRenamed {
     }
 
     fn apply(&self, fs: &dyn FileSystem, source: &Path) -> Result<(), String> {
-        crate::apply::rename_file(fs, source, &self.from, &self.to)
+        fs.rename_file(source, &self.from, &self.to)
     }
 }
 
@@ -58,7 +58,7 @@ impl Change for FileDeleted {
     }
 
     fn apply(&self, fs: &dyn FileSystem, source: &Path) -> Result<(), String> {
-        crate::apply::delete_file(fs, source, &self.path)
+        fs.delete_file(source, &self.path)
     }
 }
 
@@ -91,7 +91,7 @@ impl Change for FileAdded {
     }
 
     fn apply(&self, fs: &dyn FileSystem, source: &Path) -> Result<(), String> {
-        crate::apply::write_file(fs, source, &self.path, &self.contents)
+        fs.write_file(source, &self.path, &self.contents)
     }
 }
 

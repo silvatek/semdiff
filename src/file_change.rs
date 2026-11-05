@@ -1,13 +1,10 @@
 use std::collections::{HashMap, HashSet};
-use std::io::Read;
 use std::path::Path;
 
 use sha2::{Digest, Sha256};
 
 use crate::change::Change;
 use crate::filesystem::FileSystem;
-
-const HASH_BUFFER_SIZE: usize = 8 * 1024;
 
 /// Renames, deletions, and additions among the files that exist on only one side.
 ///
@@ -21,8 +18,8 @@ pub(crate) fn file_changes(
     left_only: &[String],
     right_only: &[String],
 ) -> Result<Vec<Box<dyn Change>>, String> {
-    let left_root = crate::source_base(fs, Path::new(&sources.left));
-    let right_root = crate::source_base(fs, Path::new(&sources.right));
+    let left_root = fs.source_base(Path::new(&sources.left));
+    let right_root = fs.source_base(Path::new(&sources.right));
     let mut left_hashes = HashMap::<[u8; 32], Vec<&String>>::new();
     for path in left_only {
         left_hashes
@@ -87,21 +84,8 @@ fn read_file(fs: &dyn FileSystem, root: &Path, relative: &str) -> Result<Vec<u8>
 /// Rename detection can compare files by this identity instead of holding their bytes.
 fn file_hash(fs: &dyn FileSystem, root: &Path, relative: &str) -> Result<[u8; 32], String> {
     let path = root.join(relative);
-    let mut file = fs
-        .open(&path)
-        .map_err(|error| format!("cannot read {}: {error}", path.display()))?;
-    let mut hasher = Sha256::new();
-    let mut buffer = [0_u8; HASH_BUFFER_SIZE];
-    loop {
-        let count = file
-            .read(&mut buffer)
-            .map_err(|error| format!("cannot read {}: {error}", path.display()))?;
-        if count == 0 {
-            break;
-        }
-        hasher.update(&buffer[..count]);
-    }
-    Ok(hasher.finalize().into())
+    fs.hash(&path)
+        .map_err(|error| format!("cannot read {}: {error}", path.display()))
 }
 
 /// The SHA-256 identity of a file's bytes, as lowercase hex.

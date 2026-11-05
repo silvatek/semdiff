@@ -29,7 +29,7 @@ impl Change for DirectoryAdded {
     }
 
     fn apply(&self, fs: &dyn FileSystem, source: &Path) -> Result<(), String> {
-        crate::apply::add_directory(fs, source, &self.path)
+        fs.add_directory(source, &self.path)
     }
 }
 
@@ -60,7 +60,7 @@ impl Change for DirectoryDeleted {
     }
 
     fn apply(&self, fs: &dyn FileSystem, source: &Path) -> Result<(), String> {
-        crate::apply::remove_directory(fs, source, &self.path)
+        fs.remove_directory(source, &self.path)
     }
 }
 
