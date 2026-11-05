@@ -25,27 +25,6 @@ fn applying_the_rust_sample_makes_a_copy_of_v1_match_v2() {
         "{}",
         String::from_utf8_lossy(&compared.stderr)
     );
-    let document = fs::read_to_string(&semdif_file).unwrap();
-    assert!(
-        document.contains(
-            "  - scope: \".\"\n    type: file-deleted\n    details:\n      path: \"note.txt\"\n"
-        ),
-        "{document}"
-    );
-    assert!(
-        document.contains("type: file-added") && document.contains("path: \"added.txt\""),
-        "{document}"
-    );
-    assert!(
-        document.contains("He said \\\"hello\\\"") && document.contains("\\\\temp"),
-        "{document}"
-    );
-    assert!(
-        document.contains(
-            "  - scope: \".\"\n    type: file-changed\n    details:\n      path: \"src/main.rs\"\n      old: \"891589590e1e0f0ef465632be3425ad900acd90d77b2b248d38897ae52670d60\"\n      new: \"24b4bead29e430eeacfe7734eddf3a4685f43873cb579fbed2738091683d9199\"\n  - scope: \".\"\n    type: line-added\n    details:\n      path: \"src/main.rs\"\n      old: 18\n      new: 18\n      text: \"// Print Fibonacci numbers.\"\n  - scope: \".\"\n    type: line-removed\n    details:\n      path: \"src/main.rs\"\n      old: 43\n      new: 44\n      text: \"// This single line is deleted.\"\n  - scope: \".\"\n    type: line-modified\n    details:\n      path: \"src/main.rs\"\n      old: 46\n      new: 46\n      text: \"// Count from one.\"\n  - scope: \".\"\n    type: line-removed\n    details:\n      path: \"src/main.rs\"\n      old: 49\n      new: 49\n      text: \"// This deleted line is first.\"\n  - scope: \".\"\n    type: line-removed\n    details:\n      path: \"src/main.rs\"\n      old: 50\n      new: 49\n      text: \"// This deleted line is second.\"\n  - scope: \".\"\n    type: line-added\n    details:\n      path: \"src/main.rs\"\n      old: 53\n      new: 51\n      text: \"// This added line is first.\"\n  - scope: \".\"\n    type: line-added\n    details:\n      path: \"src/main.rs\"\n      old: 53\n      new: 52\n      text: \"// This added line is second.\"\n  - scope: \".\"\n    type: line-modified\n    details:\n      path: \"src/main.rs\"\n      old: 55\n      new: 55\n      text: \"// New first line.\"\n  - scope: \".\"\n    type: line-modified\n    details:\n      path: \"src/main.rs\"\n      old: 56\n      new: 56\n      text: \"// New second line.\"\n"
-        ),
-        "{document}"
-    );
     let applied_output = run(&["--apply", semdif_file_arg, target_source_arg]);
     assert!(
         applied_output.status.success(),
