@@ -215,6 +215,7 @@ fn changes_in_hunk(path: &str, hunk: &Hunk) -> Vec<crate::semdif::Change> {
         changes.push(crate::semdif::Change::LineRemoved {
             path: path.to_string(),
             old: line.index + 1,
+            old_end: line.index + 1,
             new: hunk.next_new_line,
             text: line.text.clone(),
         });

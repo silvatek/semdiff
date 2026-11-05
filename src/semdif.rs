@@ -93,32 +93,73 @@ fn write_change(document: &mut String, change: &Change) {
             old,
             new,
             text,
-        } => write_line(document, "line-added", path, *old, *new, text),
+        } => write_line(document, "line-added", path, *old, 1, *new, text),
         Change::LineRemoved {
             path,
             old,
+            old_end,
             new,
             text,
-        } => write_line(document, "line-removed", path, *old, *new, text),
+        } => write_line(
+            document,
+            "line-removed",
+            path,
+            *old,
+            removed_lines(*old, *old_end),
+            *new,
+            text,
+        ),
         Change::LineModified {
             path,
             old,
             new,
             text,
-        } => write_line(document, "line-modified", path, *old, *new, text),
+        } => write_line(document, "line-modified", path, *old, 0, *new, text),
         Change::DirectoryAdded { path } => write_directory(document, "directory-added", path),
         Change::DirectoryDeleted { path } => write_directory(document, "directory-deleted", path),
     }
 }
 
-fn write_line(document: &mut String, kind: &str, path: &str, old: usize, new: usize, text: &str) {
+fn write_line(
+    document: &mut String,
+    kind: &str,
+    path: &str,
+    old: usize,
+    lines: isize,
+    new: usize,
+    text: &str,
+) {
     document.push_str("  - scope: \".\"\n");
     document.push_str(&format!("    type: {kind}\n"));
     document.push_str("    details:\n");
     document.push_str(&format!("      path: {}\n", yaml_string(path)));
     document.push_str(&format!("      old: {old}\n"));
+    document.push_str(&format!("      lines: {}\n", format_lines(lines)));
     document.push_str(&format!("      new: {new}\n"));
     document.push_str(&format!("      text: {}\n", yaml_string(text)));
+}
+
+/// The `lines` value, with its sign written out.
+///
+/// A removal is negative, so one removed line is `-1`. An addition is
+/// positive, so one added line is `+1`. A modification does not change the
+/// line count, so it is `+0`.
+fn format_lines(lines: isize) -> String {
+    if lines > 0 {
+        format!("+{lines}")
+    } else if lines == 0 {
+        "+0".to_string()
+    } else {
+        lines.to_string()
+    }
+}
+
+/// How many old lines a removal covers, as a negative count.
+///
+/// One line is `-1`. A run of two is `-2`.
+fn removed_lines(old: usize, old_end: usize) -> isize {
+    let count = old_end - old + 1;
+    -(count as isize)
 }
 
 fn write_directory(document: &mut String, kind: &str, path: &str) {
@@ -220,7 +261,10 @@ pub(crate) enum Change {
     },
     LineRemoved {
         path: String,
+        /// First removed line in the old file.
         old: usize,
+        /// Last removed line in the old file. Equal to `old` when `lines` is `-1`.
+        old_end: usize,
         new: usize,
         text: String,
     },
@@ -320,24 +364,37 @@ impl PartialChange {
                 contents: stored_bytes(&self.fields, "file-added")?,
             }),
             "file-changed" => file_changed(self.fields),
-            "line-added" => Ok(Change::LineAdded {
-                path: required(&self.fields, "path", "line-added")?,
-                old: required_line(&self.fields, "old", "line-added")?,
-                new: required_line(&self.fields, "new", "line-added")?,
-                text: required(&self.fields, "text", "line-added")?,
-            }),
-            "line-removed" => Ok(Change::LineRemoved {
-                path: required(&self.fields, "path", "line-removed")?,
-                old: required_line(&self.fields, "old", "line-removed")?,
-                new: required_line(&self.fields, "new", "line-removed")?,
-                text: required(&self.fields, "text", "line-removed")?,
-            }),
-            "line-modified" => Ok(Change::LineModified {
-                path: required(&self.fields, "path", "line-modified")?,
-                old: required_line(&self.fields, "old", "line-modified")?,
-                new: required_line(&self.fields, "new", "line-modified")?,
-                text: required(&self.fields, "text", "line-modified")?,
-            }),
+            "line-added" => {
+                let text = required(&self.fields, "text", "line-added")?;
+                expect_lines(&self.fields, "line-added", 1, &text)?;
+                Ok(Change::LineAdded {
+                    path: required(&self.fields, "path", "line-added")?,
+                    old: required_line(&self.fields, "old", "line-added")?,
+                    new: required_line(&self.fields, "new", "line-added")?,
+                    text,
+                })
+            }
+            "line-removed" => {
+                let old = required_line(&self.fields, "old", "line-removed")?;
+                let text = required(&self.fields, "text", "line-removed")?;
+                Ok(Change::LineRemoved {
+                    path: required(&self.fields, "path", "line-removed")?,
+                    old,
+                    old_end: removed_end(&self.fields, old, &text)?,
+                    new: required_line(&self.fields, "new", "line-removed")?,
+                    text,
+                })
+            }
+            "line-modified" => {
+                let text = required(&self.fields, "text", "line-modified")?;
+                expect_lines(&self.fields, "line-modified", 0, &text)?;
+                Ok(Change::LineModified {
+                    path: required(&self.fields, "path", "line-modified")?,
+                    old: required_line(&self.fields, "old", "line-modified")?,
+                    new: required_line(&self.fields, "new", "line-modified")?,
+                    text,
+                })
+            }
             "directory-added" => Ok(Change::DirectoryAdded {
                 path: required(&self.fields, "path", "directory-added")?,
             }),
@@ -395,6 +452,54 @@ fn stored_bytes(fields: &BTreeMap<String, String>, kind: &str) -> Result<Vec<u8>
             .decode(contents)
             .map_err(|_| format!("{kind} contents are not valid base64")),
         Some(other) => Err(format!("{kind} has unsupported encoding {other}")),
+    }
+}
+
+/// The last old line of a removal.
+///
+/// `lines: -1` removes the line at `old`. `lines: -2` removes `old` and the
+/// next line. The text holds that many lines.
+fn removed_end(fields: &BTreeMap<String, String>, old: usize, text: &str) -> Result<usize, String> {
+    let lines = required_lines(fields, "line-removed")?;
+    if lines >= 0 {
+        return Err(invalid_lines("line-removed", fields));
+    }
+    let count = lines
+        .checked_neg()
+        .ok_or_else(|| invalid_lines("line-removed", fields))? as usize;
+    if text.split('\n').count() != count {
+        return Err(invalid_lines("line-removed", fields));
+    }
+    old.checked_add(count - 1)
+        .ok_or_else(|| invalid_lines("line-removed", fields))
+}
+
+/// Checks that `lines` has the expected value and the text is one line.
+///
+/// An addition is `+1`. A modification is `+0`.
+fn expect_lines(
+    fields: &BTreeMap<String, String>,
+    kind: &str,
+    expected: isize,
+    text: &str,
+) -> Result<(), String> {
+    let lines = required_lines(fields, kind)?;
+    if lines != expected || text.contains('\n') {
+        return Err(invalid_lines(kind, fields));
+    }
+    Ok(())
+}
+
+fn required_lines(fields: &BTreeMap<String, String>, kind: &str) -> Result<isize, String> {
+    let text = required(fields, "lines", kind)?;
+    text.parse::<isize>()
+        .map_err(|_| format!("{kind} has invalid lines {text}"))
+}
+
+fn invalid_lines(kind: &str, fields: &BTreeMap<String, String>) -> String {
+    match fields.get("lines") {
+        Some(text) => format!("{kind} has invalid lines {text}"),
+        None => format!("{kind} is missing lines"),
     }
 }
 

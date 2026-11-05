@@ -5,6 +5,7 @@ mod dialect;
 mod directory_changes;
 mod file_change;
 mod line_changes;
+mod merge;
 mod semdif;
 
 pub(crate) use args::Sources;
@@ -38,7 +39,8 @@ struct Differences {
 /// Files that exist on only one side may be a rename, a deletion, or an addition.
 /// Files that exist on both sides are paired and compared in place.
 /// Empty directories that appear or disappear are recorded too, including one
-/// left empty because its files moved.
+/// left empty because its files moved. Adjacent removed lines in one file
+/// become one line-removed record before the semdif file is written.
 fn find_differences(sources: &Sources) -> Differences {
     let left_files = collect_files(Path::new(&sources.left)).unwrap_or_else(|message| {
         exit_with_message(message);
@@ -68,6 +70,7 @@ fn find_differences(sources: &Sources) -> Differences {
         &right_files,
     ));
     let changes = directory_changes::place_replacement_files(changes);
+    let changes = merge::merge_adjacent(changes);
     Differences {
         paths: paired_files,
         changes,
