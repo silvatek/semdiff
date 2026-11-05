@@ -2,9 +2,9 @@
 ///
 /// A run of line-removed records is one removal when the records are for one
 /// file, their old lines follow one another, and the same new line follows
-/// them. The merged record keeps the first old line and sets `lines` to the
-/// negative count, such as `old: 49` and `lines: -2`. Other kinds of change
-/// stay as they are.
+/// them. The merged record keeps the first old line. `lines` is the negative
+/// count, `-1` for one line and `-2` for two. Other kinds of change stay as
+/// they are.
 pub(crate) fn merge_adjacent(changes: Vec<crate::semdif::Change>) -> Vec<crate::semdif::Change> {
     let mut merged = Vec::new();
     for change in changes {
