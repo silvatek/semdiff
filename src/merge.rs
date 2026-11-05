@@ -27,28 +27,33 @@ fn append_line(previous: &mut String, text: &str) {
 }
 
 /// Joins `change` onto the previous record when the two are one adjacent run.
+///
+/// Records of different kinds, or in different files, stay separate. Each kind
+/// then checks whether its line numbers continue.
 fn extend_adjacent(
     merged: &mut Vec<crate::semdif::Change>,
     change: &crate::semdif::Change,
 ) -> bool {
+    if !same_line_scope(merged.last(), change) {
+        return false;
+    }
     match (merged.last_mut(), change) {
         (
             Some(crate::semdif::Change::LineRemoved {
-                path: previous_path,
                 old_end: previous_end,
                 new: previous_new,
                 text: previous_text,
                 ..
             }),
             crate::semdif::Change::LineRemoved {
-                path,
                 old,
                 old_end,
                 new,
                 text,
+                ..
             },
         ) => {
-            if previous_path != path || *previous_end + 1 != *old || previous_new != new {
+            if *previous_end + 1 != *old || previous_new != new {
                 return false;
             }
             *previous_end = *old_end;
@@ -57,22 +62,17 @@ fn extend_adjacent(
         }
         (
             Some(crate::semdif::Change::LineAdded {
-                path: previous_path,
                 old: previous_old,
                 new: previous_new,
                 text: previous_text,
+                ..
             }),
-            crate::semdif::Change::LineAdded {
-                path,
-                old,
-                new,
-                text,
-            },
+            crate::semdif::Change::LineAdded { old, new, text, .. },
         ) => {
             let Some(next_new) = previous_new.checked_add(line_count(previous_text)) else {
                 return false;
             };
-            if previous_path != path || previous_old != old || next_new != *new {
+            if previous_old != old || next_new != *new {
                 return false;
             }
             append_line(previous_text, text);
@@ -80,17 +80,12 @@ fn extend_adjacent(
         }
         (
             Some(crate::semdif::Change::LineModified {
-                path: previous_path,
                 old: previous_old,
                 new: previous_new,
                 text: previous_text,
+                ..
             }),
-            crate::semdif::Change::LineModified {
-                path,
-                old,
-                new,
-                text,
-            },
+            crate::semdif::Change::LineModified { old, new, text, .. },
         ) => {
             let count = line_count(previous_text);
             let Some(next_old) = previous_old.checked_add(count) else {
@@ -99,12 +94,43 @@ fn extend_adjacent(
             let Some(next_new) = previous_new.checked_add(count) else {
                 return false;
             };
-            if previous_path != path || next_old != *old || next_new != *new {
+            if next_old != *old || next_new != *new {
                 return false;
             }
             append_line(previous_text, text);
             true
         }
+        _ => false,
+    }
+}
+
+/// Two line edits can continue one record when they have the same kind and file.
+fn same_line_scope(
+    previous: Option<&crate::semdif::Change>,
+    change: &crate::semdif::Change,
+) -> bool {
+    match (previous, change) {
+        (
+            Some(crate::semdif::Change::LineRemoved {
+                path: previous_path,
+                ..
+            }),
+            crate::semdif::Change::LineRemoved { path, .. },
+        )
+        | (
+            Some(crate::semdif::Change::LineAdded {
+                path: previous_path,
+                ..
+            }),
+            crate::semdif::Change::LineAdded { path, .. },
+        )
+        | (
+            Some(crate::semdif::Change::LineModified {
+                path: previous_path,
+                ..
+            }),
+            crate::semdif::Change::LineModified { path, .. },
+        ) => previous_path == path,
         _ => false,
     }
 }
