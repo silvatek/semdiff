@@ -48,4 +48,6 @@ A new type or function carries a comment that says what it is for.
 
 If you are having to guess at the user's intentions, or thinking things like "Maybe the user...", stop and ask for clarification.
 
-If a lot of complexity is being revealed, stop and create a high-level plan. Review that plan in the agent chat. Once it is agreed, do the low-level design and implementation for the first step only.
+If significant complexity is being revealed, stop and create a high-level, multi-step plan. Review that plan in the agent chat. Once the plan is agreed, do the low-level design and implementation for the first step only.
+
+The objective is gradual, iterative design and implementation, with lots of small changes rather than a few huge ones.
