@@ -482,6 +482,62 @@ fn merges_renames_of_one_name_when_the_gap_does_not_keep_that_name() {
     assert_eq!(tree.read("edited/src/main.rs"), after.as_bytes());
 }
 
+#[test]
+fn applies_a_line_addition_marked_as_a_comment() {
+    let tree = Tree::new();
+    tree.write("edited/src/main.rs", "fn main() {}\n");
+
+    tree.apply(
+        "edited",
+        "\
+header:
+  semdiff: \"0.1.0\"
+  timestamp: \"2020-01-01T00:00:00Z\"
+changes:
+  - scope: \"src/main.rs\"
+    type: line-added
+    details:
+      old: 1
+      lines: +1
+      new: 1
+      text: \"// note\"
+      isComment: true
+",
+    )
+    .unwrap();
+
+    assert_eq!(tree.read("edited/src/main.rs"), b"// note\nfn main() {}\n");
+}
+
+#[test]
+fn rejects_a_line_change_with_an_invalid_comment_flag() {
+    let tree = Tree::new();
+    tree.write("edited/src/main.rs", "fn main() {}\n");
+
+    let message = tree
+        .apply(
+            "edited",
+            "\
+header:
+  semdiff: \"0.1.0\"
+  timestamp: \"2020-01-01T00:00:00Z\"
+changes:
+  - scope: \"src/main.rs\"
+    type: line-added
+    details:
+      old: 1
+      lines: +1
+      new: 1
+      text: \"// note\"
+      isComment: yes
+",
+        )
+        .unwrap_err();
+
+    assert!(message.contains("invalid isComment yes"), "{message}");
+    assert_eq!(tree.read("edited/src/main.rs"), b"fn main() {}\n");
+}
+
 fn changed_note() -> (Tree, String) {
     let tree = Tree::new();
     tree.write("left/note.txt", "old line\n");

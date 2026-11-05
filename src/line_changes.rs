@@ -226,6 +226,7 @@ fn changes_in_hunk(path: &str, hunk: &Hunk) -> Vec<Box<dyn Change>> {
             line.index + 1,
             hunk.next_new_line,
             line.text.clone(),
+            false,
         )));
     }
     for line in &hunk.new_lines[paired..] {
@@ -234,6 +235,7 @@ fn changes_in_hunk(path: &str, hunk: &Hunk) -> Vec<Box<dyn Change>> {
             hunk.next_old_line,
             line.index + 1,
             line.text.clone(),
+            false,
         )));
     }
     changes
@@ -262,6 +264,7 @@ fn modified_line(
         old,
         new,
         new_text.to_string(),
+        false,
     ))
 }
 

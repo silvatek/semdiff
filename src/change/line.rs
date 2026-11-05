@@ -1,7 +1,9 @@
 //! Line additions, removals, and modifications.
 //!
 //! A line change's scope is the file. A span change names one old line instead,
-//! and lives in its own module.
+//! and lives in its own module. The same line record can say that the edit is
+//! a full-line comment. That is `isComment: true` in the semdif. False is the
+//! default and is left out.
 
 use std::path::Path;
 
@@ -18,6 +20,10 @@ struct LineBody {
     old: usize,
     new: usize,
     text: String,
+    /// Whether this edit is a full-line comment.
+    ///
+    /// Written as `isComment: true`. False is omitted from the semdif.
+    is_comment: bool,
 }
 
 fn line_count(text: &str) -> usize {
@@ -71,11 +77,14 @@ fn append_line(body: &mut LineBody, text: &str) {
     body.text.push_str(text);
 }
 
-fn write_line(document: &mut String, body: &LineBody, lines: isize) {
+fn write_line(document: &mut String, body: &LineBody, lines: isize, is_comment: bool) {
     crate::semdif::write_plain(document, "old", &body.old.to_string());
     crate::semdif::write_plain(document, "lines", &format_lines(lines));
     crate::semdif::write_plain(document, "new", &body.new.to_string());
     crate::semdif::write_detail(document, "text", &body.text);
+    if is_comment {
+        crate::semdif::write_plain(document, "isComment", "true");
+    }
 }
 
 fn format_lines(lines: isize) -> String {
@@ -127,10 +136,21 @@ pub(crate) struct LineAdded {
 }
 
 impl LineAdded {
-    pub(crate) fn new(scope: String, old: usize, new: usize, text: String) -> Self {
+    pub(crate) fn new(
+        scope: String,
+        old: usize,
+        new: usize,
+        text: String,
+        is_comment: bool,
+    ) -> Self {
         Self {
             scope,
-            body: LineBody { old, new, text },
+            body: LineBody {
+                old,
+                new,
+                text,
+                is_comment,
+            },
         }
     }
 }
@@ -157,7 +177,12 @@ impl Change for LineAdded {
     }
 
     fn write_details(&self, document: &mut String) {
-        write_line(document, &self.body, line_count(&self.body.text) as isize);
+        write_line(
+            document,
+            &self.body,
+            line_count(&self.body.text) as isize,
+            self.is_comment(),
+        );
     }
 
     fn apply(&self, _fs: &dyn FileSystem, _source: &Path) -> Result<(), String> {
@@ -189,6 +214,10 @@ impl LineEdit for LineAdded {
         true
     }
 
+    fn is_comment(&self) -> bool {
+        self.body.is_comment
+    }
+
     fn extend(&mut self, next: &dyn Change) -> bool {
         let new_len = line_count(&self.body.text);
         extend_following(self, 0, new_len, next)
@@ -210,10 +239,21 @@ pub(crate) struct LineRemoved {
 }
 
 impl LineRemoved {
-    pub(crate) fn new(scope: String, old: usize, new: usize, text: String) -> Self {
+    pub(crate) fn new(
+        scope: String,
+        old: usize,
+        new: usize,
+        text: String,
+        is_comment: bool,
+    ) -> Self {
         Self {
             scope,
-            body: LineBody { old, new, text },
+            body: LineBody {
+                old,
+                new,
+                text,
+                is_comment,
+            },
         }
     }
 }
@@ -241,7 +281,7 @@ impl Change for LineRemoved {
 
     fn write_details(&self, document: &mut String) {
         let count = line_count(&self.body.text) as isize;
-        write_line(document, &self.body, -count);
+        write_line(document, &self.body, -count, self.is_comment());
     }
 
     fn apply(&self, _fs: &dyn FileSystem, _source: &Path) -> Result<(), String> {
@@ -273,6 +313,10 @@ impl LineEdit for LineRemoved {
         true
     }
 
+    fn is_comment(&self) -> bool {
+        self.body.is_comment
+    }
+
     fn extend(&mut self, next: &dyn Change) -> bool {
         let old_len = line_count(&self.body.text);
         extend_following(self, old_len, 0, next)
@@ -300,10 +344,21 @@ pub(crate) struct LineModified {
 }
 
 impl LineModified {
-    pub(crate) fn new(scope: String, old: usize, new: usize, text: String) -> Self {
+    pub(crate) fn new(
+        scope: String,
+        old: usize,
+        new: usize,
+        text: String,
+        is_comment: bool,
+    ) -> Self {
         Self {
             scope,
-            body: LineBody { old, new, text },
+            body: LineBody {
+                old,
+                new,
+                text,
+                is_comment,
+            },
         }
     }
 }
@@ -330,7 +385,7 @@ impl Change for LineModified {
     }
 
     fn write_details(&self, document: &mut String) {
-        write_line(document, &self.body, 0);
+        write_line(document, &self.body, 0, self.is_comment());
     }
 
     fn apply(&self, _fs: &dyn FileSystem, _source: &Path) -> Result<(), String> {
@@ -360,6 +415,10 @@ impl LineEdit for LineModified {
     fn append_text(&mut self, text: &str) -> bool {
         append_line(&mut self.body, text);
         true
+    }
+
+    fn is_comment(&self) -> bool {
+        self.body.is_comment
     }
 
     fn extend(&mut self, next: &dyn Change) -> bool {
