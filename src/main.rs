@@ -3,6 +3,7 @@ mod args;
 mod content_changes;
 mod directory_changes;
 mod file_change;
+mod line_changes;
 mod semdif;
 
 pub(crate) use args::Sources;

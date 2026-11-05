@@ -74,6 +74,10 @@ fn change_key(change: &crate::semdif::Change) -> (&str, &str) {
         crate::semdif::Change::FileDeleted { path }
         | crate::semdif::Change::FileAdded { path, .. }
         | crate::semdif::Change::FileChanged { path, .. }
+        | crate::semdif::Change::FileDigest { path, .. }
+        | crate::semdif::Change::LineAdded { path, .. }
+        | crate::semdif::Change::LineRemoved { path, .. }
+        | crate::semdif::Change::LineModified { path, .. }
         | crate::semdif::Change::DirectoryAdded { path }
         | crate::semdif::Change::DirectoryDeleted { path } => (path, ""),
     }
@@ -103,4 +107,15 @@ fn file_hash(root: &Path, relative: &str) -> Result<[u8; 32], String> {
         hasher.update(&buffer[..count]);
     }
     Ok(hasher.finalize().into())
+}
+
+/// The SHA-256 identity of a file's bytes, as lowercase hex.
+pub(crate) fn sha256_hex(bytes: &[u8]) -> String {
+    let digest = Sha256::digest(bytes);
+    let mut hex = String::with_capacity(digest.len() * 2);
+    for byte in digest {
+        hex.push(char::from(b"0123456789abcdef"[(byte >> 4) as usize]));
+        hex.push(char::from(b"0123456789abcdef"[(byte & 0xf) as usize]));
+    }
+    hex
 }

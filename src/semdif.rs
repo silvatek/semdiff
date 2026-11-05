@@ -76,9 +76,49 @@ fn write_change(document: &mut String, change: &Change) {
             document.push_str(&format!("      path: {}\n", yaml_string(path)));
             write_file_contents(document, contents);
         }
+        Change::FileDigest {
+            path,
+            old_hash,
+            new_hash,
+        } => {
+            document.push_str("  - scope: \".\"\n");
+            document.push_str("    type: file-changed\n");
+            document.push_str("    details:\n");
+            document.push_str(&format!("      path: {}\n", yaml_string(path)));
+            document.push_str(&format!("      old: {}\n", yaml_string(old_hash)));
+            document.push_str(&format!("      new: {}\n", yaml_string(new_hash)));
+        }
+        Change::LineAdded {
+            path,
+            old,
+            new,
+            text,
+        } => write_line(document, "line-added", path, *old, *new, text),
+        Change::LineRemoved {
+            path,
+            old,
+            new,
+            text,
+        } => write_line(document, "line-removed", path, *old, *new, text),
+        Change::LineModified {
+            path,
+            old,
+            new,
+            text,
+        } => write_line(document, "line-modified", path, *old, *new, text),
         Change::DirectoryAdded { path } => write_directory(document, "directory-added", path),
         Change::DirectoryDeleted { path } => write_directory(document, "directory-deleted", path),
     }
+}
+
+fn write_line(document: &mut String, kind: &str, path: &str, old: usize, new: usize, text: &str) {
+    document.push_str("  - scope: \".\"\n");
+    document.push_str(&format!("    type: {kind}\n"));
+    document.push_str("    details:\n");
+    document.push_str(&format!("      path: {}\n", yaml_string(path)));
+    document.push_str(&format!("      old: {old}\n"));
+    document.push_str(&format!("      new: {new}\n"));
+    document.push_str(&format!("      text: {}\n", yaml_string(text)));
 }
 
 fn write_directory(document: &mut String, kind: &str, path: &str) {
@@ -147,15 +187,55 @@ fn utc_timestamp() -> String {
 
 /// One change recorded in a semdif file.
 ///
-/// Apply replays these in the order they were recorded. Each kind carries the
-/// details that kind needs.
+/// File and directory changes are replayed in the order they were recorded.
+/// Line changes for one path are applied together from their old line numbers,
+/// so those records can be listed in line order. Each kind carries the details
+/// that kind needs.
 pub(crate) enum Change {
-    FileRenamed { from: String, to: String },
-    FileDeleted { path: String },
-    FileAdded { path: String, contents: Vec<u8> },
-    FileChanged { path: String, contents: Vec<u8> },
-    DirectoryAdded { path: String },
-    DirectoryDeleted { path: String },
+    FileRenamed {
+        from: String,
+        to: String,
+    },
+    FileDeleted {
+        path: String,
+    },
+    FileAdded {
+        path: String,
+        contents: Vec<u8>,
+    },
+    FileChanged {
+        path: String,
+        contents: Vec<u8>,
+    },
+    FileDigest {
+        path: String,
+        old_hash: String,
+        new_hash: String,
+    },
+    LineAdded {
+        path: String,
+        old: usize,
+        new: usize,
+        text: String,
+    },
+    LineRemoved {
+        path: String,
+        old: usize,
+        new: usize,
+        text: String,
+    },
+    LineModified {
+        path: String,
+        old: usize,
+        new: usize,
+        text: String,
+    },
+    DirectoryAdded {
+        path: String,
+    },
+    DirectoryDeleted {
+        path: String,
+    },
 }
 
 /// The changes recorded in a semdif file.
@@ -239,9 +319,24 @@ impl PartialChange {
                 path: required(&self.fields, "path", "file-added")?,
                 contents: stored_bytes(&self.fields, "file-added")?,
             }),
-            "file-changed" => Ok(Change::FileChanged {
-                path: required(&self.fields, "path", "file-changed")?,
-                contents: stored_bytes(&self.fields, "file-changed")?,
+            "file-changed" => file_changed(self.fields),
+            "line-added" => Ok(Change::LineAdded {
+                path: required(&self.fields, "path", "line-added")?,
+                old: required_line(&self.fields, "old", "line-added")?,
+                new: required_line(&self.fields, "new", "line-added")?,
+                text: required(&self.fields, "text", "line-added")?,
+            }),
+            "line-removed" => Ok(Change::LineRemoved {
+                path: required(&self.fields, "path", "line-removed")?,
+                old: required_line(&self.fields, "old", "line-removed")?,
+                new: required_line(&self.fields, "new", "line-removed")?,
+                text: required(&self.fields, "text", "line-removed")?,
+            }),
+            "line-modified" => Ok(Change::LineModified {
+                path: required(&self.fields, "path", "line-modified")?,
+                old: required_line(&self.fields, "old", "line-modified")?,
+                new: required_line(&self.fields, "new", "line-modified")?,
+                text: required(&self.fields, "text", "line-modified")?,
             }),
             "directory-added" => Ok(Change::DirectoryAdded {
                 path: required(&self.fields, "path", "directory-added")?,
@@ -252,6 +347,39 @@ impl PartialChange {
             "" => Err("change is missing a type".to_string()),
             other => Err(format!("unknown change type {other}")),
         }
+    }
+}
+
+/// A whole-file replacement, or the old and new SHA-256 hashes of a changed file.
+///
+/// The hash record has `old` and `new`. A replacement has `contents` instead.
+fn file_changed(fields: BTreeMap<String, String>) -> Result<Change, String> {
+    let path = required(&fields, "path", "file-changed")?;
+    if fields.contains_key("contents") {
+        return Ok(Change::FileChanged {
+            path,
+            contents: stored_bytes(&fields, "file-changed")?,
+        });
+    }
+    Ok(Change::FileDigest {
+        path,
+        old_hash: required_hash(&fields, "old", "file-changed")?,
+        new_hash: required_hash(&fields, "new", "file-changed")?,
+    })
+}
+
+/// A SHA-256 hex digest recorded for a changed file.
+fn required_hash(
+    fields: &BTreeMap<String, String>,
+    key: &str,
+    kind: &str,
+) -> Result<String, String> {
+    let text = required(fields, key, kind)?;
+    let hex = text.to_ascii_lowercase();
+    if hex.len() == 64 && hex.bytes().all(|byte| byte.is_ascii_hexdigit()) {
+        Ok(hex)
+    } else {
+        Err(format!("{kind} has invalid {key}"))
     }
 }
 
@@ -267,6 +395,19 @@ fn stored_bytes(fields: &BTreeMap<String, String>, kind: &str) -> Result<Vec<u8>
             .decode(contents)
             .map_err(|_| format!("{kind} contents are not valid base64")),
         Some(other) => Err(format!("{kind} has unsupported encoding {other}")),
+    }
+}
+
+/// A 1-based line number recorded for a line change.
+fn required_line(
+    fields: &BTreeMap<String, String>,
+    key: &str,
+    kind: &str,
+) -> Result<usize, String> {
+    let text = required(fields, key, kind)?;
+    match text.parse::<usize>() {
+        Ok(line) if line >= 1 => Ok(line),
+        _ => Err(format!("{kind} has invalid {key} {text}")),
     }
 }
 

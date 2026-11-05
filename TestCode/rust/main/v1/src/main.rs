@@ -38,3 +38,19 @@ mod tests {
         assert_eq!(fibonacci(10), 55);
     }
 }
+
+// One line below is removed in v2.
+// This single line is deleted.
+
+// One line below is changed in v2.
+// Count from zero.
+
+// Two lines below are removed in v2.
+// This deleted line is first.
+// This deleted line is second.
+
+// Two lines are added below in v2.
+
+// Two lines below are changed in v2.
+// Old first line.
+// Old second line.

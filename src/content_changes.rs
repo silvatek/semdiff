@@ -12,31 +12,52 @@ pub(crate) fn content_changes(
     let right_root = crate::source_base(Path::new(&sources.right));
     let mut changes = Vec::new();
     for path in paired_files {
-        if let Some(change) = content_change(left_root, right_root, path)? {
-            changes.push(change);
-        }
+        changes.extend(content_change(left_root, right_root, path)?);
     }
     Ok(changes)
 }
 
-/// The change for one paired file, when its two copies differ.
+/// The changes for one paired file, when its two copies differ.
 ///
-/// Matching copies are left out. A difference records the new contents so the old
-/// copy can be brought up to date.
+/// Matching copies are left out. Text is recorded as one change per added,
+/// removed, or modified line. Bytes that are not text stay one whole-file change,
+/// because they have no lines to compare. Every changed file also records the
+/// SHA-256 of the old bytes and the new bytes, so apply can check both.
 fn content_change(
     left_root: &Path,
     right_root: &Path,
     path: &str,
-) -> Result<Option<crate::semdif::Change>, String> {
+) -> Result<Vec<crate::semdif::Change>, String> {
     let before = read_file(left_root, path)?;
     let after = read_file(right_root, path)?;
     if before == after {
-        return Ok(None);
+        return Ok(Vec::new());
     }
-    Ok(Some(crate::semdif::Change::FileChanged {
+    let mut changes = vec![crate::semdif::Change::FileDigest {
         path: path.to_string(),
-        contents: after,
-    }))
+        old_hash: crate::file_change::sha256_hex(&before),
+        new_hash: crate::file_change::sha256_hex(&after),
+    }];
+    match (std::str::from_utf8(&before), std::str::from_utf8(&after)) {
+        (Ok(before_text), Ok(after_text)) => {
+            let line_edits = crate::line_changes::line_changes(path, before_text, after_text);
+            // The line lists match, and the bytes still differ. That difference is
+            // the final newline, which is not itself a line.
+            if line_edits.is_empty() {
+                changes.push(crate::semdif::Change::FileChanged {
+                    path: path.to_string(),
+                    contents: after,
+                });
+            } else {
+                changes.extend(line_edits);
+            }
+        }
+        _ => changes.push(crate::semdif::Change::FileChanged {
+            path: path.to_string(),
+            contents: after,
+        }),
+    }
+    Ok(changes)
 }
 
 fn read_file(root: &Path, relative: &str) -> Result<Vec<u8>, String> {
