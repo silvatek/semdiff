@@ -175,35 +175,26 @@ fn merges_the_adjacent_removals_in_the_rust_sample() {
         "  - scope: \"src/main.rs\"\n    type: line-added\n    details:\n      old: 53\n      lines: +2\n      new: 51\n      text: \"// This added line is first.\\n// This added line is second.\"\n"
     ));
     assert!(document.contains(
-        "  - scope: \"src/main.rs:1\"\n    type: identifier-renamed\n    details:\n      new: 1\n      oldname: \"fibonacci\"\n      newname: \"fib\"\n"
-    ));
-    assert!(document.contains(
-        "  - scope: \"src/main.rs:25\"\n    type: identifier-renamed\n    details:\n      new: 26\n      oldname: \"fibonacci\"\n      newname: \"fib\"\n"
-    ));
-    assert!(document.contains(
-        "  - scope: \"src/main.rs:31\"\n    type: identifier-renamed\n    details:\n      new: 32\n      oldname: \"fibonacci\"\n      newname: \"fib\"\n"
-    ));
-    assert!(document.contains(
-        "  - scope: \"src/main.rs:35\"\n    type: identifier-renamed\n    details:\n      new: 36\n      oldname: \"fibonacci\"\n      newname: \"fib\"\n"
-    ));
-    assert!(document.contains(
-        "  - scope: \"src/main.rs:36\"\n    type: identifier-renamed\n    details:\n      new: 37\n      oldname: \"fibonacci\"\n      newname: \"fib\"\n"
-    ));
-    assert!(document.contains(
-        "  - scope: \"src/main.rs:37\"\n    type: identifier-renamed\n    details:\n      new: 38\n      oldname: \"fibonacci\"\n      newname: \"fib\"\n"
-    ));
-    assert!(document.contains(
-        "  - scope: \"src/main.rs:38\"\n    type: identifier-renamed\n    details:\n      new: 39\n      oldname: \"fibonacci\"\n      newname: \"fib\"\n"
+        "  - scope: \"src/main.rs:1-38\"\n    type: identifier-renamed\n    details:\n      oldname: \"fibonacci\"\n      newname: \"fib\"\n"
     ));
     assert!(document.contains(
         "  - scope: \"src/main.rs:46\"\n    type: identifier-renamed\n    details:\n      new: 46\n      oldname: \"zero\"\n      newname: \"one\"\n"
     ));
     assert!(document.contains(
-        "  - scope: \"src/main.rs:55\"\n    type: identifier-renamed\n    details:\n      new: 55\n      oldname: \"Old\"\n      newname: \"New\"\n"
+        "  - scope: \"src/main.rs:55-56\"\n    type: identifier-renamed\n    details:\n      oldname: \"Old\"\n      newname: \"New\"\n"
     ));
-    assert!(document.contains(
-        "  - scope: \"src/main.rs:56\"\n    type: identifier-renamed\n    details:\n      new: 56\n      oldname: \"Old\"\n      newname: \"New\"\n"
-    ));
+    assert!(
+        !document.contains("scope: \"src/main.rs:25\""),
+        "{document}"
+    );
+    assert!(
+        !document.contains("scope: \"src/main.rs:35\""),
+        "{document}"
+    );
+    assert!(
+        !document.contains("scope: \"src/main.rs:56\""),
+        "{document}"
+    );
     assert!(!document.contains("old: 50\n"), "{document}");
     assert!(!document.contains("new: 52\n"), "{document}");
 }
@@ -378,6 +369,30 @@ changes:
 
     assert!(message.contains("path:line"), "{message}");
     assert_eq!(tree.read("edited/src/main.rs"), b"fn fibonacci() {}\n");
+}
+
+#[test]
+fn merges_renames_of_one_name_when_the_gap_does_not_keep_that_name() {
+    let tree = Tree::new();
+    let before = "foo one\nkeep\nfoo two\nstill foo\nfoo three\n";
+    let after = "bar one\nkeep\nbar two\nstill foo\nbar three\n";
+    tree.write("left/src/main.rs", before);
+    tree.write("right/src/main.rs", after);
+    tree.write("edited/src/main.rs", before);
+
+    let document = tree.compare("left", "right");
+
+    assert!(document.contains(
+        "  - scope: \"src/main.rs:1-3\"\n    type: identifier-renamed\n    details:\n      oldname: \"foo\"\n      newname: \"bar\"\n"
+    ));
+    assert!(document.contains(
+        "  - scope: \"src/main.rs:5\"\n    type: identifier-renamed\n    details:\n      new: 5\n      oldname: \"foo\"\n      newname: \"bar\"\n"
+    ));
+    assert!(!document.contains("scope: \"src/main.rs:1\""), "{document}");
+    assert!(!document.contains("scope: \"src/main.rs:3\""), "{document}");
+
+    tree.apply("edited", &document).unwrap();
+    assert_eq!(tree.read("edited/src/main.rs"), after.as_bytes());
 }
 
 fn changed_note() -> (Tree, String) {

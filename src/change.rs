@@ -18,7 +18,7 @@ mod span;
 pub(crate) use directory::{DirectoryAdded, DirectoryDeleted};
 pub(crate) use file::{FileAdded, FileChanged, FileDeleted, FileRenamed};
 pub(crate) use line::{merge_adjacent, LineAdded, LineModified, LineRemoved};
-pub(crate) use span::{parse_span_scope, IdentifierRenamed, SpanScope};
+pub(crate) use span::{merge_identifier_spans, parse_span_scope, IdentifierRenamed, SpanScope};
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::Path;
@@ -30,7 +30,8 @@ use crate::filesystem::FileSystem;
 /// A rename, an added or deleted file, and an added or deleted directory use
 /// this scope. A change to the lines or bytes of one file is scoped to that
 /// file. A span change is scoped to one old line of that file, written
-/// `path:line`. A later change that spans several files, such as renaming
+/// `path:line`, or to a run of old lines, written `path:start-end`. A later
+/// change that spans several files, such as renaming
 /// files by a regular expression, stores the scope that says how widely it
 /// applies.
 pub(crate) const TREE_SCOPE: &str = ".";
@@ -104,6 +105,22 @@ pub(crate) trait Change {
     fn added_file(&self) -> Option<&dyn AddedFile> {
         None
     }
+
+    /// This change renames an identifier, when it does.
+    fn identifier_rename(&self) -> Option<IdentifierRename<'_>> {
+        None
+    }
+}
+
+/// The names and old lines of one identifier rename.
+///
+/// `start` and `end` are the old lines the rename already covers. A rename of
+/// one line has the same start and end.
+pub(crate) struct IdentifierRename<'a> {
+    pub(crate) oldname: &'a str,
+    pub(crate) newname: &'a str,
+    pub(crate) start: usize,
+    pub(crate) end: usize,
 }
 
 /// A change applied with the other edits of one file.
@@ -111,7 +128,7 @@ pub(crate) trait Change {
 /// Apply groups these by [`Content::file`], checks the old hash, builds the
 /// new bytes, checks the new hash, and writes the file once. For a line
 /// change, that file is the change's scope. For a span change, the scope is
-/// `path:line` and the file is the path.
+/// `path:line` or `path:start-end` and the file is the path.
 pub(crate) trait Content {
     /// The file those edits share.
     fn file(&self) -> &str;

@@ -299,9 +299,14 @@ fn parse_identifier_renamed(
     fields: BTreeMap<String, String>,
 ) -> Result<Box<dyn Change>, String> {
     let span = crate::change::parse_span_scope(&scope)?;
-    Ok(Box::new(crate::change::IdentifierRenamed::new(
+    let new = if span.is_single() {
+        Some(required_line(&fields, "new", "identifier-renamed")?)
+    } else {
+        None
+    };
+    Ok(Box::new(crate::change::IdentifierRenamed::recorded(
         span,
-        required_line(&fields, "new", "identifier-renamed")?,
+        new,
         required(&fields, "oldname", "identifier-renamed")?,
         required(&fields, "newname", "identifier-renamed")?,
     )))

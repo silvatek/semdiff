@@ -14,7 +14,9 @@ use crate::change::Change;
 /// last old line when the text is appended. `new` is a line in the new file.
 /// For a removed line it is the new line that follows the removal, or one past
 /// the last new line when the removal is at the end. An identifier rename
-/// records its old line in the scope, as `path:line`, and still carries `new`.
+/// records its old line in the scope, as `path:line`. Renames of one name in
+/// that file become `path:start-end` when every occurrence of the old name
+/// between them is one of those renames, and that run does not record `new`.
 /// The records are ordered by
 /// `old`, then `new`, which walks the file from the top. Apply rebuilds the
 /// file from the old positions, so that order is for reading.
@@ -27,7 +29,7 @@ pub(crate) fn line_changes(path: &str, before: &str, after: &str) -> Vec<Box<dyn
         changes.extend(changes_in_hunk(path, &hunk));
     }
     changes.sort_by_key(|change| line_position(change.as_ref()));
-    changes
+    crate::change::merge_identifier_spans(path, &old_lines.lines, changes)
 }
 
 /// The lines of a text file, without their separating newlines.

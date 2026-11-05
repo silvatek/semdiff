@@ -78,6 +78,37 @@ pub(crate) fn replace_name(
     Ok(replaced)
 }
 
+/// Replaces every occurrence of `oldname` on this line.
+///
+/// Zero occurrences leaves the line unchanged. A file with no dialect is an
+/// error, so apply does not write a different edit.
+pub(crate) fn replace_every(
+    path: &str,
+    line: &str,
+    oldname: &str,
+    newname: &str,
+) -> Result<String, String> {
+    let dialect = crate::dialect::for_path(path)
+        .ok_or_else(|| format!("{path} has no dialect for an identifier rename"))?;
+    let mut replaced = String::new();
+    for piece in pieces(dialect, line) {
+        if piece.identifier && piece.text == oldname {
+            replaced.push_str(newname);
+        } else {
+            replaced.push_str(piece.text);
+        }
+    }
+    Ok(replaced)
+}
+
+/// How many times `name` occurs as an identifier on this line.
+///
+/// `None` means the file has no dialect, so the line is not read for names.
+pub(crate) fn occurrence_count(path: &str, line: &str, name: &str) -> Option<usize> {
+    let dialect = crate::dialect::for_path(path)?;
+    Some(count_name(&pieces(dialect, line), name))
+}
+
 struct Piece<'a> {
     identifier: bool,
     text: &'a str,
