@@ -4,11 +4,14 @@
 /// lines that stayed. A walk along those matches turns each gap into a hunk.
 /// Lines in a hunk pair from the top into modifications. Leftover old lines were
 /// removed, and leftover new lines were added.
-
-/// One line edit in a text file.
 ///
-/// `line` is 1-based. An added line is numbered where it sits in the new file.
-/// A removed or modified line is numbered where it sat in the old file.
+/// Each record carries `old` and `new`. `old` is a line in the old file. For an
+/// added line it is the old line the text is inserted before, or one past the
+/// last old line when the text is appended. `new` is a line in the new file.
+/// For a removed line it is the new line that follows the removal, or one past
+/// the last new line when the removal is at the end. The records are ordered by
+/// `old`, then `new`, which walks the file from the top. Apply rebuilds the
+/// file from the old positions, so that order is for reading.
 pub(crate) fn line_changes(path: &str, before: &str, after: &str) -> Vec<crate::semdif::Change> {
     let old_lines = split_text(before);
     let new_lines = split_text(after);
@@ -17,7 +20,8 @@ pub(crate) fn line_changes(path: &str, before: &str, after: &str) -> Vec<crate::
     for hunk in hunks(&old_lines.lines, &new_lines.lines, &matches) {
         changes.extend(changes_in_hunk(path, &hunk));
     }
-    replay_order(changes)
+    changes.sort_by_key(line_position);
+    changes
 }
 
 /// The lines of a text file, without their separating newlines.
@@ -115,9 +119,15 @@ fn recover_common_lines(
 }
 
 /// Old and new lines that sit in one gap between common lines.
+///
+/// `next_old_line` and `next_new_line` are the 1-based lines just after the gap.
+/// An addition is inserted before `next_old_line`. A removal is followed by
+/// `next_new_line`. Either one is one past the end when the gap reaches the end.
 struct Hunk {
     old_lines: Vec<IndexedLine>,
     new_lines: Vec<IndexedLine>,
+    next_old_line: usize,
+    next_new_line: usize,
 }
 
 struct IndexedLine {
@@ -170,6 +180,8 @@ fn push_hunk(
     hunks.push(Hunk {
         old_lines: indexed(old_lines, old_from, old_to),
         new_lines: indexed(new_lines, new_from, new_to),
+        next_old_line: old_to + 1,
+        next_new_line: new_to + 1,
     });
 }
 
@@ -194,58 +206,36 @@ fn changes_in_hunk(path: &str, hunk: &Hunk) -> Vec<crate::semdif::Change> {
     for offset in 0..paired {
         changes.push(crate::semdif::Change::LineModified {
             path: path.to_string(),
-            line: hunk.old_lines[offset].index + 1,
+            old: hunk.old_lines[offset].index + 1,
+            new: hunk.new_lines[offset].index + 1,
             text: hunk.new_lines[offset].text.clone(),
         });
     }
     for line in &hunk.old_lines[paired..] {
         changes.push(crate::semdif::Change::LineRemoved {
             path: path.to_string(),
-            line: line.index + 1,
+            old: line.index + 1,
+            new: hunk.next_new_line,
             text: line.text.clone(),
         });
     }
     for line in &hunk.new_lines[paired..] {
         changes.push(crate::semdif::Change::LineAdded {
             path: path.to_string(),
-            line: line.index + 1,
+            old: hunk.next_old_line,
+            new: line.index + 1,
             text: line.text.clone(),
         });
     }
     changes
 }
 
-/// The order in which line edits can be replayed on the old file.
-///
-/// Modifications keep every old line number valid. Removals then run from the
-/// bottom, so a line number recorded against the old file still points at the
-/// same line. Additions run from the top once those old lines are in place,
-/// and their numbers are positions in the new file.
-fn replay_order(changes: Vec<crate::semdif::Change>) -> Vec<crate::semdif::Change> {
-    let mut modified = Vec::new();
-    let mut removed = Vec::new();
-    let mut added = Vec::new();
-    for change in changes {
-        match change {
-            crate::semdif::Change::LineModified { .. } => modified.push(change),
-            crate::semdif::Change::LineRemoved { .. } => removed.push(change),
-            crate::semdif::Change::LineAdded { .. } => added.push(change),
-            other => modified.push(other),
-        }
-    }
-    modified.sort_by_key(line_number);
-    removed.sort_by_key(|change| std::cmp::Reverse(line_number(change)));
-    added.sort_by_key(line_number);
-    modified.extend(removed);
-    modified.extend(added);
-    modified
-}
-
-fn line_number(change: &crate::semdif::Change) -> usize {
+/// `old`, then `new`, so the records walk the file from the top.
+fn line_position(change: &crate::semdif::Change) -> (usize, usize) {
     match change {
-        crate::semdif::Change::LineAdded { line, .. }
-        | crate::semdif::Change::LineRemoved { line, .. }
-        | crate::semdif::Change::LineModified { line, .. } => *line,
-        _ => 0,
+        crate::semdif::Change::LineAdded { old, new, .. }
+        | crate::semdif::Change::LineRemoved { old, new, .. }
+        | crate::semdif::Change::LineModified { old, new, .. } => (*old, *new),
+        _ => (0, 0),
     }
 }

@@ -76,26 +76,36 @@ fn write_change(document: &mut String, change: &Change) {
             document.push_str(&format!("      path: {}\n", yaml_string(path)));
             write_file_contents(document, contents);
         }
-        Change::LineAdded { path, line, text } => {
-            write_line(document, "line-added", path, *line, text)
-        }
-        Change::LineRemoved { path, line, text } => {
-            write_line(document, "line-removed", path, *line, text)
-        }
-        Change::LineModified { path, line, text } => {
-            write_line(document, "line-modified", path, *line, text)
-        }
+        Change::LineAdded {
+            path,
+            old,
+            new,
+            text,
+        } => write_line(document, "line-added", path, *old, *new, text),
+        Change::LineRemoved {
+            path,
+            old,
+            new,
+            text,
+        } => write_line(document, "line-removed", path, *old, *new, text),
+        Change::LineModified {
+            path,
+            old,
+            new,
+            text,
+        } => write_line(document, "line-modified", path, *old, *new, text),
         Change::DirectoryAdded { path } => write_directory(document, "directory-added", path),
         Change::DirectoryDeleted { path } => write_directory(document, "directory-deleted", path),
     }
 }
 
-fn write_line(document: &mut String, kind: &str, path: &str, line: usize, text: &str) {
+fn write_line(document: &mut String, kind: &str, path: &str, old: usize, new: usize, text: &str) {
     document.push_str("  - scope: \".\"\n");
     document.push_str(&format!("    type: {kind}\n"));
     document.push_str("    details:\n");
     document.push_str(&format!("      path: {}\n", yaml_string(path)));
-    document.push_str(&format!("      line: {line}\n"));
+    document.push_str(&format!("      old: {old}\n"));
+    document.push_str(&format!("      new: {new}\n"));
     document.push_str(&format!("      text: {}\n", yaml_string(text)));
 }
 
@@ -165,8 +175,10 @@ fn utc_timestamp() -> String {
 
 /// One change recorded in a semdif file.
 ///
-/// Apply replays these in the order they were recorded. Each kind carries the
-/// details that kind needs.
+/// File and directory changes are replayed in the order they were recorded.
+/// Line changes for one path are applied together from their old line numbers,
+/// so those records can be listed in line order. Each kind carries the details
+/// that kind needs.
 pub(crate) enum Change {
     FileRenamed {
         from: String,
@@ -185,17 +197,20 @@ pub(crate) enum Change {
     },
     LineAdded {
         path: String,
-        line: usize,
+        old: usize,
+        new: usize,
         text: String,
     },
     LineRemoved {
         path: String,
-        line: usize,
+        old: usize,
+        new: usize,
         text: String,
     },
     LineModified {
         path: String,
-        line: usize,
+        old: usize,
+        new: usize,
         text: String,
     },
     DirectoryAdded {
@@ -293,17 +308,20 @@ impl PartialChange {
             }),
             "line-added" => Ok(Change::LineAdded {
                 path: required(&self.fields, "path", "line-added")?,
-                line: required_line(&self.fields, "line-added")?,
+                old: required_line(&self.fields, "old", "line-added")?,
+                new: required_line(&self.fields, "new", "line-added")?,
                 text: required(&self.fields, "text", "line-added")?,
             }),
             "line-removed" => Ok(Change::LineRemoved {
                 path: required(&self.fields, "path", "line-removed")?,
-                line: required_line(&self.fields, "line-removed")?,
+                old: required_line(&self.fields, "old", "line-removed")?,
+                new: required_line(&self.fields, "new", "line-removed")?,
                 text: required(&self.fields, "text", "line-removed")?,
             }),
             "line-modified" => Ok(Change::LineModified {
                 path: required(&self.fields, "path", "line-modified")?,
-                line: required_line(&self.fields, "line-modified")?,
+                old: required_line(&self.fields, "old", "line-modified")?,
+                new: required_line(&self.fields, "new", "line-modified")?,
                 text: required(&self.fields, "text", "line-modified")?,
             }),
             "directory-added" => Ok(Change::DirectoryAdded {
@@ -334,11 +352,15 @@ fn stored_bytes(fields: &BTreeMap<String, String>, kind: &str) -> Result<Vec<u8>
 }
 
 /// A 1-based line number recorded for a line change.
-fn required_line(fields: &BTreeMap<String, String>, kind: &str) -> Result<usize, String> {
-    let text = required(fields, "line", kind)?;
+fn required_line(
+    fields: &BTreeMap<String, String>,
+    key: &str,
+    kind: &str,
+) -> Result<usize, String> {
+    let text = required(fields, key, kind)?;
     match text.parse::<usize>() {
         Ok(line) if line >= 1 => Ok(line),
-        _ => Err(format!("{kind} has invalid line {text}")),
+        _ => Err(format!("{kind} has invalid {key} {text}")),
     }
 }
 

@@ -45,10 +45,10 @@ fn records_line_changes_for_a_pair_whose_contents_differ() {
     );
     assert!(!document.contains("same.txt"), "{document}");
     assert!(document.contains(
-        "  - scope: \".\"\n    type: line-removed\n    details:\n      path: \"drop.txt\"\n      line: 2\n      text: \"gone\"\n"
+        "  - scope: \".\"\n    type: line-removed\n    details:\n      path: \"drop.txt\"\n      old: 2\n      new: 2\n      text: \"gone\"\n"
     ));
     assert!(document.contains(
-        "  - scope: \".\"\n    type: line-modified\n    details:\n      path: \"note.txt\"\n      line: 1\n      text: \"He said \\\"hello\\\"\"\n  - scope: \".\"\n    type: line-added\n    details:\n      path: \"note.txt\"\n      line: 2\n      text: \"Next line\"\n"
+        "  - scope: \".\"\n    type: line-modified\n    details:\n      path: \"note.txt\"\n      old: 1\n      new: 1\n      text: \"He said \\\"hello\\\"\"\n  - scope: \".\"\n    type: line-added\n    details:\n      path: \"note.txt\"\n      old: 2\n      new: 2\n      text: \"Next line\"\n"
     ));
     assert!(document.contains("path: \"data.bin\""));
     assert!(document.contains("encoding: \"base64\""));
@@ -99,7 +99,7 @@ fn replays_a_modification_a_removal_and_an_addition() {
     );
     assert_eq!(
         document.split_once("changes:\n").expect("changes list").1,
-        "  - scope: \".\"\n    type: line-modified\n    details:\n      path: \"edit.txt\"\n      line: 2\n      text: \"new\"\n  - scope: \".\"\n    type: line-removed\n    details:\n      path: \"edit.txt\"\n      line: 3\n      text: \"gone\"\n  - scope: \".\"\n    type: line-added\n    details:\n      path: \"edit.txt\"\n      line: 4\n      text: \"extra\"\n"
+        "  - scope: \".\"\n    type: line-modified\n    details:\n      path: \"edit.txt\"\n      old: 2\n      new: 2\n      text: \"new\"\n  - scope: \".\"\n    type: line-removed\n    details:\n      path: \"edit.txt\"\n      old: 3\n      new: 3\n      text: \"gone\"\n  - scope: \".\"\n    type: line-added\n    details:\n      path: \"edit.txt\"\n      old: 5\n      new: 4\n      text: \"extra\"\n"
     );
 
     let applied = run(&["--apply", output_arg, edited_arg]);

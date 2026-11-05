@@ -42,37 +42,7 @@ fn applying_the_rust_sample_makes_a_copy_of_v1_match_v2() {
     );
     assert!(
         document.contains(
-            "  - scope: \".\"\n    type: line-added\n    details:\n      path: \"src/main.rs\"\n      line: 18\n      text: \"// Print Fibonacci numbers.\"\n"
-        ),
-        "{document}"
-    );
-    assert!(
-        document.contains(
-            "  - scope: \".\"\n    type: line-removed\n    details:\n      path: \"src/main.rs\"\n      line: 43\n      text: \"// This single line is deleted.\"\n"
-        ),
-        "{document}"
-    );
-    assert!(
-        document.contains(
-            "  - scope: \".\"\n    type: line-modified\n    details:\n      path: \"src/main.rs\"\n      line: 46\n      text: \"// Count from one.\"\n"
-        ),
-        "{document}"
-    );
-    assert!(
-        document.contains(
-            "  - scope: \".\"\n    type: line-removed\n    details:\n      path: \"src/main.rs\"\n      line: 50\n      text: \"// This deleted line is second.\"\n  - scope: \".\"\n    type: line-removed\n    details:\n      path: \"src/main.rs\"\n      line: 49\n      text: \"// This deleted line is first.\"\n"
-        ),
-        "{document}"
-    );
-    assert!(
-        document.contains(
-            "  - scope: \".\"\n    type: line-added\n    details:\n      path: \"src/main.rs\"\n      line: 51\n      text: \"// This added line is first.\"\n  - scope: \".\"\n    type: line-added\n    details:\n      path: \"src/main.rs\"\n      line: 52\n      text: \"// This added line is second.\"\n"
-        ),
-        "{document}"
-    );
-    assert!(
-        document.contains(
-            "  - scope: \".\"\n    type: line-modified\n    details:\n      path: \"src/main.rs\"\n      line: 55\n      text: \"// New first line.\"\n  - scope: \".\"\n    type: line-modified\n    details:\n      path: \"src/main.rs\"\n      line: 56\n      text: \"// New second line.\"\n"
+            "  - scope: \".\"\n    type: line-added\n    details:\n      path: \"src/main.rs\"\n      old: 18\n      new: 18\n      text: \"// Print Fibonacci numbers.\"\n  - scope: \".\"\n    type: line-removed\n    details:\n      path: \"src/main.rs\"\n      old: 43\n      new: 44\n      text: \"// This single line is deleted.\"\n  - scope: \".\"\n    type: line-modified\n    details:\n      path: \"src/main.rs\"\n      old: 46\n      new: 46\n      text: \"// Count from one.\"\n  - scope: \".\"\n    type: line-removed\n    details:\n      path: \"src/main.rs\"\n      old: 49\n      new: 49\n      text: \"// This deleted line is first.\"\n  - scope: \".\"\n    type: line-removed\n    details:\n      path: \"src/main.rs\"\n      old: 50\n      new: 49\n      text: \"// This deleted line is second.\"\n  - scope: \".\"\n    type: line-added\n    details:\n      path: \"src/main.rs\"\n      old: 53\n      new: 51\n      text: \"// This added line is first.\"\n  - scope: \".\"\n    type: line-added\n    details:\n      path: \"src/main.rs\"\n      old: 53\n      new: 52\n      text: \"// This added line is second.\"\n  - scope: \".\"\n    type: line-modified\n    details:\n      path: \"src/main.rs\"\n      old: 55\n      new: 55\n      text: \"// New first line.\"\n  - scope: \".\"\n    type: line-modified\n    details:\n      path: \"src/main.rs\"\n      old: 56\n      new: 56\n      text: \"// New second line.\"\n"
         ),
         "{document}"
     );
