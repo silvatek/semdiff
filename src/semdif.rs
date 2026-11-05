@@ -117,9 +117,31 @@ fn write_change(document: &mut String, change: &Change) {
             new,
             text,
         } => write_line(document, "line-modified", path, *old, 0, *new, text),
+        Change::IdentifierRenamed {
+            path,
+            old,
+            new,
+            oldname,
+            newname,
+        } => write_identifier(document, path, *old, *new, oldname, newname),
         Change::DirectoryAdded { path } => write_directory(document, "directory-added", path),
         Change::DirectoryDeleted { path } => write_directory(document, "directory-deleted", path),
     }
+}
+
+fn write_identifier(
+    document: &mut String,
+    path: &str,
+    old: usize,
+    new: usize,
+    oldname: &str,
+    newname: &str,
+) {
+    write_content(document, path, "identifier-renamed");
+    document.push_str(&format!("      old: {old}\n"));
+    document.push_str(&format!("      new: {new}\n"));
+    document.push_str(&format!("      oldname: {}\n", yaml_string(oldname)));
+    document.push_str(&format!("      newname: {}\n", yaml_string(newname)));
 }
 
 fn write_line(
@@ -287,6 +309,17 @@ pub(crate) enum Change {
         new: usize,
         text: String,
     },
+    /// One identifier on a line was renamed.
+    ///
+    /// The rest of the line is unchanged, and `oldname` occurs once on the old
+    /// line. The record does not carry a column.
+    IdentifierRenamed {
+        path: String,
+        old: usize,
+        new: usize,
+        oldname: String,
+        newname: String,
+    },
     DirectoryAdded {
         path: String,
     },
@@ -408,6 +441,13 @@ impl PartialChange {
                     text,
                 })
             }
+            "identifier-renamed" => Ok(Change::IdentifierRenamed {
+                path: self.scope,
+                old: required_line(&self.fields, "old", "identifier-renamed")?,
+                new: required_line(&self.fields, "new", "identifier-renamed")?,
+                oldname: required(&self.fields, "oldname", "identifier-renamed")?,
+                newname: required(&self.fields, "newname", "identifier-renamed")?,
+            }),
             "directory-added" => Ok(Change::DirectoryAdded {
                 path: required(&self.fields, "path", "directory-added")?,
             }),

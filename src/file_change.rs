@@ -78,6 +78,7 @@ fn change_key(change: &crate::semdif::Change) -> (&str, &str) {
         | crate::semdif::Change::LineAdded { path, .. }
         | crate::semdif::Change::LineRemoved { path, .. }
         | crate::semdif::Change::LineModified { path, .. }
+        | crate::semdif::Change::IdentifierRenamed { path, .. }
         | crate::semdif::Change::DirectoryAdded { path }
         | crate::semdif::Change::DirectoryDeleted { path } => (path, ""),
     }

@@ -48,6 +48,7 @@ fn content_path(change: &crate::semdif::Change) -> Option<&str> {
         crate::semdif::Change::LineAdded { path, .. }
         | crate::semdif::Change::LineRemoved { path, .. }
         | crate::semdif::Change::LineModified { path, .. }
+        | crate::semdif::Change::IdentifierRenamed { path, .. }
         | crate::semdif::Change::FileChanged { path, .. }
         | crate::semdif::Change::FileDigest { path, .. } => Some(path),
         _ => None,
@@ -65,7 +66,8 @@ fn apply_change(source: &Path, change: &crate::semdif::Change) -> Result<(), Str
         | crate::semdif::Change::FileDigest { .. }
         | crate::semdif::Change::LineAdded { .. }
         | crate::semdif::Change::LineRemoved { .. }
-        | crate::semdif::Change::LineModified { .. } => Ok(()),
+        | crate::semdif::Change::LineModified { .. }
+        | crate::semdif::Change::IdentifierRenamed { .. } => Ok(()),
         crate::semdif::Change::DirectoryAdded { path } => add_directory(source, path),
         crate::semdif::Change::DirectoryDeleted { path } => remove_directory(source, path),
     }
@@ -161,7 +163,8 @@ fn new_contents(
             }
             crate::semdif::Change::LineAdded { .. }
             | crate::semdif::Change::LineRemoved { .. }
-            | crate::semdif::Change::LineModified { .. } => lines.push(*change),
+            | crate::semdif::Change::LineModified { .. }
+            | crate::semdif::Change::IdentifierRenamed { .. } => lines.push(*change),
             _ => {}
         }
     }
@@ -209,6 +212,41 @@ fn rebuild_lines(
                             path.display()
                         ));
                     }
+                }
+            }
+            crate::semdif::Change::IdentifierRenamed {
+                path: relative,
+                old,
+                oldname,
+                newname,
+                ..
+            } => {
+                if *old == 0 || *old > lines.len() {
+                    return Err(format!(
+                        "line {old} is outside {} which has {} lines",
+                        path.display(),
+                        lines.len()
+                    ));
+                }
+                let replaced = match crate::identifier::replace_name(
+                    relative,
+                    &lines[*old - 1],
+                    oldname,
+                    newname,
+                ) {
+                    Ok(text) => text,
+                    Err(message) => {
+                        return Err(format!(
+                            "cannot rename {oldname} on line {old} in {}: {message}",
+                            path.display()
+                        ));
+                    }
+                };
+                if modified.insert(*old, replaced).is_some() {
+                    return Err(format!(
+                        "line {old} is modified more than once in {}",
+                        path.display()
+                    ));
                 }
             }
             crate::semdif::Change::LineRemoved { old, old_end, .. } => {

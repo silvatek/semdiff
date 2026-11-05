@@ -291,14 +291,16 @@ fn merges_the_adjacent_removals_in_the_rust_sample() {
         "  - scope: \"src/main.rs\"\n    type: line-added\n    details:\n      old: 53\n      lines: +2\n      new: 51\n      text: \"// This added line is first.\\n// This added line is second.\"\n"
     ));
     assert!(document.contains(
-        "  - scope: \"src/main.rs\"\n    type: line-modified\n    details:\n      old: 46\n      lines: +0\n      new: 46\n      text: \"// Count from one.\"\n"
+        "  - scope: \"src/main.rs\"\n    type: identifier-renamed\n    details:\n      old: 46\n      new: 46\n      oldname: \"zero\"\n      newname: \"one\"\n"
     ));
     assert!(document.contains(
-        "  - scope: \"src/main.rs\"\n    type: line-modified\n    details:\n      old: 55\n      lines: +0\n      new: 55\n      text: \"// New first line.\\n// New second line.\"\n"
+        "  - scope: \"src/main.rs\"\n    type: identifier-renamed\n    details:\n      old: 55\n      new: 55\n      oldname: \"Old\"\n      newname: \"New\"\n"
+    ));
+    assert!(document.contains(
+        "  - scope: \"src/main.rs\"\n    type: identifier-renamed\n    details:\n      old: 56\n      new: 56\n      oldname: \"Old\"\n      newname: \"New\"\n"
     ));
     assert!(!document.contains("old: 50\n"), "{document}");
     assert!(!document.contains("new: 52\n"), "{document}");
-    assert!(!document.contains("old: 56\n"), "{document}");
 
     let _ = fs::remove_dir_all(root);
 }
@@ -404,6 +406,135 @@ fn rejects_a_file_whose_new_hash_does_not_match() {
     let message = apply_document(&root, &edited, &document);
     assert!(message.contains("do not match the new hash"), "{message}");
     assert_eq!(fs::read(edited.join("note.txt")).unwrap(), b"old line\n");
+    let _ = fs::remove_dir_all(root);
+}
+
+#[test]
+fn records_an_identifier_rename_when_one_name_changes() {
+    let root = std::env::temp_dir().join(format!("semdiff-rename-{}", std::process::id()));
+    let left = root.join("left");
+    let right = root.join("right");
+    let edited = root.join("edited");
+    fs::create_dir_all(left.join("src")).unwrap();
+    fs::create_dir_all(right.join("src")).unwrap();
+    fs::create_dir_all(edited.join("src")).unwrap();
+    let before = "fn fibonacci(n: u32) {\n    let total = foo + bar;\n}\n";
+    let after = "fn fib(n: u32) {\n    let total = fox + baz;\n}\n";
+    let twice_before = "foo(foo)\n";
+    let twice_after = "foo(bar)\n";
+    let note_before = "hello\n";
+    let note_after = "hallo\n";
+    let python_before = "def fibonacci(n):\n    return n\n";
+    let python_after = "def fib(n):\n    return n\n";
+    fs::write(left.join("src/main.rs"), before).unwrap();
+    fs::write(right.join("src/main.rs"), after).unwrap();
+    fs::write(edited.join("src/main.rs"), before).unwrap();
+    fs::write(left.join("src/twice.rs"), twice_before).unwrap();
+    fs::write(right.join("src/twice.rs"), twice_after).unwrap();
+    fs::write(edited.join("src/twice.rs"), twice_before).unwrap();
+    fs::write(left.join("note.txt"), note_before).unwrap();
+    fs::write(right.join("note.txt"), note_after).unwrap();
+    fs::write(edited.join("note.txt"), note_before).unwrap();
+    fs::write(left.join("calc.py"), python_before).unwrap();
+    fs::write(right.join("calc.py"), python_after).unwrap();
+    fs::write(edited.join("calc.py"), python_before).unwrap();
+
+    let output_path = root.join("out.yml");
+    let compared = run(&[
+        left.to_str().unwrap(),
+        right.to_str().unwrap(),
+        output_path.to_str().unwrap(),
+    ]);
+    let document = fs::read_to_string(&output_path).expect("failed to read semdiff file");
+
+    assert!(
+        compared.status.success(),
+        "{}",
+        String::from_utf8_lossy(&compared.stderr)
+    );
+    assert!(document.contains(
+        "  - scope: \"src/main.rs\"\n    type: identifier-renamed\n    details:\n      old: 1\n      new: 1\n      oldname: \"fibonacci\"\n      newname: \"fib\"\n"
+    ));
+    assert!(document.contains(
+        "  - scope: \"src/main.rs\"\n    type: line-modified\n    details:\n      old: 2\n      lines: +0\n      new: 2\n      text: \"    let total = fox + baz;\"\n"
+    ));
+    assert!(document.contains(
+        "  - scope: \"src/twice.rs\"\n    type: line-modified\n    details:\n      old: 1\n      lines: +0\n      new: 1\n      text: \"foo(bar)\"\n"
+    ));
+    assert!(!document.contains("scope: \"src/twice.rs\"\n    type: identifier-renamed"));
+    assert!(document.contains(
+        "  - scope: \"note.txt\"\n    type: line-modified\n    details:\n      old: 1\n      lines: +0\n      new: 1\n      text: \"hallo\"\n"
+    ));
+    assert!(document.contains(
+        "  - scope: \"calc.py\"\n    type: identifier-renamed\n    details:\n      old: 1\n      new: 1\n      oldname: \"fibonacci\"\n      newname: \"fib\"\n"
+    ));
+
+    let applied = run(&[
+        "--apply",
+        output_path.to_str().unwrap(),
+        edited.to_str().unwrap(),
+    ]);
+    assert!(
+        applied.status.success(),
+        "{}",
+        String::from_utf8_lossy(&applied.stderr)
+    );
+    assert_eq!(
+        fs::read(edited.join("src/main.rs")).unwrap(),
+        after.as_bytes()
+    );
+    assert_eq!(
+        fs::read(edited.join("src/twice.rs")).unwrap(),
+        twice_after.as_bytes()
+    );
+    assert_eq!(
+        fs::read(edited.join("note.txt")).unwrap(),
+        note_after.as_bytes()
+    );
+    assert_eq!(
+        fs::read(edited.join("calc.py")).unwrap(),
+        python_after.as_bytes()
+    );
+
+    let _ = fs::remove_dir_all(root);
+}
+
+#[test]
+fn rejects_a_rename_when_the_old_name_does_not_occur_once() {
+    let root = std::env::temp_dir().join(format!("semdiff-rename-twice-{}", std::process::id()));
+    let edited = root.join("edited");
+    fs::create_dir_all(edited.join("src")).unwrap();
+    fs::write(edited.join("src/main.rs"), "foo(foo)\n").unwrap();
+    let semdif = root.join("bad.yml");
+    fs::write(
+        &semdif,
+        "\
+header:
+  semdiff: \"0.1.0\"
+  timestamp: \"2020-01-01T00:00:00Z\"
+changes:
+  - scope: \"src/main.rs\"
+    type: identifier-renamed
+    details:
+      old: 1
+      new: 1
+      oldname: \"foo\"
+      newname: \"bar\"
+",
+    )
+    .unwrap();
+
+    let applied = run(&[
+        "--apply",
+        semdif.to_str().unwrap(),
+        edited.to_str().unwrap(),
+    ]);
+    let stderr = String::from_utf8(applied.stderr).unwrap();
+
+    assert_eq!(applied.status.code(), Some(1));
+    assert!(stderr.contains("does not occur once"), "{stderr}");
+    assert_eq!(fs::read(edited.join("src/main.rs")).unwrap(), b"foo(foo)\n");
+
     let _ = fs::remove_dir_all(root);
 }
 
