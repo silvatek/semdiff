@@ -182,11 +182,11 @@ fn push_other<'a>(pieces: &mut Vec<Piece<'a>>, line: &'a str, start: usize, end:
 }
 
 impl IdentifierCharacters {
-    fn starts(&self, character: char) -> bool {
+    pub(crate) fn starts(&self, character: char) -> bool {
         self.start.contains(character)
     }
 
-    fn continues(&self, character: char) -> bool {
+    pub(crate) fn continues(&self, character: char) -> bool {
         self.continue_with.contains(character)
     }
 }

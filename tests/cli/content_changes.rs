@@ -248,6 +248,60 @@ fn flags_whitespace_in_the_samples() {
 }
 
 #[test]
+fn records_an_added_rust_function_as_a_named_block() {
+    let tree = Tree::new();
+    tree.write("left/src/add.rs", "fn kept() {}\n");
+    tree.write(
+        "right/src/add.rs",
+        "fn kept() {}\nfn added() {\n    let value = 1;\n}\n",
+    );
+    tree.write("edited/src/add.rs", "fn kept() {}\n");
+    tree.write("left/src/note.rs", "fn kept() {}\n");
+    tree.write("right/src/note.rs", "fn kept() {}\nlet value = 1;\n");
+    tree.write("edited/src/note.rs", "fn kept() {}\n");
+    tree.write("left/calc.py", "def kept():\n    return 1\n");
+    tree.write(
+        "right/calc.py",
+        "def kept():\n    return 1\ndef added():\n    return 2\n",
+    );
+    tree.write("edited/calc.py", "def kept():\n    return 1\n");
+
+    let document = tree.compare("left", "right");
+
+    assert!(document.contains(
+        "  - scope: \"src/add.rs\"\n    type: named-block-added\n    details:\n      old: 2\n      lines: +3\n      new: 2\n      text: \"fn added() {\\n    let value = 1;\\n}\"\n      name: \"added\"\n"
+    ), "{document}");
+    assert!(
+        !document.contains("scope: \"src/add.rs\"\n    type: line-added"),
+        "{document}"
+    );
+    assert!(document.contains(
+        "  - scope: \"src/note.rs\"\n    type: line-added\n    details:\n      old: 2\n      lines: +1\n      new: 2\n      text: \"let value = 1;\"\n"
+    ), "{document}");
+    assert!(document.contains(
+        "  - scope: \"calc.py\"\n    type: line-added\n    details:\n      old: 3\n      lines: +2\n      new: 3\n      text: \"def added():\\n    return 2\"\n"
+    ), "{document}");
+    assert!(
+        !document.contains("named-block-added\n    details:\n      old: 3"),
+        "{document}"
+    );
+
+    tree.apply("edited", &document).unwrap();
+    assert_eq!(
+        tree.read("edited/src/add.rs"),
+        b"fn kept() {}\nfn added() {\n    let value = 1;\n}\n"
+    );
+    assert_eq!(
+        tree.read("edited/src/note.rs"),
+        b"fn kept() {}\nlet value = 1;\n"
+    );
+    assert_eq!(
+        tree.read("edited/calc.py"),
+        b"def kept():\n    return 1\ndef added():\n    return 2\n"
+    );
+}
+
+#[test]
 fn rejects_a_line_removal_whose_line_count_is_positive() {
     let tree = Tree::new();
     tree.write("edited/note.txt", "keep\ngone\n");

@@ -2,7 +2,9 @@
 //!
 //! A changed line asks which characters form a name. A line whose first
 //! non-whitespace characters are the line comment is a full-line comment.
-//! Block comments and block edges are recorded for a later step.
+//! Block comments and block edges are recorded for a later step. A named
+//! block is a function, method, or structure opened by one of the dialect's
+//! keywords.
 
 #![cfg_attr(not(test), allow(dead_code))]
 
@@ -10,7 +12,9 @@
 ///
 /// Extensions select its files. The identifier characters say which runs of
 /// text are names. The line comment flags a full-line comment. Block comments
-/// and block edges are recorded so a later comparison can see the rest.
+/// and block edges are recorded so a later comparison can see the rest. The
+/// named-block keywords say when an added run of lines is a new function,
+/// method, or structure.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) struct Dialect {
     /// Extensions that identify this dialect, including the leading dot.
@@ -25,6 +29,16 @@ pub(crate) struct Dialect {
     pub block_end: BlockEdge,
     /// Characters that can appear in an identifier.
     pub identifier_characters: IdentifierCharacters,
+    /// Words that may precede the keyword opening a named block.
+    ///
+    /// `pub async fn` has the prefixes `pub` and `async`. A word that is not
+    /// in this list stops the search, so `pub(crate) fn` is not recognized.
+    pub block_prefixes: &'static [&'static str],
+    /// Keywords that open a named block.
+    ///
+    /// The identifier after the keyword is the block's name. An empty list
+    /// means this dialect does not record named blocks.
+    pub named_block_keywords: &'static [&'static str],
 }
 
 /// ASCII characters that can appear in an identifier.
@@ -70,7 +84,9 @@ pub(crate) enum BlockEdge {
 /// Rust files use `.rs`. A line comment starts with `//`, which also covers
 /// the doc forms `///` and `//!`. A block comment runs from `/*` to `*/`.
 /// A block of code starts with `{` and ends with `}`. An identifier starts
-/// with a letter or `_` and continues with letters, digits, or `_`.
+/// with a letter or `_` and continues with letters, digits, or `_`. A named
+/// block is opened by `fn`, `struct`, `enum`, `union`, `trait`, or `impl`,
+/// optionally after `pub`, `async`, `unsafe`, or `const`.
 pub(crate) static RUST: Dialect = Dialect {
     extensions: &[".rs"],
     line_comment: "//",
@@ -84,6 +100,8 @@ pub(crate) static RUST: Dialect = Dialect {
         start: IDENTIFIER_START,
         continue_with: IDENTIFIER_CONTINUE,
     },
+    block_prefixes: &["pub", "async", "unsafe", "const"],
+    named_block_keywords: &["fn", "struct", "enum", "union", "trait", "impl"],
 };
 
 /// The Python dialect.
@@ -92,7 +110,8 @@ pub(crate) static RUST: Dialect = Dialect {
 /// the line. Python does not denote a multi-line comment: a triple-quoted
 /// string is a string. A block starts by indenting and ends when the
 /// indentation returns. An identifier starts with a letter or `_` and
-/// continues with letters, digits, or `_`.
+/// continues with letters, digits, or `_`. Python does not record named
+/// blocks yet, so a `def` or `class` stays a line addition.
 pub(crate) static PYTHON: Dialect = Dialect {
     extensions: &[".py"],
     line_comment: "#",
@@ -103,6 +122,8 @@ pub(crate) static PYTHON: Dialect = Dialect {
         start: IDENTIFIER_START,
         continue_with: IDENTIFIER_CONTINUE,
     },
+    block_prefixes: &[],
+    named_block_keywords: &[],
 };
 
 /// Every dialect semdiff knows.
@@ -189,6 +210,76 @@ pub(crate) fn margin_whitespace(path: &str, old_line: &str, new_line: &str) -> b
     introduces_line_comment(dialect, old_line) && introduces_line_comment(dialect, new_line)
 }
 
+/// The name of the named block added by `text`, when this dialect sees one.
+///
+/// `text` is one `line-added` record and may hold several lines. Only the
+/// first line is read. Leading spaces and tabs are skipped, then any prefix
+/// words, then a keyword that opens a named block, then the identifier that
+/// names it. A comment, a dialect with no such keywords, and a line that does
+/// not open in that shape have no name. The remainder of the line, and any
+/// following lines, are kept as the block's text and are not inspected.
+pub(crate) fn named_block(path: &str, text: &str) -> Option<String> {
+    let dialect = for_path(path)?;
+    if dialect.named_block_keywords.is_empty() {
+        return None;
+    }
+    let line = text.split('\n').next().unwrap_or("");
+    if introduces_line_comment(dialect, line) {
+        return None;
+    }
+    block_name(dialect, line).map(str::to_string)
+}
+
+/// The identifier that names the block opened by `line`.
+fn block_name<'a>(dialect: &Dialect, line: &'a str) -> Option<&'a str> {
+    let mut rest = trim_ascii_blank_start(line);
+    loop {
+        let (word, after) = next_word(&dialect.identifier_characters, rest)?;
+        if is_listed(dialect.named_block_keywords, word) {
+            let name_at = trim_ascii_blank_start(after);
+            if name_at.len() == after.len() {
+                return None;
+            }
+            let (name, _) = next_word(&dialect.identifier_characters, name_at)?;
+            return Some(name);
+        }
+        if !is_listed(dialect.block_prefixes, word) {
+            return None;
+        }
+        let next = trim_ascii_blank_start(after);
+        if next.len() == after.len() {
+            return None;
+        }
+        rest = next;
+    }
+}
+
+fn is_listed(words: &[&str], word: &str) -> bool {
+    words.iter().any(|candidate| *candidate == word)
+}
+
+/// The next identifier in `line`, and the text that follows it.
+fn next_word<'a>(characters: &IdentifierCharacters, line: &'a str) -> Option<(&'a str, &'a str)> {
+    let mut chars = line.char_indices();
+    let (_, first) = chars.next()?;
+    if !characters.starts(first) {
+        return None;
+    }
+    let mut end = first.len_utf8();
+    for (index, character) in chars {
+        if !characters.continues(character) {
+            end = index;
+            break;
+        }
+        end = index + character.len_utf8();
+    }
+    Some((&line[..end], &line[end..]))
+}
+
+fn trim_ascii_blank_start(line: &str) -> &str {
+    line.trim_start_matches(is_ascii_blank)
+}
+
 /// Whether a block is delimited by tokens, so indentation is formatting.
 fn indent_is_formatting(dialect: &Dialect) -> bool {
     matches!(
@@ -216,7 +307,7 @@ fn leading_ascii_blank(line: &str) -> &str {
 mod tests {
     use super::{
         blank_line, for_path, full_line_comment, introduces_line_comment, margin_whitespace,
-        BlockEdge, IdentifierCharacters, PYTHON, RUST,
+        named_block, BlockEdge, IdentifierCharacters, PYTHON, RUST,
     };
 
     fn ascii_identifiers() -> IdentifierCharacters {
@@ -236,6 +327,11 @@ mod tests {
         assert_eq!(RUST.block_start, BlockEdge::Token("{"));
         assert_eq!(RUST.block_end, BlockEdge::Token("}"));
         assert_eq!(RUST.identifier_characters, ascii_identifiers());
+        assert_eq!(RUST.block_prefixes, ["pub", "async", "unsafe", "const"]);
+        assert_eq!(
+            RUST.named_block_keywords,
+            ["fn", "struct", "enum", "union", "trait", "impl"]
+        );
     }
 
     #[test]
@@ -246,6 +342,8 @@ mod tests {
         assert_eq!(PYTHON.block_start, BlockEdge::Indentation);
         assert_eq!(PYTHON.block_end, BlockEdge::Indentation);
         assert_eq!(PYTHON.identifier_characters, ascii_identifiers());
+        assert_eq!(PYTHON.block_prefixes, [] as [&str; 0]);
+        assert_eq!(PYTHON.named_block_keywords, [] as [&str; 0]);
     }
 
     #[test]
@@ -350,5 +448,71 @@ mod tests {
             "let value = 1;",
             "  let value = 1;"
         ));
+    }
+
+    #[test]
+    fn a_rust_addition_names_the_block_it_opens() {
+        assert_eq!(
+            named_block("src/main.rs", "fn fib() {}"),
+            Some("fib".to_string())
+        );
+        assert_eq!(
+            named_block("src/main.rs", "    fn fib() {"),
+            Some("fib".to_string())
+        );
+        assert_eq!(
+            named_block("src/main.rs", "pub async fn run() {\n    work();\n}"),
+            Some("run".to_string())
+        );
+        assert_eq!(
+            named_block("src/main.rs", "const fn ready() {}"),
+            Some("ready".to_string())
+        );
+        assert_eq!(
+            named_block("src/main.rs", "struct Point {"),
+            Some("Point".to_string())
+        );
+        assert_eq!(
+            named_block("src/main.rs", "struct Unit;"),
+            Some("Unit".to_string())
+        );
+        assert_eq!(
+            named_block("src/main.rs", "unsafe impl Foo {"),
+            Some("Foo".to_string())
+        );
+        assert_eq!(
+            named_block("src/main.rs", "pub enum Color {"),
+            Some("Color".to_string())
+        );
+        assert_eq!(
+            named_block("src/main.rs", "union Raw {"),
+            Some("Raw".to_string())
+        );
+        assert_eq!(
+            named_block("src/main.rs", "trait Draw {"),
+            Some("Draw".to_string())
+        );
+    }
+
+    #[test]
+    fn an_addition_that_does_not_open_a_named_block_stays_unnamed() {
+        assert_eq!(named_block("src/main.rs", "let value = 1;"), None);
+        assert_eq!(named_block("src/main.rs", "const VALUE: i32 = 1;"), None);
+        assert_eq!(
+            named_block("src/main.rs", "pub(crate) fn hidden() {}"),
+            None
+        );
+        assert_eq!(
+            named_block("src/main.rs", "#[derive(Debug)]\nstruct Foo {}"),
+            None
+        );
+        assert_eq!(named_block("src/main.rs", "impl<T> Foo {"), None);
+        assert_eq!(named_block("src/main.rs", "// fn fake() {}"), None);
+        assert_eq!(named_block("src/main.rs", "fn"), None);
+        assert_eq!(named_block("src/main.rs", ""), None);
+        assert_eq!(named_block("src/main.rs", "\nfn fib() {}"), None);
+        assert_eq!(named_block("calc.py", "def fib():\n    return 1"), None);
+        assert_eq!(named_block("calc.py", "class Point:"), None);
+        assert_eq!(named_block("notes.txt", "fn fib() {}"), None);
     }
 }

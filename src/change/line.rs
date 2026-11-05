@@ -4,7 +4,9 @@
 //! and lives in its own module. The same line record can say that the edit is
 //! a full-line comment, and that it is insignificant whitespace. Those are
 //! `isComment: true` and `isWhitespace: true` in the semdif. False is the
-//! default and is left out. A record may carry both.
+//! default and is left out. A record may carry both. An addition the dialect
+//! reads as a new function, method, or structure is `named-block-added` and
+//! carries that block's name.
 
 use std::path::Path;
 
@@ -156,6 +158,46 @@ pub(crate) fn merge_adjacent(changes: Vec<Box<dyn super::Change>>) -> Vec<Box<dy
     merged
 }
 
+/// Records a line addition as a named block when the dialect says it opens one.
+///
+/// Merging has already joined adjacent added lines into one record. This pass
+/// reads that record and, when its first line opens a function, method, or
+/// structure, replaces it with [`NamedBlockAdded`]. The line text is unchanged,
+/// so apply inserts the same lines. A comment, whitespace, or an addition the
+/// dialect does not treat as a named block stays a line addition.
+pub(crate) fn promote_named_blocks(
+    changes: Vec<Box<dyn super::Change>>,
+) -> Vec<Box<dyn super::Change>> {
+    changes.into_iter().map(promote_named_block).collect()
+}
+
+fn promote_named_block(change: Box<dyn super::Change>) -> Box<dyn super::Change> {
+    match named_block_from_addition(change.as_ref()) {
+        Some(promoted) => Box::new(promoted),
+        None => change,
+    }
+}
+
+fn named_block_from_addition(change: &dyn super::Change) -> Option<NamedBlockAdded> {
+    if change.kind() != "line-added" {
+        return None;
+    }
+    let line = change.line_edit()?;
+    if line.is_comment() || line.is_whitespace() {
+        return None;
+    }
+    let text = line.text()?;
+    let name = crate::dialect::named_block(change.scope(), text)?;
+    let (old, new) = line.position();
+    Some(NamedBlockAdded::new(
+        change.scope().to_string(),
+        old,
+        new,
+        text.to_string(),
+        name,
+    ))
+}
+
 pub(crate) struct LineAdded {
     scope: String,
     body: LineBody,
@@ -248,6 +290,102 @@ impl LineEdit for LineAdded {
     fn extend(&mut self, next: &dyn Change) -> bool {
         let new_len = line_count(&self.body.text);
         extend_following(self, 0, new_len, next)
+    }
+
+    fn rebuild(
+        &self,
+        file: &Path,
+        _source_lines: &[String],
+        plan: &mut LinePlan,
+    ) -> Result<(), String> {
+        plan.insert(file, self.body.old, self.body.new, &self.body.text)
+    }
+}
+
+/// A line addition that opens a named block.
+///
+/// The block is a function, method, or structure, and `name` is the identifier
+/// that follows the dialect's keyword. The record keeps the added lines, and
+/// apply inserts them the way a line addition does. It does not join a
+/// neighboring edit: the name belongs to this one block.
+pub(crate) struct NamedBlockAdded {
+    scope: String,
+    body: LineBody,
+    name: String,
+}
+
+impl NamedBlockAdded {
+    pub(crate) fn new(scope: String, old: usize, new: usize, text: String, name: String) -> Self {
+        Self {
+            scope,
+            body: LineBody {
+                old,
+                new,
+                text,
+                is_comment: false,
+                is_whitespace: false,
+            },
+            name,
+        }
+    }
+}
+
+impl Change for NamedBlockAdded {
+    fn kind(&self) -> &'static str {
+        "named-block-added"
+    }
+
+    fn scope(&self) -> &str {
+        &self.scope
+    }
+
+    fn line_edit(&self) -> Option<&dyn LineEdit> {
+        Some(self)
+    }
+
+    fn line_edit_mut(&mut self) -> Option<&mut dyn LineEdit> {
+        Some(self)
+    }
+
+    fn content(&self) -> Option<&dyn Content> {
+        Some(self)
+    }
+
+    fn write_details(&self, document: &mut String) {
+        write_line(document, &self.body, line_count(&self.body.text) as isize);
+        crate::semdif::write_detail(document, "name", &self.name);
+    }
+
+    fn apply(&self, _fs: &dyn FileSystem, _source: &Path) -> Result<(), String> {
+        applied_with_its_file(self.kind())
+    }
+}
+
+impl Content for NamedBlockAdded {
+    fn file(&self) -> &str {
+        &self.scope
+    }
+}
+
+impl LineEdit for NamedBlockAdded {
+    fn position(&self) -> (usize, usize) {
+        (self.body.old, self.body.new)
+    }
+
+    fn start(&self) -> Option<LineStart> {
+        Some(line_start(&self.body))
+    }
+
+    fn text(&self) -> Option<&str> {
+        Some(&self.body.text)
+    }
+
+    fn is_comment(&self) -> bool {
+        false
+    }
+
+    fn is_whitespace(&self) -> bool {
+        false
     }
 
     fn rebuild(
@@ -484,7 +622,7 @@ impl LineEdit for LineModified {
 
 #[cfg(test)]
 mod tests {
-    use super::{merge_adjacent, LineAdded};
+    use super::{merge_adjacent, promote_named_blocks, LineAdded};
 
     /// An added line at one insertion point. `new` is its line in the new file.
     fn added(new: usize, text: &str, is_comment: bool, is_whitespace: bool) -> LineAdded {
@@ -526,5 +664,37 @@ mod tests {
         assert!(line.is_whitespace());
         assert!(!line.is_comment());
         assert_eq!(line.text(), Some("    \n\t"));
+    }
+
+    #[test]
+    fn a_function_addition_becomes_a_named_block() {
+        let merged = promote_named_blocks(vec![Box::new(added(
+            2,
+            "fn added() {\n    let value = 1;\n}",
+            false,
+            false,
+        ))]);
+
+        assert_eq!(merged.len(), 1);
+        assert_eq!(merged[0].kind(), "named-block-added");
+        let line = merged[0].line_edit().expect("line edit");
+        assert_eq!(line.text(), Some("fn added() {\n    let value = 1;\n}"));
+        assert!(!line.is_comment());
+        assert!(!line.is_whitespace());
+        let mut details = String::new();
+        merged[0].write_details(&mut details);
+        assert!(details.contains("name: \"added\"\n"), "{details}");
+    }
+
+    #[test]
+    fn a_comment_or_plain_addition_stays_a_line_addition() {
+        let merged = promote_named_blocks(vec![
+            Box::new(added(1, "// fn fake() {}", true, false)),
+            Box::new(added(2, "let value = 1;", false, false)),
+        ]);
+
+        assert_eq!(merged.len(), 2);
+        assert_eq!(merged[0].kind(), "line-added");
+        assert_eq!(merged[1].kind(), "line-added");
     }
 }

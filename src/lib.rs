@@ -65,7 +65,8 @@ struct Differences {
 /// Empty directories that appear or disappear are recorded too, including one
 /// left empty because its files moved. Adjacent removed, added, or modified
 /// lines in one file become one record before the semdif file is written
-/// when every line in the run is a comment, or none of them is.
+/// when every line in the run is a comment, or none of them is. An added run
+/// that opens a named block is then recorded as that block.
 /// Identifier renames of one name then join across files when the directory
 /// that covers them has no other occurrence of that name.
 fn find_differences(fs: &dyn FileSystem, sources: &Sources) -> Result<Differences, String> {
@@ -87,6 +88,7 @@ fn find_differences(fs: &dyn FileSystem, sources: &Sources) -> Result<Difference
     ));
     let changes = directory_changes::place_replacement_files(changes);
     let changes = change::merge_adjacent(changes);
+    let changes = change::promote_named_blocks(changes);
     let left_root = fs.source_base(Path::new(&sources.left));
     let texts = source_texts(fs, left_root, &left_files)?;
     let changes = change::merge_identifier_files(&texts, changes);

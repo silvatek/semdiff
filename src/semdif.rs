@@ -204,6 +204,7 @@ impl PartialChange {
             ("file-added", parse_file_added),
             ("file-changed", file_changed),
             ("line-added", parse_line_added),
+            ("named-block-added", parse_named_block_added),
             ("line-removed", parse_line_removed),
             ("line-modified", parse_line_modified),
             ("identifier-renamed", parse_identifier_renamed),
@@ -256,7 +257,7 @@ fn parse_line_added(
     fields: BTreeMap<String, String>,
 ) -> Result<Box<dyn Change>, String> {
     let text = required(&fields, "text", "line-added")?;
-    expect_added_lines(&fields, &text)?;
+    expect_added_lines(&fields, &text, "line-added")?;
     Ok(Box::new(crate::change::LineAdded::new(
         scope,
         required_line(&fields, "old", "line-added")?,
@@ -264,6 +265,21 @@ fn parse_line_added(
         text,
         comment_flag(&fields, "line-added")?,
         whitespace_flag(&fields, "line-added")?,
+    )))
+}
+
+fn parse_named_block_added(
+    scope: String,
+    fields: BTreeMap<String, String>,
+) -> Result<Box<dyn Change>, String> {
+    let text = required(&fields, "text", "named-block-added")?;
+    expect_added_lines(&fields, &text, "named-block-added")?;
+    Ok(Box::new(crate::change::NamedBlockAdded::new(
+        scope,
+        required_line(&fields, "old", "named-block-added")?,
+        required_line(&fields, "new", "named-block-added")?,
+        text,
+        required_name(&fields, "named-block-added")?,
     )))
 }
 
@@ -419,12 +435,28 @@ fn expect_removed_lines(
 }
 
 /// Checks that an addition's `lines` is the positive count of lines in `text`.
-fn expect_added_lines(fields: &BTreeMap<String, String>, text: &str) -> Result<(), String> {
-    let lines = required_lines(fields, "line-added")?;
+fn expect_added_lines(
+    fields: &BTreeMap<String, String>,
+    text: &str,
+    kind: &str,
+) -> Result<(), String> {
+    let lines = required_lines(fields, kind)?;
     if lines <= 0 || text.split('\n').count() != lines as usize {
-        return Err(invalid_lines("line-added", fields));
+        return Err(invalid_lines(kind, fields));
     }
     Ok(())
+}
+
+/// The block name recorded on a named-block addition.
+///
+/// The name is the identifier that follows the dialect's keyword. An empty
+/// name is rejected so apply is not asked to replay a block that has none.
+fn required_name(fields: &BTreeMap<String, String>, kind: &str) -> Result<String, String> {
+    let name = required(fields, "name", kind)?;
+    if name.is_empty() {
+        return Err(format!("{kind} has invalid name"));
+    }
+    Ok(name)
 }
 
 /// Checks that a modification's `lines` is zero.
@@ -655,5 +687,41 @@ changes:
             true,
             true,
         );
+    }
+
+    #[test]
+    fn a_named_block_needs_a_name() {
+        let missing = "\
+changes:
+  - scope: \"src/main.rs\"
+    type: named-block-added
+    details:
+      old: 1
+      lines: +1
+      new: 1
+      text: \"fn fib() {}\"
+";
+        let message = match parse_changes(missing) {
+            Err(message) => message,
+            Ok(_) => panic!("missing name was accepted"),
+        };
+        assert!(message.contains("missing name"), "{message}");
+
+        let empty = "\
+changes:
+  - scope: \"src/main.rs\"
+    type: named-block-added
+    details:
+      old: 1
+      lines: +1
+      new: 1
+      text: \"fn fib() {}\"
+      name: \"\"
+";
+        let message = match parse_changes(empty) {
+            Err(message) => message,
+            Ok(_) => panic!("empty name was accepted"),
+        };
+        assert!(message.contains("invalid name"), "{message}");
     }
 }
