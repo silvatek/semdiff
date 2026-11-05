@@ -175,8 +175,13 @@ fn merges_the_adjacent_removals_in_the_rust_sample() {
         "  - scope: \"src/main.rs\"\n    type: line-added\n    details:\n      old: 53\n      lines: +2\n      new: 51\n      text: \"// This added line is first.\\n// This added line is second.\"\n"
     ));
     assert!(document.contains(
-        "  - scope: \"src/main.rs:1-38\"\n    type: identifier-renamed\n    details:\n      oldname: \"fibonacci\"\n      newname: \"fib\"\n"
+        "  - scope: \"src\"\n    type: identifier-renamed\n    details:\n      oldname: \"fibonacci\"\n      newname: \"fib\"\n"
     ));
+    assert!(!document.contains("scope: \"src/main.rs:1-38\""), "{document}");
+    assert!(
+        !document.contains("scope: \"src/report.rs:"),
+        "{document}"
+    );
     assert!(document.contains(
         "  - scope: \"src/main.rs:46\"\n    type: identifier-renamed\n    details:\n      new: 46\n      oldname: \"zero\"\n      newname: \"one\"\n"
     ));
