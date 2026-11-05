@@ -215,6 +215,12 @@ pub(crate) trait LineEdit {
     fn is_comment(&self) -> bool {
         false
     }
+
+    /// Keeps the comment flag only when the following joined line is a comment.
+    ///
+    /// Adjacent lines become one record. That record is a comment when every
+    /// line in it is a full-line comment. A span change does not join.
+    fn join_comment(&mut self, _following: bool) {}
 }
 
 /// A directory removed from the tree.

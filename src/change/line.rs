@@ -35,6 +35,7 @@ fn line_count(text: &str) -> usize {
 /// `old_len` and `new_len` are how far `current` already reaches. The next
 /// change continues it when each side's first line plus that length equals
 /// the next change's first line. The joined text is stored on `current`.
+/// The comment flag stays set only when the following line is a comment too.
 fn extend_following(
     current: &mut dyn Change,
     old_len: usize,
@@ -62,12 +63,14 @@ fn extend_following(
     if next_old != following.old || next_new != following.new {
         return false;
     }
+    let following_is_comment = line.is_comment();
     let Some(text) = line.text() else {
         return false;
     };
     let Some(current_line) = current.line_edit_mut() else {
         return false;
     };
+    current_line.join_comment(following_is_comment);
     current_line.append_text(text)
 }
 
@@ -218,6 +221,10 @@ impl LineEdit for LineAdded {
         self.body.is_comment
     }
 
+    fn join_comment(&mut self, following: bool) {
+        self.body.is_comment = self.body.is_comment && following;
+    }
+
     fn extend(&mut self, next: &dyn Change) -> bool {
         let new_len = line_count(&self.body.text);
         extend_following(self, 0, new_len, next)
@@ -315,6 +322,10 @@ impl LineEdit for LineRemoved {
 
     fn is_comment(&self) -> bool {
         self.body.is_comment
+    }
+
+    fn join_comment(&mut self, following: bool) {
+        self.body.is_comment = self.body.is_comment && following;
     }
 
     fn extend(&mut self, next: &dyn Change) -> bool {
@@ -419,6 +430,10 @@ impl LineEdit for LineModified {
 
     fn is_comment(&self) -> bool {
         self.body.is_comment
+    }
+
+    fn join_comment(&mut self, following: bool) {
+        self.body.is_comment = self.body.is_comment && following;
     }
 
     fn extend(&mut self, next: &dyn Change) -> bool {

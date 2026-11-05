@@ -6,8 +6,10 @@ use crate::change::Change;
 /// lines that stayed. A walk along those matches turns each gap into a hunk.
 /// Lines in a hunk pair from the top into modifications. A modification whose
 /// only change is one identifier, occurring once on the old line, is an
-/// identifier rename. Leftover old lines were removed, and leftover new lines
-/// were added.
+/// identifier rename. An added or removed line is a full-line comment when
+/// that line opens with the dialect's line comment. A modification is one when
+/// both the old line and the new line do. A file with no dialect is never a
+/// comment. Leftover old lines were removed, and leftover new lines were added.
 ///
 /// Each record carries `old` and `new`. `old` is a line in the old file. For an
 /// added line it is the old line the text is inserted before, or one past the
@@ -226,7 +228,7 @@ fn changes_in_hunk(path: &str, hunk: &Hunk) -> Vec<Box<dyn Change>> {
             line.index + 1,
             hunk.next_new_line,
             line.text.clone(),
-            false,
+            crate::dialect::full_line_comment(path, &line.text),
         )));
     }
     for line in &hunk.new_lines[paired..] {
@@ -235,7 +237,7 @@ fn changes_in_hunk(path: &str, hunk: &Hunk) -> Vec<Box<dyn Change>> {
             hunk.next_old_line,
             line.index + 1,
             line.text.clone(),
-            false,
+            crate::dialect::full_line_comment(path, &line.text),
         )));
     }
     changes
@@ -243,7 +245,9 @@ fn changes_in_hunk(path: &str, hunk: &Hunk) -> Vec<Box<dyn Change>> {
 
 /// A paired line, recorded as an identifier rename when that is the whole edit.
 ///
-/// The rename's scope is `path:line`, with the old line.
+/// The rename's scope is `path:line`, with the old line. Anything else is a
+/// line modification. It is a full-line comment when both lines open with the
+/// dialect's line comment.
 fn modified_line(
     path: &str,
     old: usize,
@@ -264,7 +268,8 @@ fn modified_line(
         old,
         new,
         new_text.to_string(),
-        false,
+        crate::dialect::full_line_comment(path, old_text)
+            && crate::dialect::full_line_comment(path, new_text),
     ))
 }
 

@@ -3,8 +3,8 @@
 //! The two lines are split into names and the text between them. The edit is
 //! a rename when those pieces have the same shape, exactly one name differs,
 //! and that old name occurs once on the line. A file with no dialect stays a
-//! line modification. Comments and strings are still read as ordinary text;
-//! telling them apart comes later.
+//! line modification. Comments and strings are still read as ordinary text, so
+//! a one-name edit inside a full-line comment stays a rename.
 
 use crate::dialect::{Dialect, IdentifierCharacters};
 
