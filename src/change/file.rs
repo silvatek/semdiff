@@ -1,0 +1,206 @@
+//! Changes to a file in the tree, and to the bytes of a file that stayed put.
+
+use std::path::Path;
+
+use super::{applied_with_its_file, AddedFile, Change, Content, Digest, Replacement};
+
+pub(crate) struct FileRenamed {
+    pub(crate) scope: String,
+    pub(crate) from: String,
+    pub(crate) to: String,
+}
+
+impl Change for FileRenamed {
+    fn kind(&self) -> &'static str {
+        "file-renamed"
+    }
+
+    fn scope(&self) -> &str {
+        &self.scope
+    }
+
+    fn sort_key(&self) -> (&str, &str) {
+        (&self.from, &self.to)
+    }
+
+    fn write_details(&self, document: &mut String) {
+        crate::semdif::write_detail(document, "from", &self.from);
+        crate::semdif::write_detail(document, "to", &self.to);
+    }
+
+    fn apply(&self, source: &Path) -> Result<(), String> {
+        crate::apply::rename_file(source, &self.from, &self.to)
+    }
+}
+
+pub(crate) struct FileDeleted {
+    pub(crate) scope: String,
+    pub(crate) path: String,
+}
+
+impl Change for FileDeleted {
+    fn kind(&self) -> &'static str {
+        "file-deleted"
+    }
+
+    fn scope(&self) -> &str {
+        &self.scope
+    }
+
+    fn sort_key(&self) -> (&str, &str) {
+        (&self.path, "")
+    }
+
+    fn write_details(&self, document: &mut String) {
+        crate::semdif::write_detail(document, "path", &self.path);
+    }
+
+    fn apply(&self, source: &Path) -> Result<(), String> {
+        crate::apply::delete_file(source, &self.path)
+    }
+}
+
+pub(crate) struct FileAdded {
+    pub(crate) scope: String,
+    pub(crate) path: String,
+    pub(crate) contents: Vec<u8>,
+}
+
+impl Change for FileAdded {
+    fn kind(&self) -> &'static str {
+        "file-added"
+    }
+
+    fn scope(&self) -> &str {
+        &self.scope
+    }
+
+    fn sort_key(&self) -> (&str, &str) {
+        (&self.path, "")
+    }
+
+    fn added_file(&self) -> Option<&dyn AddedFile> {
+        Some(self)
+    }
+
+    fn write_details(&self, document: &mut String) {
+        crate::semdif::write_detail(document, "path", &self.path);
+        crate::semdif::write_file_contents(document, &self.contents);
+    }
+
+    fn apply(&self, source: &Path) -> Result<(), String> {
+        crate::apply::write_file(source, &self.path, &self.contents)
+    }
+}
+
+impl AddedFile for FileAdded {
+    fn path(&self) -> &str {
+        &self.path
+    }
+}
+
+/// A `file-changed` change.
+///
+/// One type, and one semdif type name. The change carries either the old and
+/// new SHA-256 hashes of a changed file, or the bytes that replace the whole
+/// file.
+pub(crate) struct FileChanged {
+    scope: String,
+    body: FileChangedBody,
+}
+
+enum FileChangedBody {
+    Hashes(FileHashes),
+    Contents(FileContents),
+}
+
+struct FileHashes {
+    old_hash: String,
+    new_hash: String,
+}
+
+struct FileContents(Vec<u8>);
+
+impl FileChanged {
+    /// The hashes written for every changed file.
+    pub(crate) fn hashes(scope: String, old_hash: String, new_hash: String) -> Self {
+        Self {
+            scope,
+            body: FileChangedBody::Hashes(FileHashes { old_hash, new_hash }),
+        }
+    }
+
+    /// The bytes that replace a file which has no line edits.
+    pub(crate) fn contents(scope: String, contents: Vec<u8>) -> Self {
+        Self {
+            scope,
+            body: FileChangedBody::Contents(FileContents(contents)),
+        }
+    }
+}
+
+impl Change for FileChanged {
+    fn kind(&self) -> &'static str {
+        "file-changed"
+    }
+
+    fn scope(&self) -> &str {
+        &self.scope
+    }
+
+    fn content(&self) -> Option<&dyn Content> {
+        Some(self)
+    }
+
+    fn digest(&self) -> Option<&dyn Digest> {
+        match &self.body {
+            FileChangedBody::Hashes(hashes) => Some(hashes),
+            FileChangedBody::Contents(_) => None,
+        }
+    }
+
+    fn replacement(&self) -> Option<&dyn Replacement> {
+        match &self.body {
+            FileChangedBody::Contents(contents) => Some(contents),
+            FileChangedBody::Hashes(_) => None,
+        }
+    }
+
+    fn write_details(&self, document: &mut String) {
+        match &self.body {
+            FileChangedBody::Hashes(hashes) => {
+                crate::semdif::write_detail(document, "old", &hashes.old_hash);
+                crate::semdif::write_detail(document, "new", &hashes.new_hash);
+            }
+            FileChangedBody::Contents(contents) => {
+                crate::semdif::write_file_contents(document, &contents.0);
+            }
+        }
+    }
+
+    fn apply(&self, _source: &Path) -> Result<(), String> {
+        applied_with_its_file(self.kind())
+    }
+}
+
+impl Content for FileChanged {
+    fn file(&self) -> &str {
+        &self.scope
+    }
+}
+
+impl Digest for FileHashes {
+    fn old_hash(&self) -> &str {
+        &self.old_hash
+    }
+
+    fn new_hash(&self) -> &str {
+        &self.new_hash
+    }
+}
+
+impl Replacement for FileContents {
+    fn bytes(&self) -> &[u8] {
+        &self.0
+    }
+}

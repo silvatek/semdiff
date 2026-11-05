@@ -1,12 +1,12 @@
 mod apply;
 mod args;
+mod change;
 mod content_changes;
 mod dialect;
 mod directory_changes;
 mod file_change;
 mod identifier;
 mod line_changes;
-mod merge;
 mod semdif;
 
 pub(crate) use args::Sources;
@@ -31,7 +31,7 @@ fn main() -> ExitCode {
 
 struct Differences {
     paths: Vec<String>,
-    changes: Vec<semdif::Change>,
+    changes: Vec<Box<dyn change::Change>>,
 }
 
 /// The shared files and file changes between the two sources.
@@ -71,7 +71,7 @@ fn find_differences(sources: &Sources) -> Differences {
         &right_files,
     ));
     let changes = directory_changes::place_replacement_files(changes);
-    let changes = merge::merge_adjacent(changes);
+    let changes = change::merge_adjacent(changes);
     Differences {
         paths: paired_files,
         changes,

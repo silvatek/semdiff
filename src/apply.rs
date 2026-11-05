@@ -3,6 +3,8 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
+use crate::change::{Change, LinePlan};
+
 /// Edits `source` so it gains the changes recorded in `semdif`.
 ///
 /// The semdif file is the record of what changed, so the same edits can be replayed
@@ -23,60 +25,35 @@ fn apply_changes(semdif: &Path, source: &Path) -> Result<(), String> {
     let changes = crate::semdif::parse_changes(&document)?;
     let mut applied_content = BTreeSet::new();
     for change in &changes {
-        if let Some(path) = content_path(change) {
+        if let Some(content) = change.content() {
+            let path = content.file();
             if !applied_content.insert(path.to_string()) {
                 continue;
             }
-            let batch: Vec<_> = changes
+            let batch: Vec<&dyn Change> = changes
                 .iter()
-                .filter(|candidate| content_path(candidate) == Some(path))
+                .filter(|candidate| candidate.content().is_some_and(|item| item.file() == path))
+                .map(|candidate| candidate.as_ref())
                 .collect();
             apply_content(source, path, &batch)?;
         } else {
-            apply_change(source, change)?;
+            apply_change(source, change.as_ref())?;
         }
     }
     Ok(())
 }
 
-/// The path of a content edit, when this change is one.
+/// Performs one structural change in the source directory.
 ///
-/// Line edits, a whole-file replacement, and the old and new hashes of a changed
-/// file are applied together.
-fn content_path(change: &crate::semdif::Change) -> Option<&str> {
-    match change {
-        crate::semdif::Change::LineAdded { path, .. }
-        | crate::semdif::Change::LineRemoved { path, .. }
-        | crate::semdif::Change::LineModified { path, .. }
-        | crate::semdif::Change::IdentifierRenamed { path, .. }
-        | crate::semdif::Change::FileChanged { path, .. }
-        | crate::semdif::Change::FileDigest { path, .. } => Some(path),
-        _ => None,
-    }
-}
-
-/// Performs one recorded change in the source directory.
-fn apply_change(source: &Path, change: &crate::semdif::Change) -> Result<(), String> {
-    match change {
-        crate::semdif::Change::FileRenamed { from, to } => rename_file(source, from, to),
-        crate::semdif::Change::FileDeleted { path } => delete_file(source, path),
-        crate::semdif::Change::FileAdded { path, contents } => write_file(source, path, contents),
-        // Content edits are checked and written together in apply_content.
-        crate::semdif::Change::FileChanged { .. }
-        | crate::semdif::Change::FileDigest { .. }
-        | crate::semdif::Change::LineAdded { .. }
-        | crate::semdif::Change::LineRemoved { .. }
-        | crate::semdif::Change::LineModified { .. }
-        | crate::semdif::Change::IdentifierRenamed { .. } => Ok(()),
-        crate::semdif::Change::DirectoryAdded { path } => add_directory(source, path),
-        crate::semdif::Change::DirectoryDeleted { path } => remove_directory(source, path),
-    }
+/// A content edit is applied with the other edits of its file, in `apply_content`.
+fn apply_change(source: &Path, change: &dyn Change) -> Result<(), String> {
+    change.apply(source)
 }
 
 /// Creates one directory in the source.
 ///
 /// The semdif records an empty directory that exists only on the other side.
-fn add_directory(root: &Path, relative: &str) -> Result<(), String> {
+pub(crate) fn add_directory(root: &Path, relative: &str) -> Result<(), String> {
     let path = path_inside(root, relative)?;
     fs::create_dir_all(&path).map_err(|error| format!("cannot create {}: {error}", path.display()))
 }
@@ -85,7 +62,7 @@ fn add_directory(root: &Path, relative: &str) -> Result<(), String> {
 ///
 /// Files inside it have already been moved or deleted. A directory that still
 /// holds something is left in place and reported.
-fn remove_directory(root: &Path, relative: &str) -> Result<(), String> {
+pub(crate) fn remove_directory(root: &Path, relative: &str) -> Result<(), String> {
     let path = path_inside(root, relative)?;
     fs::remove_dir(&path).map_err(|error| format!("cannot remove {}: {error}", path.display()))
 }
@@ -94,11 +71,7 @@ fn remove_directory(root: &Path, relative: &str) -> Result<(), String> {
 ///
 /// The old hash is checked against the file as it is. The new hash is checked
 /// against the bytes about to be written, so a mismatch leaves the file unchanged.
-fn apply_content(
-    root: &Path,
-    relative: &str,
-    batch: &[&crate::semdif::Change],
-) -> Result<(), String> {
+fn apply_content(root: &Path, relative: &str, batch: &[&dyn Change]) -> Result<(), String> {
     let path = path_inside(root, relative)?;
     let bytes =
         fs::read(&path).map_err(|error| format!("cannot read {}: {error}", path.display()))?;
@@ -117,19 +90,20 @@ fn apply_content(
     Ok(())
 }
 
-fn file_digest(batch: &[&crate::semdif::Change]) -> Result<Option<(String, String)>, String> {
+fn file_digest(batch: &[&dyn Change]) -> Result<Option<(String, String)>, String> {
     let mut found = None;
     for change in batch {
-        if let crate::semdif::Change::FileDigest {
-            path,
-            old_hash,
-            new_hash,
-        } = change
-        {
+        let hashes = change
+            .digest()
+            .map(|digest| (digest.old_hash().to_string(), digest.new_hash().to_string()));
+        if let Some(hashes) = hashes {
             if found.is_some() {
-                return Err(format!("{path} has more than one file-changed hash"));
+                return Err(format!(
+                    "{} has more than one file-changed hash",
+                    change.scope()
+                ));
             }
-            found = Some((old_hash.clone(), new_hash.clone()));
+            found = Some(hashes);
         }
     }
     Ok(found)
@@ -146,26 +120,17 @@ fn check_hash(path: &Path, bytes: &[u8], expected: &str, side: &str) -> Result<(
     Ok(())
 }
 
-fn new_contents(
-    path: &Path,
-    bytes: &[u8],
-    batch: &[&crate::semdif::Change],
-) -> Result<Vec<u8>, String> {
+fn new_contents(path: &Path, bytes: &[u8], batch: &[&dyn Change]) -> Result<Vec<u8>, String> {
     let mut replacement = None;
     let mut lines = Vec::new();
     for change in batch {
-        match change {
-            crate::semdif::Change::FileChanged { contents, .. } => {
-                if replacement.is_some() {
-                    return Err(format!("{} has more than one replacement", path.display()));
-                }
-                replacement = Some(contents.clone());
+        if let Some(contents) = change.replacement() {
+            if replacement.is_some() {
+                return Err(format!("{} has more than one replacement", path.display()));
             }
-            crate::semdif::Change::LineAdded { .. }
-            | crate::semdif::Change::LineRemoved { .. }
-            | crate::semdif::Change::LineModified { .. }
-            | crate::semdif::Change::IdentifierRenamed { .. } => lines.push(*change),
-            _ => {}
+            replacement = Some(contents.bytes().to_vec());
+        } else if change.line_edit().is_some() {
+            lines.push(*change);
         }
     }
     if replacement.is_some() && !lines.is_empty() {
@@ -183,7 +148,17 @@ fn new_contents(
     let text = String::from_utf8(bytes.to_vec())
         .map_err(|_| format!("cannot edit lines in {}: file is not text", path.display()))?;
     let source_lines = crate::line_changes::split_text(&text);
-    let rebuilt = rebuild_lines(path, &source_lines.lines, &lines)?;
+    // The only place a LinePlan is built. Each line edit adds the lines it
+    // changes, then `rebuild` produces the new lines of this file. A
+    // whole-file replacement returned above and never reaches here.
+    let mut plan = LinePlan::new();
+    for change in &lines {
+        let Some(line) = change.line_edit() else {
+            continue;
+        };
+        line.rebuild(path, &source_lines.lines, &mut plan)?;
+    }
+    let rebuilt = plan.rebuild(path, &source_lines.lines)?;
     Ok(crate::line_changes::join_text(&crate::line_changes::Text {
         lines: rebuilt,
         trailing_newline: source_lines.trailing_newline,
@@ -191,142 +166,10 @@ fn new_contents(
     .into_bytes())
 }
 
-fn rebuild_lines(
-    path: &Path,
-    lines: &[String],
-    batch: &[&crate::semdif::Change],
-) -> Result<Vec<String>, String> {
-    let mut modified = std::collections::BTreeMap::new();
-    let mut removed = BTreeSet::new();
-    let mut added = Vec::new();
-    for change in batch {
-        match change {
-            crate::semdif::Change::LineModified { old, text, .. } => {
-                for (offset, line) in text.split('\n').enumerate() {
-                    let line_no = old
-                        .checked_add(offset)
-                        .ok_or_else(|| format!("line {old} is outside {}", path.display()))?;
-                    if modified.insert(line_no, line.to_string()).is_some() {
-                        return Err(format!(
-                            "line {line_no} is modified more than once in {}",
-                            path.display()
-                        ));
-                    }
-                }
-            }
-            crate::semdif::Change::IdentifierRenamed {
-                path: relative,
-                old,
-                oldname,
-                newname,
-                ..
-            } => {
-                if *old == 0 || *old > lines.len() {
-                    return Err(format!(
-                        "line {old} is outside {} which has {} lines",
-                        path.display(),
-                        lines.len()
-                    ));
-                }
-                let replaced = match crate::identifier::replace_name(
-                    relative,
-                    &lines[*old - 1],
-                    oldname,
-                    newname,
-                ) {
-                    Ok(text) => text,
-                    Err(message) => {
-                        return Err(format!(
-                            "cannot rename {oldname} on line {old} in {}: {message}",
-                            path.display()
-                        ));
-                    }
-                };
-                if modified.insert(*old, replaced).is_some() {
-                    return Err(format!(
-                        "line {old} is modified more than once in {}",
-                        path.display()
-                    ));
-                }
-            }
-            crate::semdif::Change::LineRemoved { old, old_end, .. } => {
-                if *old_end < *old {
-                    return Err(format!(
-                        "line {old}-{old_end} is not a removal range in {}",
-                        path.display()
-                    ));
-                }
-                for line in *old..=*old_end {
-                    if !removed.insert(line) {
-                        return Err(format!(
-                            "line {line} is removed more than once in {}",
-                            path.display()
-                        ));
-                    }
-                }
-            }
-            crate::semdif::Change::LineAdded { old, new, text, .. } => {
-                for (offset, line) in text.split('\n').enumerate() {
-                    let line_no = new.checked_add(offset).ok_or_else(|| {
-                        format!("cannot insert before line {old} in {}", path.display())
-                    })?;
-                    added.push((*old, line_no, line.to_string()));
-                }
-            }
-            _ => {}
-        }
-    }
-    added.sort_by_key(|(old, new, _)| (*old, *new));
-    let count = lines.len();
-    for old in modified.keys().chain(removed.iter()) {
-        if *old == 0 || *old > count {
-            return Err(format!(
-                "line {old} is outside {} which has {count} lines",
-                path.display()
-            ));
-        }
-    }
-    for (old, _, _) in &added {
-        if *old == 0 || *old > count + 1 {
-            return Err(format!(
-                "cannot insert before line {old} in {}: file has {count} lines",
-                path.display()
-            ));
-        }
-    }
-    for old in modified.keys() {
-        if removed.contains(old) {
-            return Err(format!(
-                "line {old} is both modified and removed in {}",
-                path.display()
-            ));
-        }
-    }
-
-    let mut rebuilt = Vec::new();
-    for old in 1..=count {
-        for (_, _, text) in added.iter().filter(|(before, _, _)| *before == old) {
-            rebuilt.push(text.clone());
-        }
-        if removed.contains(&old) {
-            continue;
-        }
-        if let Some(text) = modified.get(&old) {
-            rebuilt.push(text.clone());
-        } else {
-            rebuilt.push(lines[old - 1].clone());
-        }
-    }
-    for (_, _, text) in added.iter().filter(|(before, _, _)| *before == count + 1) {
-        rebuilt.push(text.clone());
-    }
-    Ok(rebuilt)
-}
-
 /// Writes one file in the source directory.
 ///
 /// An added file is created. A changed file is replaced with the recorded bytes.
-fn write_file(root: &Path, relative: &str, contents: &[u8]) -> Result<(), String> {
+pub(crate) fn write_file(root: &Path, relative: &str, contents: &[u8]) -> Result<(), String> {
     let path = path_inside(root, relative)?;
     create_parent(root, &path)?;
     fs::write(&path, contents).map_err(|error| format!("cannot write {}: {error}", path.display()))
@@ -335,7 +178,7 @@ fn write_file(root: &Path, relative: &str, contents: &[u8]) -> Result<(), String
 /// Removes one file from the source directory.
 ///
 /// The semdif records the path relative to that directory.
-fn delete_file(root: &Path, relative: &str) -> Result<(), String> {
+pub(crate) fn delete_file(root: &Path, relative: &str) -> Result<(), String> {
     let path = path_inside(root, relative)?;
     fs::remove_file(&path).map_err(|error| format!("cannot delete {}: {error}", path.display()))
 }
@@ -343,7 +186,7 @@ fn delete_file(root: &Path, relative: &str) -> Result<(), String> {
 /// Moves one file inside the source directory.
 ///
 /// The semdif records the old and new paths relative to that directory.
-fn rename_file(root: &Path, from: &str, to: &str) -> Result<(), String> {
+pub(crate) fn rename_file(root: &Path, from: &str, to: &str) -> Result<(), String> {
     let from_path = path_inside(root, from)?;
     let to_path = path_inside(root, to)?;
     create_parent(root, &to_path)?;
