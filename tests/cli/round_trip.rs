@@ -41,11 +41,12 @@ fn applying_the_rust_sample_makes_a_copy_of_v1_match_v2() {
         "{document}"
     );
     assert!(
-        document.contains("type: file-changed")
-            && document.contains("path: \"src/main.rs\"")
-            && document.contains("// Print Fibonacci numbers."),
+        document.contains(
+            "  - scope: \".\"\n    type: line-added\n    details:\n      path: \"src/main.rs\"\n      line: 18\n      text: \"// Print Fibonacci numbers.\"\n"
+        ),
         "{document}"
     );
+    assert!(!document.contains("type: file-changed"), "{document}");
     let applied_output = run(&["--apply", semdif_file_arg, target_source_arg]);
     assert!(
         applied_output.status.success(),

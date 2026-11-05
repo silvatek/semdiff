@@ -76,9 +76,27 @@ fn write_change(document: &mut String, change: &Change) {
             document.push_str(&format!("      path: {}\n", yaml_string(path)));
             write_file_contents(document, contents);
         }
+        Change::LineAdded { path, line, text } => {
+            write_line(document, "line-added", path, *line, text)
+        }
+        Change::LineRemoved { path, line, text } => {
+            write_line(document, "line-removed", path, *line, text)
+        }
+        Change::LineModified { path, line, text } => {
+            write_line(document, "line-modified", path, *line, text)
+        }
         Change::DirectoryAdded { path } => write_directory(document, "directory-added", path),
         Change::DirectoryDeleted { path } => write_directory(document, "directory-deleted", path),
     }
+}
+
+fn write_line(document: &mut String, kind: &str, path: &str, line: usize, text: &str) {
+    document.push_str("  - scope: \".\"\n");
+    document.push_str(&format!("    type: {kind}\n"));
+    document.push_str("    details:\n");
+    document.push_str(&format!("      path: {}\n", yaml_string(path)));
+    document.push_str(&format!("      line: {line}\n"));
+    document.push_str(&format!("      text: {}\n", yaml_string(text)));
 }
 
 fn write_directory(document: &mut String, kind: &str, path: &str) {
@@ -150,12 +168,42 @@ fn utc_timestamp() -> String {
 /// Apply replays these in the order they were recorded. Each kind carries the
 /// details that kind needs.
 pub(crate) enum Change {
-    FileRenamed { from: String, to: String },
-    FileDeleted { path: String },
-    FileAdded { path: String, contents: Vec<u8> },
-    FileChanged { path: String, contents: Vec<u8> },
-    DirectoryAdded { path: String },
-    DirectoryDeleted { path: String },
+    FileRenamed {
+        from: String,
+        to: String,
+    },
+    FileDeleted {
+        path: String,
+    },
+    FileAdded {
+        path: String,
+        contents: Vec<u8>,
+    },
+    FileChanged {
+        path: String,
+        contents: Vec<u8>,
+    },
+    LineAdded {
+        path: String,
+        line: usize,
+        text: String,
+    },
+    LineRemoved {
+        path: String,
+        line: usize,
+        text: String,
+    },
+    LineModified {
+        path: String,
+        line: usize,
+        text: String,
+    },
+    DirectoryAdded {
+        path: String,
+    },
+    DirectoryDeleted {
+        path: String,
+    },
 }
 
 /// The changes recorded in a semdif file.
@@ -243,6 +291,21 @@ impl PartialChange {
                 path: required(&self.fields, "path", "file-changed")?,
                 contents: stored_bytes(&self.fields, "file-changed")?,
             }),
+            "line-added" => Ok(Change::LineAdded {
+                path: required(&self.fields, "path", "line-added")?,
+                line: required_line(&self.fields, "line-added")?,
+                text: required(&self.fields, "text", "line-added")?,
+            }),
+            "line-removed" => Ok(Change::LineRemoved {
+                path: required(&self.fields, "path", "line-removed")?,
+                line: required_line(&self.fields, "line-removed")?,
+                text: required(&self.fields, "text", "line-removed")?,
+            }),
+            "line-modified" => Ok(Change::LineModified {
+                path: required(&self.fields, "path", "line-modified")?,
+                line: required_line(&self.fields, "line-modified")?,
+                text: required(&self.fields, "text", "line-modified")?,
+            }),
             "directory-added" => Ok(Change::DirectoryAdded {
                 path: required(&self.fields, "path", "directory-added")?,
             }),
@@ -267,6 +330,15 @@ fn stored_bytes(fields: &BTreeMap<String, String>, kind: &str) -> Result<Vec<u8>
             .decode(contents)
             .map_err(|_| format!("{kind} contents are not valid base64")),
         Some(other) => Err(format!("{kind} has unsupported encoding {other}")),
+    }
+}
+
+/// A 1-based line number recorded for a line change.
+fn required_line(fields: &BTreeMap<String, String>, kind: &str) -> Result<usize, String> {
+    let text = required(fields, "line", kind)?;
+    match text.parse::<usize>() {
+        Ok(line) if line >= 1 => Ok(line),
+        _ => Err(format!("{kind} has invalid line {text}")),
     }
 }
 
