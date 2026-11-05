@@ -230,8 +230,8 @@ fn changes_in_hunk(path: &str, hunk: &Hunk) -> Vec<Box<dyn Change>> {
             line.index + 1,
             hunk.next_new_line,
             line.text.clone(),
-            crate::dialect::full_line_comment(path, &line.text),
-            crate::dialect::blank_line(path, &line.text),
+            crate::classify::full_line_comment(path, &line.text),
+            crate::classify::blank_line(path, &line.text),
         )));
     }
     for line in &hunk.new_lines[paired..] {
@@ -240,8 +240,8 @@ fn changes_in_hunk(path: &str, hunk: &Hunk) -> Vec<Box<dyn Change>> {
             hunk.next_old_line,
             line.index + 1,
             line.text.clone(),
-            crate::dialect::full_line_comment(path, &line.text),
-            crate::dialect::blank_line(path, &line.text),
+            crate::classify::full_line_comment(path, &line.text),
+            crate::classify::blank_line(path, &line.text),
         )));
     }
     changes
@@ -273,9 +273,9 @@ fn modified_line(
         old,
         new,
         new_text.to_string(),
-        crate::dialect::full_line_comment(path, old_text)
-            && crate::dialect::full_line_comment(path, new_text),
-        crate::dialect::margin_whitespace(path, old_text, new_text),
+        crate::classify::full_line_comment(path, old_text)
+            && crate::classify::full_line_comment(path, new_text),
+        crate::classify::margin_whitespace(path, old_text, new_text),
     ))
 }
 

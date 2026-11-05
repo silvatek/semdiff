@@ -187,7 +187,7 @@ fn named_block_from_addition(change: &dyn super::Change) -> Option<NamedBlockAdd
         return None;
     }
     let text = line.text()?;
-    let block = crate::dialect::named_block(change.scope(), text)?;
+    let block = crate::classify::named_block(change.scope(), text)?;
     let (old, new) = line.position();
     Some(NamedBlockAdded::new(
         change.scope().to_string(),
