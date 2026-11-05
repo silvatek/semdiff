@@ -45,18 +45,18 @@ fn records_line_changes_for_a_pair_whose_contents_differ() {
     );
     assert!(!document.contains("same.txt"), "{document}");
     assert!(document.contains(
-        "  - scope: \".\"\n    type: file-changed\n    details:\n      path: \"drop.txt\"\n      old: \"3282251a9b2bf054b863c3712910d292ff2f0c57d0fb16bb43c50157b20cce56\"\n      new: \"f660a7996deacfbc7560e4240054a8ad82eb02fe25a95064257e07084bcacb85\"\n  - scope: \".\"\n    type: line-removed\n    details:\n      path: \"drop.txt\"\n      old: 2\n      lines: -1\n      new: 2\n      text: \"gone\"\n"
+        "  - scope: \"drop.txt\"\n    type: file-changed\n    details:\n      old: \"3282251a9b2bf054b863c3712910d292ff2f0c57d0fb16bb43c50157b20cce56\"\n      new: \"f660a7996deacfbc7560e4240054a8ad82eb02fe25a95064257e07084bcacb85\"\n  - scope: \"drop.txt\"\n    type: line-removed\n    details:\n      old: 2\n      lines: -1\n      new: 2\n      text: \"gone\"\n"
     ));
     assert!(document.contains(
-        "  - scope: \".\"\n    type: file-changed\n    details:\n      path: \"note.txt\"\n      old: \"9e9894bfcaf8d63b9898e90db0fe05f5a0388d45bcf60a0a208ad31153072142\"\n      new: \"f77de5e87174686ce6fca0e3d03893b38dc6020febaa55578a8b20b289b5c362\"\n"
+        "  - scope: \"note.txt\"\n    type: file-changed\n    details:\n      old: \"9e9894bfcaf8d63b9898e90db0fe05f5a0388d45bcf60a0a208ad31153072142\"\n      new: \"f77de5e87174686ce6fca0e3d03893b38dc6020febaa55578a8b20b289b5c362\"\n"
     ));
     assert!(document.contains(
-        "  - scope: \".\"\n    type: file-changed\n    details:\n      path: \"data.bin\"\n      old: \"cba06b5736faf67e54b07b561eae94395e774c517a7d910a54369e1263ccfbd4\"\n      new: \"06eb7d6a69ee19e5fbdf749018d3d2abfa04bcbd1365db312eb86dc7169389b8\"\n"
+        "  - scope: \"data.bin\"\n    type: file-changed\n    details:\n      old: \"cba06b5736faf67e54b07b561eae94395e774c517a7d910a54369e1263ccfbd4\"\n      new: \"06eb7d6a69ee19e5fbdf749018d3d2abfa04bcbd1365db312eb86dc7169389b8\"\n"
     ));
     assert!(document.contains(
-        "  - scope: \".\"\n    type: line-modified\n    details:\n      path: \"note.txt\"\n      old: 1\n      lines: +0\n      new: 1\n      text: \"He said \\\"hello\\\"\"\n  - scope: \".\"\n    type: line-added\n    details:\n      path: \"note.txt\"\n      old: 2\n      lines: +1\n      new: 2\n      text: \"Next line\"\n"
+        "  - scope: \"note.txt\"\n    type: line-modified\n    details:\n      old: 1\n      lines: +0\n      new: 1\n      text: \"He said \\\"hello\\\"\"\n  - scope: \"note.txt\"\n    type: line-added\n    details:\n      old: 2\n      lines: +1\n      new: 2\n      text: \"Next line\"\n"
     ));
-    assert!(document.contains("path: \"data.bin\""));
+    assert!(document.contains("scope: \"data.bin\""));
     assert!(document.contains("encoding: \"base64\""));
     assert!(document.contains("type: file-changed"));
     assert!(!document.as_bytes().contains(&0xff));
@@ -105,7 +105,7 @@ fn replays_a_modification_a_removal_and_an_addition() {
     );
     assert_eq!(
         document.split_once("changes:\n").expect("changes list").1,
-        "  - scope: \".\"\n    type: file-changed\n    details:\n      path: \"edit.txt\"\n      old: \"38a0e71cdc417583a6f82094581552227c96aaa4dbb897edece3f69a71d31464\"\n      new: \"21f14a6d40bb2fcf5c54176224f1ae9cfb50dad1e6561d62c2cadff3bd848ca2\"\n  - scope: \".\"\n    type: line-modified\n    details:\n      path: \"edit.txt\"\n      old: 2\n      lines: +0\n      new: 2\n      text: \"new\"\n  - scope: \".\"\n    type: line-removed\n    details:\n      path: \"edit.txt\"\n      old: 3\n      lines: -1\n      new: 3\n      text: \"gone\"\n  - scope: \".\"\n    type: line-added\n    details:\n      path: \"edit.txt\"\n      old: 5\n      lines: +1\n      new: 4\n      text: \"extra\"\n"
+        "  - scope: \"edit.txt\"\n    type: file-changed\n    details:\n      old: \"38a0e71cdc417583a6f82094581552227c96aaa4dbb897edece3f69a71d31464\"\n      new: \"21f14a6d40bb2fcf5c54176224f1ae9cfb50dad1e6561d62c2cadff3bd848ca2\"\n  - scope: \"edit.txt\"\n    type: line-modified\n    details:\n      old: 2\n      lines: +0\n      new: 2\n      text: \"new\"\n  - scope: \"edit.txt\"\n    type: line-removed\n    details:\n      old: 3\n      lines: -1\n      new: 3\n      text: \"gone\"\n  - scope: \"edit.txt\"\n    type: line-added\n    details:\n      old: 5\n      lines: +1\n      new: 4\n      text: \"extra\"\n"
     );
 
     let applied = run(&["--apply", output_arg, edited_arg]);
@@ -146,13 +146,13 @@ fn merges_adjacent_removed_lines_into_one_span() {
         String::from_utf8_lossy(&compared.stderr)
     );
     assert!(document.contains(
-        "  - scope: \".\"\n    type: line-removed\n    details:\n      path: \"span.txt\"\n      old: 2\n      lines: -3\n      new: 2\n      text: \"one\\ntwo\\nthree\"\n"
+        "  - scope: \"span.txt\"\n    type: line-removed\n    details:\n      old: 2\n      lines: -3\n      new: 2\n      text: \"one\\ntwo\\nthree\"\n"
     ));
     assert!(document.contains(
-        "  - scope: \".\"\n    type: line-removed\n    details:\n      path: \"gap.txt\"\n      old: 2\n      lines: -1\n      new: 2\n      text: \"one\"\n"
+        "  - scope: \"gap.txt\"\n    type: line-removed\n    details:\n      old: 2\n      lines: -1\n      new: 2\n      text: \"one\"\n"
     ));
     assert!(document.contains(
-        "  - scope: \".\"\n    type: line-removed\n    details:\n      path: \"gap.txt\"\n      old: 4\n      lines: -1\n      new: 3\n      text: \"two\"\n"
+        "  - scope: \"gap.txt\"\n    type: line-removed\n    details:\n      old: 4\n      lines: -1\n      new: 3\n      text: \"two\"\n"
     ));
 
     let applied = run(&["--apply", output_arg, edited.to_str().unwrap()]);
@@ -190,10 +190,10 @@ fn merges_the_adjacent_removals_in_the_rust_sample() {
         String::from_utf8_lossy(&compared.stderr)
     );
     assert!(document.contains(
-        "  - scope: \".\"\n    type: line-removed\n    details:\n      path: \"src/main.rs\"\n      old: 43\n      lines: -1\n      new: 44\n      text: \"// This single line is deleted.\"\n"
+        "  - scope: \"src/main.rs\"\n    type: line-removed\n    details:\n      old: 43\n      lines: -1\n      new: 44\n      text: \"// This single line is deleted.\"\n"
     ));
     assert!(document.contains(
-        "  - scope: \".\"\n    type: line-removed\n    details:\n      path: \"src/main.rs\"\n      old: 49\n      lines: -2\n      new: 49\n      text: \"// This deleted line is first.\\n// This deleted line is second.\"\n"
+        "  - scope: \"src/main.rs\"\n    type: line-removed\n    details:\n      old: 49\n      lines: -2\n      new: 49\n      text: \"// This deleted line is first.\\n// This deleted line is second.\"\n"
     ));
     assert!(!document.contains("old: 50\n"), "{document}");
 
@@ -214,10 +214,9 @@ header:
   semdiff: \"0.1.0\"
   timestamp: \"2020-01-01T00:00:00Z\"
 changes:
-  - scope: \".\"
+  - scope: \"note.txt\"
     type: line-removed
     details:
-      path: \"note.txt\"
       old: 2
       lines: 2
       new: 2
@@ -267,7 +266,7 @@ fn records_a_whole_file_when_only_the_final_newline_differs() {
         String::from_utf8_lossy(&compared.stderr)
     );
     assert!(document.contains(
-        "  - scope: \".\"\n    type: file-changed\n    details:\n      path: \"note.txt\"\n      old: \"2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824\"\n      new: \"5891b5b522d5df086d0ff0b110fbd9d21bb4fc7163af34d08286a2e846f6be03\"\n  - scope: \".\"\n    type: file-changed\n    details:\n      path: \"note.txt\"\n      contents: \"hello\\n\"\n"
+        "  - scope: \"note.txt\"\n    type: file-changed\n    details:\n      old: \"2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824\"\n      new: \"5891b5b522d5df086d0ff0b110fbd9d21bb4fc7163af34d08286a2e846f6be03\"\n  - scope: \"note.txt\"\n    type: file-changed\n    details:\n      contents: \"hello\\n\"\n"
     ));
 
     let applied = run(&["--apply", output_arg, edited_arg]);

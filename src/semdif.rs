@@ -70,10 +70,7 @@ fn write_change(document: &mut String, change: &Change) {
             write_file_contents(document, contents);
         }
         Change::FileChanged { path, contents } => {
-            document.push_str("  - scope: \".\"\n");
-            document.push_str("    type: file-changed\n");
-            document.push_str("    details:\n");
-            document.push_str(&format!("      path: {}\n", yaml_string(path)));
+            write_content(document, path, "file-changed");
             write_file_contents(document, contents);
         }
         Change::FileDigest {
@@ -81,10 +78,7 @@ fn write_change(document: &mut String, change: &Change) {
             old_hash,
             new_hash,
         } => {
-            document.push_str("  - scope: \".\"\n");
-            document.push_str("    type: file-changed\n");
-            document.push_str("    details:\n");
-            document.push_str(&format!("      path: {}\n", yaml_string(path)));
+            write_content(document, path, "file-changed");
             document.push_str(&format!("      old: {}\n", yaml_string(old_hash)));
             document.push_str(&format!("      new: {}\n", yaml_string(new_hash)));
         }
@@ -129,10 +123,7 @@ fn write_line(
     new: usize,
     text: &str,
 ) {
-    document.push_str("  - scope: \".\"\n");
-    document.push_str(&format!("    type: {kind}\n"));
-    document.push_str("    details:\n");
-    document.push_str(&format!("      path: {}\n", yaml_string(path)));
+    write_content(document, path, kind);
     document.push_str(&format!("      old: {old}\n"));
     document.push_str(&format!("      lines: {}\n", format_lines(lines)));
     document.push_str(&format!("      new: {new}\n"));
@@ -160,6 +151,15 @@ fn format_lines(lines: isize) -> String {
 fn removed_lines(old: usize, old_end: usize) -> isize {
     let count = old_end - old + 1;
     -(count as isize)
+}
+
+/// The start of a change to a file's contents.
+///
+/// The scope is that file. The path is not repeated inside the details.
+fn write_content(document: &mut String, path: &str, kind: &str) {
+    document.push_str(&format!("  - scope: {}\n", yaml_string(path)));
+    document.push_str(&format!("    type: {kind}\n"));
+    document.push_str("    details:\n");
 }
 
 fn write_directory(document: &mut String, kind: &str, path: &str) {
@@ -363,12 +363,12 @@ impl PartialChange {
                 path: required(&self.fields, "path", "file-added")?,
                 contents: stored_bytes(&self.fields, "file-added")?,
             }),
-            "file-changed" => file_changed(self.fields),
+            "file-changed" => file_changed(self.scope, self.fields),
             "line-added" => {
                 let text = required(&self.fields, "text", "line-added")?;
                 expect_lines(&self.fields, "line-added", 1, &text)?;
                 Ok(Change::LineAdded {
-                    path: required(&self.fields, "path", "line-added")?,
+                    path: self.scope,
                     old: required_line(&self.fields, "old", "line-added")?,
                     new: required_line(&self.fields, "new", "line-added")?,
                     text,
@@ -378,7 +378,7 @@ impl PartialChange {
                 let old = required_line(&self.fields, "old", "line-removed")?;
                 let text = required(&self.fields, "text", "line-removed")?;
                 Ok(Change::LineRemoved {
-                    path: required(&self.fields, "path", "line-removed")?,
+                    path: self.scope,
                     old,
                     old_end: removed_end(&self.fields, old, &text)?,
                     new: required_line(&self.fields, "new", "line-removed")?,
@@ -389,7 +389,7 @@ impl PartialChange {
                 let text = required(&self.fields, "text", "line-modified")?;
                 expect_lines(&self.fields, "line-modified", 0, &text)?;
                 Ok(Change::LineModified {
-                    path: required(&self.fields, "path", "line-modified")?,
+                    path: self.scope,
                     old: required_line(&self.fields, "old", "line-modified")?,
                     new: required_line(&self.fields, "new", "line-modified")?,
                     text,
@@ -409,9 +409,9 @@ impl PartialChange {
 
 /// A whole-file replacement, or the old and new SHA-256 hashes of a changed file.
 ///
-/// The hash record has `old` and `new`. A replacement has `contents` instead.
-fn file_changed(fields: BTreeMap<String, String>) -> Result<Change, String> {
-    let path = required(&fields, "path", "file-changed")?;
+/// The file path is the record's scope. The hash record has `old` and `new`.
+/// A replacement has `contents` instead.
+fn file_changed(path: String, fields: BTreeMap<String, String>) -> Result<Change, String> {
     if fields.contains_key("contents") {
         return Ok(Change::FileChanged {
             path,
