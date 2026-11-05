@@ -1,0 +1,69 @@
+//! An empty directory added to or removed from the tree.
+
+use std::path::Path;
+
+use super::{GenericChange, RemovedDirectory};
+
+pub(crate) struct DirectoryAdded {
+    pub(crate) scope: String,
+    pub(crate) path: String,
+}
+
+impl GenericChange for DirectoryAdded {
+    fn kind(&self) -> &'static str {
+        "directory-added"
+    }
+
+    fn scope(&self) -> &str {
+        &self.scope
+    }
+
+    fn sort_key(&self) -> (&str, &str) {
+        (&self.path, "")
+    }
+
+    fn write_details(&self, document: &mut String) {
+        crate::semdif::write_detail(document, "path", &self.path);
+    }
+
+    fn apply(&self, source: &Path) -> Result<(), String> {
+        crate::apply::add_directory(source, &self.path)
+    }
+}
+
+pub(crate) struct DirectoryDeleted {
+    pub(crate) scope: String,
+    pub(crate) path: String,
+}
+
+impl GenericChange for DirectoryDeleted {
+    fn kind(&self) -> &'static str {
+        "directory-deleted"
+    }
+
+    fn scope(&self) -> &str {
+        &self.scope
+    }
+
+    fn sort_key(&self) -> (&str, &str) {
+        (&self.path, "")
+    }
+
+    fn removed_directory(&self) -> Option<&dyn RemovedDirectory> {
+        Some(self)
+    }
+
+    fn write_details(&self, document: &mut String) {
+        crate::semdif::write_detail(document, "path", &self.path);
+    }
+
+    fn apply(&self, source: &Path) -> Result<(), String> {
+        crate::apply::remove_directory(source, &self.path)
+    }
+}
+
+impl RemovedDirectory for DirectoryDeleted {
+    fn directory(&self) -> &str {
+        &self.path
+    }
+}

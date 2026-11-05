@@ -37,10 +37,16 @@ pub(crate) fn directory_changes(
 
     let mut changes: Vec<crate::semdif::Change> = Vec::new();
     for path in removed {
-        changes.push(Box::new(crate::change::DirectoryDeleted { path }));
+        changes.push(Box::new(crate::change::DirectoryDeleted {
+            scope: crate::change::TREE_SCOPE.to_string(),
+            path,
+        }));
     }
     for path in added {
-        changes.push(Box::new(crate::change::DirectoryAdded { path }));
+        changes.push(Box::new(crate::change::DirectoryAdded {
+            scope: crate::change::TREE_SCOPE.to_string(),
+            path,
+        }));
     }
     changes
 }

@@ -216,21 +216,24 @@ impl PartialChange {
 
 type Parser = fn(String, BTreeMap<String, String>) -> Result<Change, String>;
 
-fn parse_file_renamed(_scope: String, fields: BTreeMap<String, String>) -> Result<Change, String> {
+fn parse_file_renamed(scope: String, fields: BTreeMap<String, String>) -> Result<Change, String> {
     Ok(Box::new(crate::change::FileRenamed {
+        scope,
         from: required(&fields, "from", "file-renamed")?,
         to: required(&fields, "to", "file-renamed")?,
     }))
 }
 
-fn parse_file_deleted(_scope: String, fields: BTreeMap<String, String>) -> Result<Change, String> {
+fn parse_file_deleted(scope: String, fields: BTreeMap<String, String>) -> Result<Change, String> {
     Ok(Box::new(crate::change::FileDeleted {
+        scope,
         path: required(&fields, "path", "file-deleted")?,
     }))
 }
 
-fn parse_file_added(_scope: String, fields: BTreeMap<String, String>) -> Result<Change, String> {
+fn parse_file_added(scope: String, fields: BTreeMap<String, String>) -> Result<Change, String> {
     Ok(Box::new(crate::change::FileAdded {
+        scope,
         path: required(&fields, "path", "file-added")?,
         contents: stored_bytes(&fields, "file-added")?,
     }))
@@ -275,7 +278,7 @@ fn parse_identifier_renamed(
     fields: BTreeMap<String, String>,
 ) -> Result<Change, String> {
     Ok(Box::new(crate::change::IdentifierRenamed {
-        path: scope,
+        scope,
         old: required_line(&fields, "old", "identifier-renamed")?,
         new: required_line(&fields, "new", "identifier-renamed")?,
         oldname: required(&fields, "oldname", "identifier-renamed")?,
@@ -284,39 +287,41 @@ fn parse_identifier_renamed(
 }
 
 fn parse_directory_added(
-    _scope: String,
+    scope: String,
     fields: BTreeMap<String, String>,
 ) -> Result<Change, String> {
     Ok(Box::new(crate::change::DirectoryAdded {
+        scope,
         path: required(&fields, "path", "directory-added")?,
     }))
 }
 
 fn parse_directory_deleted(
-    _scope: String,
+    scope: String,
     fields: BTreeMap<String, String>,
 ) -> Result<Change, String> {
     Ok(Box::new(crate::change::DirectoryDeleted {
+        scope,
         path: required(&fields, "path", "directory-deleted")?,
     }))
 }
 
-/// A whole-file replacement, or the old and new SHA-256 hashes of a changed file.
+/// A `file-changed` change: the old and new hashes, or bytes that replace the file.
 ///
-/// The file path is the record's scope. The hash record has `old` and `new`.
-/// A replacement has `contents` instead.
-fn file_changed(path: String, fields: BTreeMap<String, String>) -> Result<Change, String> {
+/// The file path is the change's scope. Hashes are `old` and `new`. A
+/// replacement has `contents` instead. Both are the same change type.
+fn file_changed(scope: String, fields: BTreeMap<String, String>) -> Result<Change, String> {
     if fields.contains_key("contents") {
-        return Ok(Box::new(crate::change::FileChanged {
-            path,
-            contents: stored_bytes(&fields, "file-changed")?,
-        }));
+        return Ok(Box::new(crate::change::FileChanged::contents(
+            scope,
+            stored_bytes(&fields, "file-changed")?,
+        )));
     }
-    Ok(Box::new(crate::change::FileDigest {
-        path,
-        old_hash: required_hash(&fields, "old", "file-changed")?,
-        new_hash: required_hash(&fields, "new", "file-changed")?,
-    }))
+    Ok(Box::new(crate::change::FileChanged::hashes(
+        scope,
+        required_hash(&fields, "old", "file-changed")?,
+        required_hash(&fields, "new", "file-changed")?,
+    )))
 }
 
 /// A SHA-256 hex digest recorded for a changed file.

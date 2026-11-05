@@ -243,7 +243,7 @@ fn modified_line(
 ) -> crate::semdif::Change {
     if let Some(rename) = crate::identifier::identifier_rename(path, old_text, new_text) {
         return Box::new(crate::change::IdentifierRenamed {
-            path: path.to_string(),
+            scope: path.to_string(),
             old,
             new,
             oldname: rename.oldname,

@@ -46,6 +46,7 @@ pub(crate) fn file_changes(
             renamed_from.insert(from_paths[0].as_str());
             renamed_to.insert(to_paths[0].as_str());
             changes.push(Box::new(crate::change::FileRenamed {
+                scope: crate::change::TREE_SCOPE.to_string(),
                 from: from_paths[0].clone(),
                 to: to_paths[0].clone(),
             }));
@@ -53,12 +54,16 @@ pub(crate) fn file_changes(
     }
     for path in left_only {
         if !renamed_from.contains(path.as_str()) {
-            changes.push(Box::new(crate::change::FileDeleted { path: path.clone() }));
+            changes.push(Box::new(crate::change::FileDeleted {
+                scope: crate::change::TREE_SCOPE.to_string(),
+                path: path.clone(),
+            }));
         }
     }
     for path in right_only {
         if !renamed_to.contains(path.as_str()) {
             changes.push(Box::new(crate::change::FileAdded {
+                scope: crate::change::TREE_SCOPE.to_string(),
                 path: path.clone(),
                 contents: read_file(right_root, path)?,
             }));

@@ -155,6 +155,9 @@ fn new_contents(
     let text = String::from_utf8(bytes.to_vec())
         .map_err(|_| format!("cannot edit lines in {}: file is not text", path.display()))?;
     let source_lines = crate::line_changes::split_text(&text);
+    // The only place a LinePlan is built. Each line edit adds the lines it
+    // changes, then `rebuild` produces the new lines of this file. A
+    // whole-file replacement returned above and never reaches here.
     let mut plan = LinePlan::new();
     for change in &lines {
         let Some(line) = change.line_edit() else {
