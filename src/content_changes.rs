@@ -1,20 +1,21 @@
-use std::fs;
 use std::path::Path;
 
 use crate::change::Change;
+use crate::filesystem::FileSystem;
 
 /// Content changes for files present on both sides.
 ///
 /// Each paired path is compared on its own. Only pairs whose contents differ are recorded.
 pub(crate) fn content_changes(
+    fs: &dyn FileSystem,
     sources: &crate::Sources,
     paired_files: &[String],
 ) -> Result<Vec<Box<dyn Change>>, String> {
-    let left_root = crate::source_base(Path::new(&sources.left));
-    let right_root = crate::source_base(Path::new(&sources.right));
+    let left_root = crate::source_base(fs, Path::new(&sources.left));
+    let right_root = crate::source_base(fs, Path::new(&sources.right));
     let mut changes = Vec::new();
     for path in paired_files {
-        changes.extend(content_change(left_root, right_root, path)?);
+        changes.extend(content_change(fs, left_root, right_root, path)?);
     }
     Ok(changes)
 }
@@ -26,12 +27,13 @@ pub(crate) fn content_changes(
 /// because they have no lines to compare. Every changed file also records the
 /// SHA-256 of the old bytes and the new bytes, so apply can check both.
 fn content_change(
+    fs: &dyn FileSystem,
     left_root: &Path,
     right_root: &Path,
     path: &str,
 ) -> Result<Vec<Box<dyn Change>>, String> {
-    let before = read_file(left_root, path)?;
-    let after = read_file(right_root, path)?;
+    let before = read_file(fs, left_root, path)?;
+    let after = read_file(fs, right_root, path)?;
     if before == after {
         return Ok(Vec::new());
     }
@@ -62,7 +64,8 @@ fn content_change(
     Ok(changes)
 }
 
-fn read_file(root: &Path, relative: &str) -> Result<Vec<u8>, String> {
+fn read_file(fs: &dyn FileSystem, root: &Path, relative: &str) -> Result<Vec<u8>, String> {
     let path = root.join(relative);
-    fs::read(&path).map_err(|error| format!("cannot read {}: {error}", path.display()))
+    fs.read(&path)
+        .map_err(|error| format!("cannot read {}: {error}", path.display()))
 }

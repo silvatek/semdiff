@@ -4,6 +4,8 @@ use std::path::Path;
 
 use super::{applied_with_its_file, AddedFile, Change, Content, Digest, Replacement};
 
+use crate::filesystem::FileSystem;
+
 pub(crate) struct FileRenamed {
     pub(crate) scope: String,
     pub(crate) from: String,
@@ -28,8 +30,8 @@ impl Change for FileRenamed {
         crate::semdif::write_detail(document, "to", &self.to);
     }
 
-    fn apply(&self, source: &Path) -> Result<(), String> {
-        crate::apply::rename_file(source, &self.from, &self.to)
+    fn apply(&self, fs: &dyn FileSystem, source: &Path) -> Result<(), String> {
+        crate::apply::rename_file(fs, source, &self.from, &self.to)
     }
 }
 
@@ -55,8 +57,8 @@ impl Change for FileDeleted {
         crate::semdif::write_detail(document, "path", &self.path);
     }
 
-    fn apply(&self, source: &Path) -> Result<(), String> {
-        crate::apply::delete_file(source, &self.path)
+    fn apply(&self, fs: &dyn FileSystem, source: &Path) -> Result<(), String> {
+        crate::apply::delete_file(fs, source, &self.path)
     }
 }
 
@@ -88,8 +90,8 @@ impl Change for FileAdded {
         crate::semdif::write_file_contents(document, &self.contents);
     }
 
-    fn apply(&self, source: &Path) -> Result<(), String> {
-        crate::apply::write_file(source, &self.path, &self.contents)
+    fn apply(&self, fs: &dyn FileSystem, source: &Path) -> Result<(), String> {
+        crate::apply::write_file(fs, source, &self.path, &self.contents)
     }
 }
 
@@ -178,7 +180,7 @@ impl Change for FileChanged {
         }
     }
 
-    fn apply(&self, _source: &Path) -> Result<(), String> {
+    fn apply(&self, _fs: &dyn FileSystem, _source: &Path) -> Result<(), String> {
         applied_with_its_file(self.kind())
     }
 }

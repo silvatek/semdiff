@@ -5,6 +5,7 @@ mod directory_changes;
 mod file_change;
 mod round_trip;
 mod semdif;
+mod tree;
 
 use std::fs;
 use std::process::Command;

@@ -1,48 +1,31 @@
-use super::run;
+use super::tree::Tree;
 
-use std::fs;
+use std::path::Path;
 
 #[test]
 fn records_line_changes_for_a_pair_whose_contents_differ() {
-    let root = std::env::temp_dir().join(format!("semdiff-content-{}", std::process::id()));
-    let left = root.join("left");
-    let right = root.join("right");
-    let edited = root.join("edited");
-    fs::create_dir_all(&left).unwrap();
-    fs::create_dir_all(&right).unwrap();
-    fs::create_dir_all(&edited).unwrap();
+    let tree = Tree::new();
     let same = "unchanged\n";
     let before = "old line\n";
     let after = "He said \"hello\"\nNext line\n";
     let removed = "keep\ngone\n";
     let kept = "keep\n";
     let binary = b"\x00\xff";
-    fs::write(left.join("same.txt"), same).unwrap();
-    fs::write(right.join("same.txt"), same).unwrap();
-    fs::write(edited.join("same.txt"), same).unwrap();
-    fs::write(left.join("note.txt"), before).unwrap();
-    fs::write(right.join("note.txt"), after).unwrap();
-    fs::write(edited.join("note.txt"), before).unwrap();
-    fs::write(left.join("drop.txt"), removed).unwrap();
-    fs::write(right.join("drop.txt"), kept).unwrap();
-    fs::write(edited.join("drop.txt"), removed).unwrap();
-    fs::write(left.join("data.bin"), b"old").unwrap();
-    fs::write(right.join("data.bin"), binary).unwrap();
-    fs::write(edited.join("data.bin"), b"old").unwrap();
+    tree.write("left/same.txt", same);
+    tree.write("right/same.txt", same);
+    tree.write("edited/same.txt", same);
+    tree.write("left/note.txt", before);
+    tree.write("right/note.txt", after);
+    tree.write("edited/note.txt", before);
+    tree.write("left/drop.txt", removed);
+    tree.write("right/drop.txt", kept);
+    tree.write("edited/drop.txt", removed);
+    tree.write("left/data.bin", b"old");
+    tree.write("right/data.bin", binary);
+    tree.write("edited/data.bin", b"old");
 
-    let output_path = root.join("out.yml");
-    let left_arg = left.to_str().unwrap();
-    let right_arg = right.to_str().unwrap();
-    let edited_arg = edited.to_str().unwrap();
-    let output_arg = output_path.to_str().unwrap();
-    let compared = run(&[left_arg, right_arg, output_arg]);
-    let document = fs::read_to_string(&output_path).expect("failed to read semdiff file");
+    let document = tree.compare("left", "right");
 
-    assert!(
-        compared.status.success(),
-        "{}",
-        String::from_utf8_lossy(&compared.stderr)
-    );
     assert!(!document.contains("same.txt"), "{document}");
     assert!(document.contains(
         "  - scope: \"drop.txt\"\n    type: file-changed\n    details:\n      old: \"3282251a9b2bf054b863c3712910d292ff2f0c57d0fb16bb43c50157b20cce56\"\n      new: \"f660a7996deacfbc7560e4240054a8ad82eb02fe25a95064257e07084bcacb85\"\n  - scope: \"drop.txt\"\n    type: line-removed\n    details:\n      old: 2\n      lines: -1\n      new: 2\n      text: \"gone\"\n"
@@ -61,90 +44,45 @@ fn records_line_changes_for_a_pair_whose_contents_differ() {
     assert!(document.contains("type: file-changed"));
     assert!(!document.as_bytes().contains(&0xff));
 
-    let applied = run(&["--apply", output_arg, edited_arg]);
-    assert!(
-        applied.status.success(),
-        "{}",
-        String::from_utf8_lossy(&applied.stderr)
-    );
-    assert_eq!(fs::read(edited.join("same.txt")).unwrap(), same.as_bytes());
-    assert_eq!(fs::read(edited.join("note.txt")).unwrap(), after.as_bytes());
-    assert_eq!(fs::read(edited.join("drop.txt")).unwrap(), kept.as_bytes());
-    assert_eq!(fs::read(edited.join("data.bin")).unwrap(), binary);
-
-    let _ = fs::remove_dir_all(root);
+    tree.apply("edited", &document).unwrap();
+    assert_eq!(tree.read("edited/same.txt"), same.as_bytes());
+    assert_eq!(tree.read("edited/note.txt"), after.as_bytes());
+    assert_eq!(tree.read("edited/drop.txt"), kept.as_bytes());
+    assert_eq!(tree.read("edited/data.bin"), binary);
 }
 
 #[test]
 fn replays_a_modification_a_removal_and_an_addition() {
-    let root = std::env::temp_dir().join(format!("semdiff-lines-{}", std::process::id()));
-    let left = root.join("left");
-    let right = root.join("right");
-    let edited = root.join("edited");
-    fs::create_dir_all(&left).unwrap();
-    fs::create_dir_all(&right).unwrap();
-    fs::create_dir_all(&edited).unwrap();
+    let tree = Tree::new();
     let before = "same\nold\ngone\ntail\n";
     let after = "same\nnew\ntail\nextra\n";
-    fs::write(left.join("edit.txt"), before).unwrap();
-    fs::write(right.join("edit.txt"), after).unwrap();
-    fs::write(edited.join("edit.txt"), before).unwrap();
+    tree.write("left/edit.txt", before);
+    tree.write("right/edit.txt", after);
+    tree.write("edited/edit.txt", before);
 
-    let output_path = root.join("out.yml");
-    let left_arg = left.to_str().unwrap();
-    let right_arg = right.to_str().unwrap();
-    let edited_arg = edited.to_str().unwrap();
-    let output_arg = output_path.to_str().unwrap();
-    let compared = run(&[left_arg, right_arg, output_arg]);
-    let document = fs::read_to_string(&output_path).expect("failed to read semdiff file");
+    let document = tree.compare("left", "right");
 
-    assert!(
-        compared.status.success(),
-        "{}",
-        String::from_utf8_lossy(&compared.stderr)
-    );
     assert_eq!(
         document.split_once("changes:\n").expect("changes list").1,
         "  - scope: \"edit.txt\"\n    type: file-changed\n    details:\n      old: \"38a0e71cdc417583a6f82094581552227c96aaa4dbb897edece3f69a71d31464\"\n      new: \"21f14a6d40bb2fcf5c54176224f1ae9cfb50dad1e6561d62c2cadff3bd848ca2\"\n  - scope: \"edit.txt\"\n    type: line-modified\n    details:\n      old: 2\n      lines: +0\n      new: 2\n      text: \"new\"\n  - scope: \"edit.txt\"\n    type: line-removed\n    details:\n      old: 3\n      lines: -1\n      new: 3\n      text: \"gone\"\n  - scope: \"edit.txt\"\n    type: line-added\n    details:\n      old: 5\n      lines: +1\n      new: 4\n      text: \"extra\"\n"
     );
 
-    let applied = run(&["--apply", output_arg, edited_arg]);
-    assert!(
-        applied.status.success(),
-        "{}",
-        String::from_utf8_lossy(&applied.stderr)
-    );
-    assert_eq!(fs::read(edited.join("edit.txt")).unwrap(), after.as_bytes());
-
-    let _ = fs::remove_dir_all(root);
+    tree.apply("edited", &document).unwrap();
+    assert_eq!(tree.read("edited/edit.txt"), after.as_bytes());
 }
 
 #[test]
 fn merges_adjacent_removed_lines_into_one_span() {
-    let root = std::env::temp_dir().join(format!("semdiff-removed-span-{}", std::process::id()));
-    let left = root.join("left");
-    let right = root.join("right");
-    let edited = root.join("edited");
-    fs::create_dir_all(&left).unwrap();
-    fs::create_dir_all(&right).unwrap();
-    fs::create_dir_all(&edited).unwrap();
-    fs::write(left.join("span.txt"), "keep\none\ntwo\nthree\ntail\n").unwrap();
-    fs::write(right.join("span.txt"), "keep\ntail\n").unwrap();
-    fs::write(edited.join("span.txt"), "keep\none\ntwo\nthree\ntail\n").unwrap();
-    fs::write(left.join("gap.txt"), "keep\none\nmid\ntwo\ntail\n").unwrap();
-    fs::write(right.join("gap.txt"), "keep\nmid\ntail\n").unwrap();
-    fs::write(edited.join("gap.txt"), "keep\none\nmid\ntwo\ntail\n").unwrap();
+    let tree = Tree::new();
+    tree.write("left/span.txt", "keep\none\ntwo\nthree\ntail\n");
+    tree.write("right/span.txt", "keep\ntail\n");
+    tree.write("edited/span.txt", "keep\none\ntwo\nthree\ntail\n");
+    tree.write("left/gap.txt", "keep\none\nmid\ntwo\ntail\n");
+    tree.write("right/gap.txt", "keep\nmid\ntail\n");
+    tree.write("edited/gap.txt", "keep\none\nmid\ntwo\ntail\n");
 
-    let output_path = root.join("out.yml");
-    let output_arg = output_path.to_str().unwrap();
-    let compared = run(&[left.to_str().unwrap(), right.to_str().unwrap(), output_arg]);
-    let document = fs::read_to_string(&output_path).expect("failed to read semdiff file");
+    let document = tree.compare("left", "right");
 
-    assert!(
-        compared.status.success(),
-        "{}",
-        String::from_utf8_lossy(&compared.stderr)
-    );
     assert!(document.contains(
         "  - scope: \"span.txt\"\n    type: line-removed\n    details:\n      old: 2\n      lines: -3\n      new: 2\n      text: \"one\\ntwo\\nthree\"\n"
     ));
@@ -155,65 +93,29 @@ fn merges_adjacent_removed_lines_into_one_span() {
         "  - scope: \"gap.txt\"\n    type: line-removed\n    details:\n      old: 4\n      lines: -1\n      new: 3\n      text: \"two\"\n"
     ));
 
-    let applied = run(&["--apply", output_arg, edited.to_str().unwrap()]);
-    assert!(
-        applied.status.success(),
-        "{}",
-        String::from_utf8_lossy(&applied.stderr)
-    );
-    assert_eq!(fs::read(edited.join("span.txt")).unwrap(), b"keep\ntail\n");
-    assert_eq!(
-        fs::read(edited.join("gap.txt")).unwrap(),
-        b"keep\nmid\ntail\n"
-    );
-
-    let _ = fs::remove_dir_all(root);
+    tree.apply("edited", &document).unwrap();
+    assert_eq!(tree.read("edited/span.txt"), b"keep\ntail\n");
+    assert_eq!(tree.read("edited/gap.txt"), b"keep\nmid\ntail\n");
 }
 
 #[test]
 fn merges_adjacent_additions_and_modifications() {
-    let root = std::env::temp_dir().join(format!("semdiff-added-span-{}", std::process::id()));
-    let left = root.join("left");
-    let right = root.join("right");
-    let edited = root.join("edited");
-    fs::create_dir_all(&left).unwrap();
-    fs::create_dir_all(&right).unwrap();
-    fs::create_dir_all(&edited).unwrap();
-    fs::write(left.join("added.txt"), "keep\ntail\n").unwrap();
-    fs::write(right.join("added.txt"), "keep\none\ntwo\nthree\ntail\n").unwrap();
-    fs::write(edited.join("added.txt"), "keep\ntail\n").unwrap();
-    fs::write(left.join("changed.txt"), "keep\nold1\nold2\ntail\n").unwrap();
-    fs::write(right.join("changed.txt"), "keep\nnew1\nnew2\ntail\n").unwrap();
-    fs::write(edited.join("changed.txt"), "keep\nold1\nold2\ntail\n").unwrap();
-    fs::write(left.join("split-added.txt"), "keep\nmid\ntail\n").unwrap();
-    fs::write(right.join("split-added.txt"), "keep\none\nmid\ntwo\ntail\n").unwrap();
-    fs::write(edited.join("split-added.txt"), "keep\nmid\ntail\n").unwrap();
-    fs::write(
-        left.join("split-changed.txt"),
-        "keep\nold1\nmid\nold2\ntail\n",
-    )
-    .unwrap();
-    fs::write(
-        right.join("split-changed.txt"),
-        "keep\nnew1\nmid\nnew2\ntail\n",
-    )
-    .unwrap();
-    fs::write(
-        edited.join("split-changed.txt"),
-        "keep\nold1\nmid\nold2\ntail\n",
-    )
-    .unwrap();
+    let tree = Tree::new();
+    tree.write("left/added.txt", "keep\ntail\n");
+    tree.write("right/added.txt", "keep\none\ntwo\nthree\ntail\n");
+    tree.write("edited/added.txt", "keep\ntail\n");
+    tree.write("left/changed.txt", "keep\nold1\nold2\ntail\n");
+    tree.write("right/changed.txt", "keep\nnew1\nnew2\ntail\n");
+    tree.write("edited/changed.txt", "keep\nold1\nold2\ntail\n");
+    tree.write("left/split-added.txt", "keep\nmid\ntail\n");
+    tree.write("right/split-added.txt", "keep\none\nmid\ntwo\ntail\n");
+    tree.write("edited/split-added.txt", "keep\nmid\ntail\n");
+    tree.write("left/split-changed.txt", "keep\nold1\nmid\nold2\ntail\n");
+    tree.write("right/split-changed.txt", "keep\nnew1\nmid\nnew2\ntail\n");
+    tree.write("edited/split-changed.txt", "keep\nold1\nmid\nold2\ntail\n");
 
-    let output_path = root.join("out.yml");
-    let output_arg = output_path.to_str().unwrap();
-    let compared = run(&[left.to_str().unwrap(), right.to_str().unwrap(), output_arg]);
-    let document = fs::read_to_string(&output_path).expect("failed to read semdiff file");
+    let document = tree.compare("left", "right");
 
-    assert!(
-        compared.status.success(),
-        "{}",
-        String::from_utf8_lossy(&compared.stderr)
-    );
     assert!(document.contains(
         "  - scope: \"added.txt\"\n    type: line-added\n    details:\n      old: 2\n      lines: +3\n      new: 2\n      text: \"one\\ntwo\\nthree\"\n"
     ));
@@ -233,51 +135,33 @@ fn merges_adjacent_additions_and_modifications() {
         "  - scope: \"split-changed.txt\"\n    type: line-modified\n    details:\n      old: 4\n      lines: +0\n      new: 4\n      text: \"new2\"\n"
     ));
 
-    let applied = run(&["--apply", output_arg, edited.to_str().unwrap()]);
-    assert!(
-        applied.status.success(),
-        "{}",
-        String::from_utf8_lossy(&applied.stderr)
-    );
+    tree.apply("edited", &document).unwrap();
     assert_eq!(
-        fs::read(edited.join("added.txt")).unwrap(),
+        tree.read("edited/added.txt"),
         b"keep\none\ntwo\nthree\ntail\n"
     );
+    assert_eq!(tree.read("edited/changed.txt"), b"keep\nnew1\nnew2\ntail\n");
     assert_eq!(
-        fs::read(edited.join("changed.txt")).unwrap(),
-        b"keep\nnew1\nnew2\ntail\n"
-    );
-    assert_eq!(
-        fs::read(edited.join("split-added.txt")).unwrap(),
+        tree.read("edited/split-added.txt"),
         b"keep\none\nmid\ntwo\ntail\n"
     );
     assert_eq!(
-        fs::read(edited.join("split-changed.txt")).unwrap(),
+        tree.read("edited/split-changed.txt"),
         b"keep\nnew1\nmid\nnew2\ntail\n"
     );
-
-    let _ = fs::remove_dir_all(root);
 }
 
 #[test]
 fn merges_the_adjacent_removals_in_the_rust_sample() {
-    let manifest = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
+    let manifest = Path::new(env!("CARGO_MANIFEST_DIR"));
     let sample = manifest.join("TestCode/rust/main");
-    let root = std::env::temp_dir().join(format!("semdiff-sample-span-{}", std::process::id()));
-    let output_path = root.join("out.yml");
-    fs::create_dir_all(&root).unwrap();
-    let compared = run(&[
+    let document = semdiff::compare_sources(
+        &semdiff::StdFileSystem,
         sample.join("v1").to_str().unwrap(),
         sample.join("v2").to_str().unwrap(),
-        output_path.to_str().unwrap(),
-    ]);
-    let document = fs::read_to_string(&output_path).expect("failed to read semdiff file");
+    )
+    .unwrap();
 
-    assert!(
-        compared.status.success(),
-        "{}",
-        String::from_utf8_lossy(&compared.stderr)
-    );
     assert!(document.contains(
         "  - scope: \"src/main.rs\"\n    type: line-removed\n    details:\n      old: 43\n      lines: -1\n      new: 44\n      text: \"// This single line is deleted.\"\n"
     ));
@@ -322,20 +206,16 @@ fn merges_the_adjacent_removals_in_the_rust_sample() {
     ));
     assert!(!document.contains("old: 50\n"), "{document}");
     assert!(!document.contains("new: 52\n"), "{document}");
-
-    let _ = fs::remove_dir_all(root);
 }
 
 #[test]
 fn rejects_a_line_removal_whose_line_count_is_positive() {
-    let root = std::env::temp_dir().join(format!("semdiff-bad-span-{}", std::process::id()));
-    let edited = root.join("edited");
-    fs::create_dir_all(&edited).unwrap();
-    fs::write(edited.join("note.txt"), "keep\ngone\n").unwrap();
-    let semdif = root.join("bad.yml");
-    fs::write(
-        &semdif,
-        "\
+    let tree = Tree::new();
+    tree.write("edited/note.txt", "keep\ngone\n");
+    let message = tree
+        .apply(
+            "edited",
+            "\
 header:
   semdiff: \"0.1.0\"
   timestamp: \"2020-01-01T00:00:00Z\"
@@ -348,97 +228,59 @@ changes:
       new: 2
       text: \"gone\"
 ",
-    )
-    .unwrap();
+        )
+        .unwrap_err();
 
-    let applied = run(&[
-        "--apply",
-        semdif.to_str().unwrap(),
-        edited.to_str().unwrap(),
-    ]);
-    let stderr = String::from_utf8(applied.stderr).unwrap();
-
-    assert_eq!(applied.status.code(), Some(1));
-    assert!(stderr.contains("invalid lines 2"), "{stderr}");
-    assert_eq!(fs::read(edited.join("note.txt")).unwrap(), b"keep\ngone\n");
-
-    let _ = fs::remove_dir_all(root);
+    assert!(message.contains("invalid lines 2"), "{message}");
+    assert_eq!(tree.read("edited/note.txt"), b"keep\ngone\n");
 }
 
 #[test]
 fn records_a_whole_file_when_only_the_final_newline_differs() {
-    let root = std::env::temp_dir().join(format!("semdiff-newline-{}", std::process::id()));
-    let left = root.join("left");
-    let right = root.join("right");
-    let edited = root.join("edited");
-    fs::create_dir_all(&left).unwrap();
-    fs::create_dir_all(&right).unwrap();
-    fs::create_dir_all(&edited).unwrap();
-    fs::write(left.join("note.txt"), "hello").unwrap();
-    fs::write(right.join("note.txt"), "hello\n").unwrap();
-    fs::write(edited.join("note.txt"), "hello").unwrap();
+    let tree = Tree::new();
+    tree.write("left/note.txt", "hello");
+    tree.write("right/note.txt", "hello\n");
+    tree.write("edited/note.txt", "hello");
 
-    let output_path = root.join("out.yml");
-    let left_arg = left.to_str().unwrap();
-    let right_arg = right.to_str().unwrap();
-    let edited_arg = edited.to_str().unwrap();
-    let output_arg = output_path.to_str().unwrap();
-    let compared = run(&[left_arg, right_arg, output_arg]);
-    let document = fs::read_to_string(&output_path).expect("failed to read semdiff file");
+    let document = tree.compare("left", "right");
 
-    assert!(
-        compared.status.success(),
-        "{}",
-        String::from_utf8_lossy(&compared.stderr)
-    );
     assert!(document.contains(
         "  - scope: \"note.txt\"\n    type: file-changed\n    details:\n      old: \"2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824\"\n      new: \"5891b5b522d5df086d0ff0b110fbd9d21bb4fc7163af34d08286a2e846f6be03\"\n  - scope: \"note.txt\"\n    type: file-changed\n    details:\n      contents: \"hello\\n\"\n"
     ));
 
-    let applied = run(&["--apply", output_arg, edited_arg]);
-    assert!(
-        applied.status.success(),
-        "{}",
-        String::from_utf8_lossy(&applied.stderr)
-    );
-    assert_eq!(fs::read(edited.join("note.txt")).unwrap(), b"hello\n");
-
-    let _ = fs::remove_dir_all(root);
+    tree.apply("edited", &document).unwrap();
+    assert_eq!(tree.read("edited/note.txt"), b"hello\n");
 }
 
 #[test]
 fn rejects_a_file_whose_old_hash_does_not_match() {
-    let (root, edited, document) = changed_note("old");
-    let wrong = "0".repeat(64);
-    let old_hash = "9e9894bfcaf8d63b9898e90db0fe05f5a0388d45bcf60a0a208ad31153072142";
-    let document = document.replacen(old_hash, &wrong, 1);
-    let message = apply_document(&root, &edited, &document);
+    let (tree, document) = changed_note();
+    let document = document.replacen(
+        "9e9894bfcaf8d63b9898e90db0fe05f5a0388d45bcf60a0a208ad31153072142",
+        &"0".repeat(64),
+        1,
+    );
+    let message = tree.apply("edited", &document).unwrap_err();
     assert!(message.contains("do not match the old hash"), "{message}");
-    assert_eq!(fs::read(edited.join("note.txt")).unwrap(), b"old line\n");
-    let _ = fs::remove_dir_all(root);
+    assert_eq!(tree.read("edited/note.txt"), b"old line\n");
 }
 
 #[test]
 fn rejects_a_file_whose_new_hash_does_not_match() {
-    let (root, edited, document) = changed_note("new");
-    let wrong = "f".repeat(64);
-    let new_hash = "f77de5e87174686ce6fca0e3d03893b38dc6020febaa55578a8b20b289b5c362";
-    let document = document.replacen(new_hash, &wrong, 1);
-    let message = apply_document(&root, &edited, &document);
+    let (tree, document) = changed_note();
+    let document = document.replacen(
+        "f77de5e87174686ce6fca0e3d03893b38dc6020febaa55578a8b20b289b5c362",
+        &"f".repeat(64),
+        1,
+    );
+    let message = tree.apply("edited", &document).unwrap_err();
     assert!(message.contains("do not match the new hash"), "{message}");
-    assert_eq!(fs::read(edited.join("note.txt")).unwrap(), b"old line\n");
-    let _ = fs::remove_dir_all(root);
+    assert_eq!(tree.read("edited/note.txt"), b"old line\n");
 }
 
 #[test]
 fn records_an_identifier_rename_when_one_name_changes() {
-    let root = std::env::temp_dir().join(format!("semdiff-rename-{}", std::process::id()));
-    let left = root.join("left");
-    let right = root.join("right");
-    let edited = root.join("edited");
-    fs::create_dir_all(left.join("src")).unwrap();
-    fs::create_dir_all(right.join("src")).unwrap();
-    fs::create_dir_all(edited.join("src")).unwrap();
+    let tree = Tree::new();
     let before = "fn fibonacci(n: u32) {\n    let total = foo + bar;\n}\n";
     let after = "fn fib(n: u32) {\n    let total = fox + baz;\n}\n";
     let twice_before = "foo(foo)\n";
@@ -447,32 +289,21 @@ fn records_an_identifier_rename_when_one_name_changes() {
     let note_after = "hallo\n";
     let python_before = "def fibonacci(n):\n    return n\n";
     let python_after = "def fib(n):\n    return n\n";
-    fs::write(left.join("src/main.rs"), before).unwrap();
-    fs::write(right.join("src/main.rs"), after).unwrap();
-    fs::write(edited.join("src/main.rs"), before).unwrap();
-    fs::write(left.join("src/twice.rs"), twice_before).unwrap();
-    fs::write(right.join("src/twice.rs"), twice_after).unwrap();
-    fs::write(edited.join("src/twice.rs"), twice_before).unwrap();
-    fs::write(left.join("note.txt"), note_before).unwrap();
-    fs::write(right.join("note.txt"), note_after).unwrap();
-    fs::write(edited.join("note.txt"), note_before).unwrap();
-    fs::write(left.join("calc.py"), python_before).unwrap();
-    fs::write(right.join("calc.py"), python_after).unwrap();
-    fs::write(edited.join("calc.py"), python_before).unwrap();
+    tree.write("left/src/main.rs", before);
+    tree.write("right/src/main.rs", after);
+    tree.write("edited/src/main.rs", before);
+    tree.write("left/src/twice.rs", twice_before);
+    tree.write("right/src/twice.rs", twice_after);
+    tree.write("edited/src/twice.rs", twice_before);
+    tree.write("left/note.txt", note_before);
+    tree.write("right/note.txt", note_after);
+    tree.write("edited/note.txt", note_before);
+    tree.write("left/calc.py", python_before);
+    tree.write("right/calc.py", python_after);
+    tree.write("edited/calc.py", python_before);
 
-    let output_path = root.join("out.yml");
-    let compared = run(&[
-        left.to_str().unwrap(),
-        right.to_str().unwrap(),
-        output_path.to_str().unwrap(),
-    ]);
-    let document = fs::read_to_string(&output_path).expect("failed to read semdiff file");
+    let document = tree.compare("left", "right");
 
-    assert!(
-        compared.status.success(),
-        "{}",
-        String::from_utf8_lossy(&compared.stderr)
-    );
     assert!(document.contains(
         "  - scope: \"src/main.rs\"\n    type: identifier-renamed\n    details:\n      old: 1\n      new: 1\n      oldname: \"fibonacci\"\n      newname: \"fib\"\n"
     ));
@@ -490,46 +321,21 @@ fn records_an_identifier_rename_when_one_name_changes() {
         "  - scope: \"calc.py\"\n    type: identifier-renamed\n    details:\n      old: 1\n      new: 1\n      oldname: \"fibonacci\"\n      newname: \"fib\"\n"
     ));
 
-    let applied = run(&[
-        "--apply",
-        output_path.to_str().unwrap(),
-        edited.to_str().unwrap(),
-    ]);
-    assert!(
-        applied.status.success(),
-        "{}",
-        String::from_utf8_lossy(&applied.stderr)
-    );
-    assert_eq!(
-        fs::read(edited.join("src/main.rs")).unwrap(),
-        after.as_bytes()
-    );
-    assert_eq!(
-        fs::read(edited.join("src/twice.rs")).unwrap(),
-        twice_after.as_bytes()
-    );
-    assert_eq!(
-        fs::read(edited.join("note.txt")).unwrap(),
-        note_after.as_bytes()
-    );
-    assert_eq!(
-        fs::read(edited.join("calc.py")).unwrap(),
-        python_after.as_bytes()
-    );
-
-    let _ = fs::remove_dir_all(root);
+    tree.apply("edited", &document).unwrap();
+    assert_eq!(tree.read("edited/src/main.rs"), after.as_bytes());
+    assert_eq!(tree.read("edited/src/twice.rs"), twice_after.as_bytes());
+    assert_eq!(tree.read("edited/note.txt"), note_after.as_bytes());
+    assert_eq!(tree.read("edited/calc.py"), python_after.as_bytes());
 }
 
 #[test]
 fn rejects_a_rename_when_the_old_name_does_not_occur_once() {
-    let root = std::env::temp_dir().join(format!("semdiff-rename-twice-{}", std::process::id()));
-    let edited = root.join("edited");
-    fs::create_dir_all(edited.join("src")).unwrap();
-    fs::write(edited.join("src/main.rs"), "foo(foo)\n").unwrap();
-    let semdif = root.join("bad.yml");
-    fs::write(
-        &semdif,
-        "\
+    let tree = Tree::new();
+    tree.write("edited/src/main.rs", "foo(foo)\n");
+    let message = tree
+        .apply(
+            "edited",
+            "\
 header:
   semdiff: \"0.1.0\"
   timestamp: \"2020-01-01T00:00:00Z\"
@@ -542,57 +348,18 @@ changes:
       oldname: \"foo\"
       newname: \"bar\"
 ",
-    )
-    .unwrap();
+        )
+        .unwrap_err();
 
-    let applied = run(&[
-        "--apply",
-        semdif.to_str().unwrap(),
-        edited.to_str().unwrap(),
-    ]);
-    let stderr = String::from_utf8(applied.stderr).unwrap();
-
-    assert_eq!(applied.status.code(), Some(1));
-    assert!(stderr.contains("does not occur once"), "{stderr}");
-    assert_eq!(fs::read(edited.join("src/main.rs")).unwrap(), b"foo(foo)\n");
-
-    let _ = fs::remove_dir_all(root);
+    assert!(message.contains("does not occur once"), "{message}");
+    assert_eq!(tree.read("edited/src/main.rs"), b"foo(foo)\n");
 }
 
-fn changed_note(name: &str) -> (std::path::PathBuf, std::path::PathBuf, String) {
-    let root = std::env::temp_dir().join(format!("semdiff-hash-{name}-{}", std::process::id()));
-    let left = root.join("left");
-    let right = root.join("right");
-    let edited = root.join("edited");
-    fs::create_dir_all(&left).unwrap();
-    fs::create_dir_all(&right).unwrap();
-    fs::create_dir_all(&edited).unwrap();
-    fs::write(left.join("note.txt"), "old line\n").unwrap();
-    fs::write(right.join("note.txt"), "He said \"hello\"\nNext line\n").unwrap();
-    fs::write(edited.join("note.txt"), "old line\n").unwrap();
-    let output_path = root.join("out.yml");
-    let compared = run(&[
-        left.to_str().unwrap(),
-        right.to_str().unwrap(),
-        output_path.to_str().unwrap(),
-    ]);
-    assert!(
-        compared.status.success(),
-        "{}",
-        String::from_utf8_lossy(&compared.stderr)
-    );
-    let document = fs::read_to_string(&output_path).unwrap();
-    (root, edited, document)
-}
-
-fn apply_document(root: &std::path::Path, edited: &std::path::Path, document: &str) -> String {
-    let semdif = root.join("tampered.yml");
-    fs::write(&semdif, document).unwrap();
-    let applied = run(&[
-        "--apply",
-        semdif.to_str().unwrap(),
-        edited.to_str().unwrap(),
-    ]);
-    assert_eq!(applied.status.code(), Some(1));
-    String::from_utf8(applied.stderr).unwrap()
+fn changed_note() -> (Tree, String) {
+    let tree = Tree::new();
+    tree.write("left/note.txt", "old line\n");
+    tree.write("right/note.txt", "He said \"hello\"\nNext line\n");
+    tree.write("edited/note.txt", "old line\n");
+    let document = tree.compare("left", "right");
+    (tree, document)
 }

@@ -1,6 +1,8 @@
 use std::collections::BTreeMap;
-use std::fs;
+use std::path::Path;
 use std::process::ExitCode;
+
+use crate::filesystem::FileSystem;
 
 use crate::change::Change;
 
@@ -11,17 +13,18 @@ use base64::Engine;
 ///
 /// The file is the command's result. The listing shows which files were eligible for
 /// comparison. A failure to save the file returns exit code 1.
+pub(crate) fn document(changes: &[Box<dyn Change>]) -> String {
+    semdif_document(env!("CARGO_PKG_VERSION"), &utc_timestamp(), changes)
+}
+
 pub(crate) fn write_output(
+    fs: &dyn FileSystem,
     output: &str,
     sources: &crate::Sources,
     differences: &crate::Differences,
 ) -> ExitCode {
-    let document = semdif_document(
-        env!("CARGO_PKG_VERSION"),
-        &utc_timestamp(),
-        &differences.changes,
-    );
-    if let Err(error) = fs::write(output, document) {
+    let document = document(&differences.changes);
+    if let Err(error) = fs.write(Path::new(output), document.as_bytes()) {
         eprintln!("cannot write {output}: {error}");
         return ExitCode::from(1);
     }
