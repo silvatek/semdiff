@@ -425,11 +425,11 @@ impl IdentifierRenamed {
     }
 }
 
-/// The file and old line named by an identifier-renamed scope.
+/// The file and old line named by a span scope.
 ///
 /// The scope is `path:line`. The line is a 1-based line in the old file.
 /// The last `:` separates them, so a colon in the path stays in the path.
-pub(crate) fn parse_identifier_scope(scope: &str) -> Result<(&str, usize), String> {
+pub(crate) fn parse_span_scope(scope: &str) -> Result<(&str, usize), String> {
     let Some((path, line)) = scope.rsplit_once(':') else {
         return Err(identifier_scope_error(scope));
     };
@@ -521,21 +521,21 @@ impl LineEdit for IdentifierRenamed {
 
 #[cfg(test)]
 mod tests {
-    use super::parse_identifier_scope;
+    use super::parse_span_scope;
 
     #[test]
     fn an_identifier_scope_names_the_file_and_the_old_line() {
         assert_eq!(
-            parse_identifier_scope("src/main.rs:37").unwrap(),
+            parse_span_scope("src/main.rs:37").unwrap(),
             ("src/main.rs", 37)
         );
         assert_eq!(
-            parse_identifier_scope("weird:name.rs:4").unwrap(),
+            parse_span_scope("weird:name.rs:4").unwrap(),
             ("weird:name.rs", 4)
         );
-        assert!(parse_identifier_scope("src/main.rs").is_err());
-        assert!(parse_identifier_scope("src/main.rs:0").is_err());
-        assert!(parse_identifier_scope("src/main.rs:37-46").is_err());
-        assert!(parse_identifier_scope(":1").is_err());
+        assert!(parse_span_scope("src/main.rs").is_err());
+        assert!(parse_span_scope("src/main.rs:0").is_err());
+        assert!(parse_span_scope("src/main.rs:37-46").is_err());
+        assert!(parse_span_scope(":1").is_err());
     }
 }

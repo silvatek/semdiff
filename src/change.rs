@@ -14,7 +14,7 @@ mod line;
 pub(crate) use directory::{DirectoryAdded, DirectoryDeleted};
 pub(crate) use file::{FileAdded, FileChanged, FileDeleted, FileRenamed};
 pub(crate) use line::{
-    merge_adjacent, parse_identifier_scope, IdentifierRenamed, LineAdded, LineModified, LineRemoved,
+    merge_adjacent, parse_span_scope, IdentifierRenamed, LineAdded, LineModified, LineRemoved,
 };
 
 use std::collections::{BTreeMap, BTreeSet};
