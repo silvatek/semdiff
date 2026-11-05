@@ -8,11 +8,22 @@ use std::path::Path;
 
 #[test]
 fn applying_the_rust_sample_makes_a_copy_of_v1_match_v2() {
+    assert_sample_round_trip("TestCode/rust/main", "semdiff-apply-rust");
+}
+
+#[test]
+fn applying_the_python_sample_makes_a_copy_of_v1_match_v2() {
+    assert_sample_round_trip("TestCode/python/main", "semdiff-apply-python");
+}
+
+/// Compares a sample's v1 with v2, applies that semdif to a copy of v1, and
+/// checks the copy matches v2.
+fn assert_sample_round_trip(relative_sample: &str, tmp_prefix: &str) {
     let manifest = Path::new(env!("CARGO_MANIFEST_DIR"));
-    let sample = manifest.join("TestCode/rust/main");
+    let sample = manifest.join(relative_sample);
     let v1_source = sample.join("v1");
     let v2_source = sample.join("v2");
-    let tmp_root = std::env::temp_dir().join(format!("semdiff-apply-rust-{}", std::process::id()));
+    let tmp_root = std::env::temp_dir().join(format!("{tmp_prefix}-{}", std::process::id()));
     let target_source = tmp_root.join("v1");
     copy_tree(&v1_source, &target_source);
     let semdif_file = tmp_root.join("diff.yml");
