@@ -68,3 +68,10 @@ trailing = 1
 
 # A blank line is added below in v2.
 
+# A function is added below in v2.
+def shifted(n):
+    return n + 1
+
+# A class is added below in v2.
+class Step:
+    by = 1

@@ -1,18 +1,23 @@
 //! Languages semdiff can read.
 //!
-//! A changed line asks which characters form a name. A line whose first
-//! non-whitespace characters are the line comment is a full-line comment.
-//! Block comments and block edges are recorded for a later step.
+//! A dialect is configuration. It names the files it covers, how comments and
+//! blocks are written, which characters form a name, and which keywords open
+//! a named block. `family` selects the reader: brace-delimited languages share
+//! the C-family reader, and Python has its own.
 
 #![cfg_attr(not(test), allow(dead_code))]
 
 /// A language semdiff knows how to read.
 ///
-/// Extensions select its files. The identifier characters say which runs of
-/// text are names. The line comment flags a full-line comment. Block comments
-/// and block edges are recorded so a later comparison can see the rest.
+/// The fields are the whole dialect. Extensions select its files. The
+/// identifier characters say which runs of text are names. The line comment
+/// marks a full-line comment. Block comments and block edges describe the
+/// rest of a block. The named-block keywords say which added runs are a new
+/// function, method, or structure, and which shared category each keyword is.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) struct Dialect {
+    /// Which reader interprets this dialect.
+    pub family: Family,
     /// Extensions that identify this dialect, including the leading dot.
     pub extensions: &'static [&'static str],
     /// Characters that open a comment running to the end of the line.
@@ -25,6 +30,17 @@ pub(crate) struct Dialect {
     pub block_end: BlockEdge,
     /// Characters that can appear in an identifier.
     pub identifier_characters: IdentifierCharacters,
+    /// Words that may precede the keyword opening a named block.
+    ///
+    /// `pub async fn` has the prefixes `pub` and `async`. A word that is not
+    /// in this list stops the search, so `pub(crate) fn` is not recognized.
+    pub block_prefixes: &'static [&'static str],
+    /// Keywords that open a named block, each with its category.
+    ///
+    /// The identifier after the keyword is the block's name. An empty list
+    /// means this dialect does not record named blocks. A category that is
+    /// absent here is one this dialect does not support.
+    pub named_block_keywords: &'static [NamedBlockKeyword],
 }
 
 /// ASCII characters that can appear in an identifier.
@@ -41,6 +57,18 @@ pub(crate) struct IdentifierCharacters {
     pub continue_with: &'static str,
 }
 
+/// Which reader interprets a dialect.
+///
+/// Brace-delimited languages share one reader. Python is read on its own,
+/// because its blocks are indentation rather than braces.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Family {
+    /// C, C++, Rust, Java, JavaScript, and the other brace-delimited languages.
+    CFamily,
+    /// Python.
+    Python,
+}
+
 const IDENTIFIER_START: &str = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz_";
 const IDENTIFIER_CONTINUE: &str = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz_0123456789";
 
@@ -51,6 +79,85 @@ pub(crate) struct BlockComment {
     pub start: &'static str,
     /// Characters that close the comment.
     pub end: &'static str,
+}
+
+/// A kind of named block, shared by every dialect.
+///
+/// A dialect maps its keywords onto this list and leaves out the categories
+/// it does not have. `procedure` is a callable that is not a function.
+/// `method` is a function or procedure that belongs to a type. `interface`
+/// covers a Rust trait and a language that spells the same idea `interface`.
+/// `implementation` is a block that supplies a type's methods, such as Rust
+/// `impl`. `enumeration` and `union` are type blocks that are not structures.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum BlockCategory {
+    /// A callable that does not return a value.
+    Procedure,
+    /// A callable that returns a value and is not attached to a type.
+    Function,
+    /// A function or procedure that belongs to a type.
+    Method,
+    /// A product of named fields, such as a Rust struct.
+    Structure,
+    /// A type that combines data and the operations on it.
+    Class,
+    /// A type that is one of a fixed set of variants.
+    Enumeration,
+    /// A type whose fields share one storage location.
+    Union,
+    /// A set of operations a type can promise to provide.
+    Interface,
+    /// A block that supplies the operations of a type.
+    Implementation,
+}
+
+/// Every category a dialect may assign to a named block.
+pub(crate) const BLOCK_CATEGORIES: &[BlockCategory] = &[
+    BlockCategory::Procedure,
+    BlockCategory::Function,
+    BlockCategory::Method,
+    BlockCategory::Structure,
+    BlockCategory::Class,
+    BlockCategory::Enumeration,
+    BlockCategory::Union,
+    BlockCategory::Interface,
+    BlockCategory::Implementation,
+];
+
+impl BlockCategory {
+    /// The semdif value for this category.
+    pub(crate) fn as_str(self) -> &'static str {
+        match self {
+            Self::Procedure => "procedure",
+            Self::Function => "function",
+            Self::Method => "method",
+            Self::Structure => "structure",
+            Self::Class => "class",
+            Self::Enumeration => "enumeration",
+            Self::Union => "union",
+            Self::Interface => "interface",
+            Self::Implementation => "implementation",
+        }
+    }
+
+    /// The category named by a semdif value.
+    ///
+    /// An unknown word is rejected so a record cannot invent a category.
+    pub(crate) fn parse(text: &str) -> Option<Self> {
+        BLOCK_CATEGORIES
+            .iter()
+            .copied()
+            .find(|category| category.as_str() == text)
+    }
+}
+
+/// A keyword that opens a named block, and the category that keyword means.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct NamedBlockKeyword {
+    /// The word in source, such as `fn` or `struct`.
+    pub keyword: &'static str,
+    /// The shared category that keyword selects.
+    pub category: BlockCategory,
 }
 
 /// One edge of a block: where it starts, or where it ends.
@@ -69,9 +176,16 @@ pub(crate) enum BlockEdge {
 ///
 /// Rust files use `.rs`. A line comment starts with `//`, which also covers
 /// the doc forms `///` and `//!`. A block comment runs from `/*` to `*/`.
-/// A block of code starts with `{` and ends with `}`. An identifier starts
-/// with a letter or `_` and continues with letters, digits, or `_`.
+/// Rust is a C-family language. A block of code starts with `{` and ends with
+/// `}`. An identifier starts with a letter or `_` and continues with letters,
+/// digits, or `_`. A named block is opened by `fn`, `struct`, `enum`, `union`,
+/// `trait`, or `impl`,
+/// optionally after `pub`, `async`, `unsafe`, or `const`. Those keywords are
+/// function, structure, enumeration, union, interface, and implementation.
+/// A method uses `fn` as well, and needs the enclosing type, so a `fn` read
+/// from the added lines alone is a function.
 pub(crate) static RUST: Dialect = Dialect {
+    family: Family::CFamily,
     extensions: &[".rs"],
     line_comment: "//",
     block_comment: Some(BlockComment {
@@ -84,16 +198,45 @@ pub(crate) static RUST: Dialect = Dialect {
         start: IDENTIFIER_START,
         continue_with: IDENTIFIER_CONTINUE,
     },
+    block_prefixes: &["pub", "async", "unsafe", "const"],
+    named_block_keywords: &[
+        NamedBlockKeyword {
+            keyword: "fn",
+            category: BlockCategory::Function,
+        },
+        NamedBlockKeyword {
+            keyword: "struct",
+            category: BlockCategory::Structure,
+        },
+        NamedBlockKeyword {
+            keyword: "enum",
+            category: BlockCategory::Enumeration,
+        },
+        NamedBlockKeyword {
+            keyword: "union",
+            category: BlockCategory::Union,
+        },
+        NamedBlockKeyword {
+            keyword: "trait",
+            category: BlockCategory::Interface,
+        },
+        NamedBlockKeyword {
+            keyword: "impl",
+            category: BlockCategory::Implementation,
+        },
+    ],
 };
 
 /// The Python dialect.
 ///
 /// Python files use `.py`. A comment starts with `#` and ends at the end of
-/// the line. Python does not denote a multi-line comment: a triple-quoted
-/// string is a string. A block starts by indenting and ends when the
-/// indentation returns. An identifier starts with a letter or `_` and
-/// continues with letters, digits, or `_`.
+/// the line. Python is read by its own reader. It does not denote a multi-line
+/// comment: a triple-quoted string is a string. A block starts by indenting
+/// and ends when the indentation returns. An identifier starts with a letter
+/// or `_` and continues with letters, digits, or `_`. A named block is opened
+/// by `def` or `class`, which are a function and a class.
 pub(crate) static PYTHON: Dialect = Dialect {
+    family: Family::Python,
     extensions: &[".py"],
     line_comment: "#",
     block_comment: None,
@@ -103,6 +246,17 @@ pub(crate) static PYTHON: Dialect = Dialect {
         start: IDENTIFIER_START,
         continue_with: IDENTIFIER_CONTINUE,
     },
+    block_prefixes: &[],
+    named_block_keywords: &[
+        NamedBlockKeyword {
+            keyword: "def",
+            category: BlockCategory::Function,
+        },
+        NamedBlockKeyword {
+            keyword: "class",
+            category: BlockCategory::Class,
+        },
+    ],
 };
 
 /// Every dialect semdiff knows.
@@ -121,102 +275,11 @@ pub(crate) fn for_path(path: &str) -> Option<&'static Dialect> {
     })
 }
 
-/// Whether `line` introduces this dialect's line comment before any other text.
-///
-/// Leading whitespace is skipped. The line-comment marker then has to be the
-/// next characters. A block comment is not recognized here.
-pub(crate) fn introduces_line_comment(dialect: &Dialect, line: &str) -> bool {
-    line.trim_start().starts_with(dialect.line_comment)
-}
-
-/// Whether `text` is a full-line comment for the file at `path`.
-///
-/// Every line has to introduce the dialect's line comment. A file with no
-/// dialect is not a comment. An empty line is not one either.
-pub(crate) fn full_line_comment(path: &str, text: &str) -> bool {
-    let Some(dialect) = for_path(path) else {
-        return false;
-    };
-    if text.is_empty() {
-        return false;
-    }
-    text.split('\n')
-        .all(|line| introduces_line_comment(dialect, line))
-}
-
-/// Whether `text` is a blank line for the file at `path`.
-///
-/// A blank line is empty or holds only ASCII spaces and tabs. Rust and Python
-/// both ignore that line, so editing one has no functional effect. A file with
-/// no dialect is not blank for this purpose. A comment, a carriage return, or
-/// any other character keeps the line unflagged.
-pub(crate) fn blank_line(path: &str, text: &str) -> bool {
-    if for_path(path).is_none() {
-        return false;
-    }
-    text.split('\n').all(only_ascii_blank)
-}
-
-/// Whether `line` contains nothing but ASCII spaces and tabs.
-fn only_ascii_blank(line: &str) -> bool {
-    line.chars().all(is_ascii_blank)
-}
-
-/// Whether changing `old_line` into `new_line` touches only an insignificant margin.
-///
-/// The lines have to match once ASCII spaces and tabs are removed from both
-/// ends. A brace dialect treats that indentation as formatting. An indentation
-/// dialect treats a leading change as a block boundary, unless both lines are
-/// blank or both are full-line comments. Trailing space is insignificant in
-/// either dialect. A file with no dialect is not whitespace. A carriage return
-/// or any other character stays part of the line.
-pub(crate) fn margin_whitespace(path: &str, old_line: &str, new_line: &str) -> bool {
-    let Some(dialect) = for_path(path) else {
-        return false;
-    };
-    if strip_ascii_blank(old_line) != strip_ascii_blank(new_line) {
-        return false;
-    }
-    if leading_ascii_blank(old_line) == leading_ascii_blank(new_line) {
-        return true;
-    }
-    if indent_is_formatting(dialect) {
-        return true;
-    }
-    if only_ascii_blank(old_line) && only_ascii_blank(new_line) {
-        return true;
-    }
-    introduces_line_comment(dialect, old_line) && introduces_line_comment(dialect, new_line)
-}
-
-/// Whether a block is delimited by tokens, so indentation is formatting.
-fn indent_is_formatting(dialect: &Dialect) -> bool {
-    matches!(
-        (dialect.block_start, dialect.block_end),
-        (BlockEdge::Token(_), BlockEdge::Token(_))
-    )
-}
-
-fn is_ascii_blank(character: char) -> bool {
-    character == ' ' || character == '\t'
-}
-
-/// `line` without ASCII spaces and tabs at either end.
-fn strip_ascii_blank(line: &str) -> &str {
-    line.trim_matches(is_ascii_blank)
-}
-
-/// The ASCII spaces and tabs at the start of `line`.
-fn leading_ascii_blank(line: &str) -> &str {
-    let rest = line.trim_start_matches(is_ascii_blank);
-    &line[..line.len() - rest.len()]
-}
-
 #[cfg(test)]
 mod tests {
     use super::{
-        blank_line, for_path, full_line_comment, introduces_line_comment, margin_whitespace,
-        BlockEdge, IdentifierCharacters, PYTHON, RUST,
+        for_path, BlockCategory, BlockEdge, Family, IdentifierCharacters, NamedBlockKeyword,
+        BLOCK_CATEGORIES, PYTHON, RUST,
     };
 
     fn ascii_identifiers() -> IdentifierCharacters {
@@ -228,6 +291,7 @@ mod tests {
 
     #[test]
     fn rust_uses_slashes_and_braces() {
+        assert_eq!(RUST.family, Family::CFamily);
         assert_eq!(RUST.extensions, [".rs"]);
         assert_eq!(RUST.line_comment, "//");
         let comment = RUST.block_comment.expect("Rust denotes a block comment");
@@ -236,16 +300,88 @@ mod tests {
         assert_eq!(RUST.block_start, BlockEdge::Token("{"));
         assert_eq!(RUST.block_end, BlockEdge::Token("}"));
         assert_eq!(RUST.identifier_characters, ascii_identifiers());
+        assert_eq!(RUST.block_prefixes, ["pub", "async", "unsafe", "const"]);
+        assert_eq!(
+            RUST.named_block_keywords,
+            [
+                NamedBlockKeyword {
+                    keyword: "fn",
+                    category: BlockCategory::Function,
+                },
+                NamedBlockKeyword {
+                    keyword: "struct",
+                    category: BlockCategory::Structure,
+                },
+                NamedBlockKeyword {
+                    keyword: "enum",
+                    category: BlockCategory::Enumeration,
+                },
+                NamedBlockKeyword {
+                    keyword: "union",
+                    category: BlockCategory::Union,
+                },
+                NamedBlockKeyword {
+                    keyword: "trait",
+                    category: BlockCategory::Interface,
+                },
+                NamedBlockKeyword {
+                    keyword: "impl",
+                    category: BlockCategory::Implementation,
+                },
+            ]
+        );
     }
 
     #[test]
     fn python_uses_hash_and_indentation() {
+        assert_eq!(PYTHON.family, Family::Python);
         assert_eq!(PYTHON.extensions, [".py"]);
         assert_eq!(PYTHON.line_comment, "#");
         assert_eq!(PYTHON.block_comment, None);
         assert_eq!(PYTHON.block_start, BlockEdge::Indentation);
         assert_eq!(PYTHON.block_end, BlockEdge::Indentation);
         assert_eq!(PYTHON.identifier_characters, ascii_identifiers());
+        assert_eq!(PYTHON.block_prefixes, [] as [&str; 0]);
+        assert_eq!(
+            PYTHON.named_block_keywords,
+            [
+                NamedBlockKeyword {
+                    keyword: "def",
+                    category: BlockCategory::Function,
+                },
+                NamedBlockKeyword {
+                    keyword: "class",
+                    category: BlockCategory::Class,
+                },
+            ]
+        );
+    }
+
+    #[test]
+    fn every_dialect_shares_one_category_list() {
+        let names: Vec<_> = BLOCK_CATEGORIES
+            .iter()
+            .map(|category| category.as_str())
+            .collect();
+        assert_eq!(
+            names,
+            [
+                "procedure",
+                "function",
+                "method",
+                "structure",
+                "class",
+                "enumeration",
+                "union",
+                "interface",
+                "implementation",
+            ]
+        );
+        for category in BLOCK_CATEGORIES {
+            assert_eq!(BlockCategory::parse(category.as_str()), Some(*category));
+        }
+        assert_eq!(BlockCategory::parse("widget"), None);
+        assert_eq!(BlockCategory::parse("fn"), None);
     }
 
     #[test]
@@ -254,101 +390,5 @@ mod tests {
         assert_eq!(for_path("pkg/__init__.py"), Some(&PYTHON));
         assert_eq!(for_path("notes.txt"), None);
         assert_eq!(for_path("main.rs.bak"), None);
-    }
-
-    #[test]
-    fn a_line_comment_is_the_first_non_whitespace() {
-        assert!(introduces_line_comment(&RUST, "// note"));
-        assert!(introduces_line_comment(&RUST, "    /// doc"));
-        assert!(introduces_line_comment(&RUST, "//! inner"));
-        assert!(!introduces_line_comment(&RUST, "let x = 1; // note"));
-        assert!(!introduces_line_comment(&RUST, "/* block */"));
-        assert!(!introduces_line_comment(&RUST, "#[allow(dead_code)]"));
-        assert!(!introduces_line_comment(&RUST, ""));
-        assert!(!introduces_line_comment(&RUST, "    "));
-        assert!(introduces_line_comment(&PYTHON, "# note"));
-        assert!(introduces_line_comment(&PYTHON, "  # note"));
-        assert!(!introduces_line_comment(&PYTHON, "x = 1  # note"));
-        assert!(!introduces_line_comment(&PYTHON, "// not python"));
-    }
-
-    #[test]
-    fn a_full_line_comment_needs_a_known_dialect() {
-        assert!(full_line_comment("src/main.rs", "// note"));
-        assert!(full_line_comment("src/main.rs", "// one\n// two"));
-        assert!(!full_line_comment("src/main.rs", "// one\nlet x = 1;"));
-        assert!(!full_line_comment("src/main.rs", "/* note */"));
-        assert!(full_line_comment("calc.py", "# note"));
-        assert!(!full_line_comment("notes.txt", "// note"));
-        assert!(!full_line_comment("main.rs.bak", "// note"));
-        assert!(!full_line_comment("src/main.rs", ""));
-    }
-
-    #[test]
-    fn a_blank_line_needs_a_known_dialect() {
-        assert!(blank_line("src/main.rs", ""));
-        assert!(blank_line("src/main.rs", " "));
-        assert!(blank_line("src/main.rs", "\t"));
-        assert!(blank_line("src/main.rs", " \t "));
-        assert!(blank_line("calc.py", ""));
-        assert!(blank_line("calc.py", "  "));
-        assert!(!blank_line("src/main.rs", "\r"));
-        assert!(!blank_line("src/main.rs", " \r"));
-        assert!(!blank_line("src/main.rs", "\u{00a0}"));
-        assert!(!blank_line("src/main.rs", "let x = 1;"));
-        assert!(!blank_line("src/main.rs", "    let x = 1;"));
-        assert!(!blank_line("calc.py", "    x = 1"));
-        assert!(!blank_line("src/main.rs", "// note"));
-        assert!(!blank_line("src/main.rs", "  // note"));
-        assert!(!blank_line("calc.py", "# note"));
-        assert!(!blank_line("notes.txt", ""));
-        assert!(!blank_line("notes.txt", " "));
-        assert!(!blank_line("main.rs.bak", " "));
-    }
-
-    #[test]
-    fn margin_whitespace_follows_the_block_edge() {
-        assert!(margin_whitespace(
-            "src/main.rs",
-            "let value = 1;",
-            "    let value = 1;"
-        ));
-        assert!(margin_whitespace(
-            "src/main.rs",
-            "let value = 1;",
-            "let value = 1; "
-        ));
-        assert!(margin_whitespace(
-            "src/main.rs",
-            "let value = 1;",
-            "\tlet value = 1;\t"
-        ));
-        assert!(margin_whitespace("src/main.rs", "// note", "    // note"));
-        assert!(margin_whitespace("calc.py", "x = 1", "x = 1 "));
-        assert!(margin_whitespace("calc.py", "x = 1", "x = 1\t"));
-        assert!(margin_whitespace("calc.py", "# note", "  # note"));
-        assert!(margin_whitespace("calc.py", "# note", "# note "));
-        assert!(margin_whitespace("src/main.rs", "    ", "\t"));
-        assert!(margin_whitespace("calc.py", "", "  "));
-        assert!(!margin_whitespace("calc.py", "x = 1", "    x = 1"));
-        assert!(!margin_whitespace("calc.py", "x = 1", " x = 1 "));
-        assert!(!margin_whitespace(
-            "src/main.rs",
-            "let value = 1;",
-            "let  value = 1;"
-        ));
-        assert!(!margin_whitespace(
-            "src/main.rs",
-            "let value = 1;",
-            "let value = 1;\r"
-        ));
-        assert!(!margin_whitespace("src/main.rs", "    ", "let value = 1;"));
-        assert!(!margin_whitespace("notes.txt", "hello", "hello "));
-        assert!(!margin_whitespace("notes.txt", "hello", "  hello"));
-        assert!(!margin_whitespace(
-            "main.rs.bak",
-            "let value = 1;",
-            "  let value = 1;"
-        ));
     }
 }

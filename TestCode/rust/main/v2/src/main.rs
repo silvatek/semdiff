@@ -70,3 +70,12 @@ fn marked() {
 
 // A blank line is added below in v2.
 
+// A function is added below in v2.
+fn shifted(n: u32) -> u64 {
+    n + 1
+}
+
+// A structure is added below in v2.
+struct Step {
+    by: u32,
+}
