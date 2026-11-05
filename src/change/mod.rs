@@ -142,8 +142,9 @@ pub(crate) trait LineEdit {
         false
     }
 
-    /// The first old line and the first new line, when this edit can merge.
-    fn span(&self) -> Option<LineSpan> {
+    /// The first old line and the first new line, when this edit can be joined
+    /// to the one before it.
+    fn start(&self) -> Option<LineStart> {
         None
     }
 
@@ -163,13 +164,14 @@ pub(crate) trait AddedFile {
     fn path(&self) -> &str;
 }
 
-/// The first old line and the first new line of a line edit.
+/// The first old line and the first new line of a line edit that can be joined
+/// to the one before it.
 ///
 /// The length on each side is known by the change being extended. A removal
 /// has a new length of zero, so `new` is the line that follows it. An addition
 /// has an old length of zero, so `old` is the line it is inserted before.
 #[derive(Clone, Copy)]
-pub(crate) struct LineSpan {
+pub(crate) struct LineStart {
     pub(super) old: usize,
     pub(super) new: usize,
 }

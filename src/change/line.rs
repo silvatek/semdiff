@@ -2,7 +2,7 @@
 
 use std::path::Path;
 
-use super::{applied_with_its_file, Change, Content, LineEdit, LinePlan, LineSpan};
+use super::{applied_with_its_file, Change, Content, LineEdit, LinePlan, LineStart};
 
 /// The line numbers and text shared by a line addition, removal, and modification.
 ///
@@ -22,10 +22,10 @@ fn line_count(text: &str) -> usize {
 
 /// Joins `next` onto a line edit when it continues the same kind and scope.
 ///
-/// `old_len` and `new_len` are the span already stored. The next change
-/// continues the run when each side's start plus that length equals the next
-/// start.
-fn extend_span(
+/// `old_len` and `new_len` are how far this edit already reaches. The next
+/// change continues it when each side's first line plus that length equals
+/// the next change's first line.
+fn extend_following(
     kind: &str,
     scope: &str,
     body: &mut LineBody,
@@ -39,7 +39,7 @@ fn extend_span(
     let Some(line) = next.line_edit() else {
         return false;
     };
-    let Some(following) = line.span() else {
+    let Some(following) = line.start() else {
         return false;
     };
     let Some(next_old) = body.old.checked_add(old_len) else {
@@ -76,8 +76,8 @@ fn format_lines(lines: isize) -> String {
     }
 }
 
-fn span(body: &LineBody) -> LineSpan {
-    LineSpan {
+fn line_start(body: &LineBody) -> LineStart {
+    LineStart {
         old: body.old,
         new: body.new,
     }
@@ -164,8 +164,8 @@ impl LineEdit for LineAdded {
         (self.body.old, self.body.new)
     }
 
-    fn span(&self) -> Option<LineSpan> {
-        Some(span(&self.body))
+    fn start(&self) -> Option<LineStart> {
+        Some(line_start(&self.body))
     }
 
     fn text(&self) -> Option<&str> {
@@ -174,7 +174,7 @@ impl LineEdit for LineAdded {
 
     fn extend(&mut self, next: &dyn Change) -> bool {
         let new_len = line_count(&self.body.text);
-        extend_span(self.kind(), &self.scope, &mut self.body, 0, new_len, next)
+        extend_following(self.kind(), &self.scope, &mut self.body, 0, new_len, next)
     }
 
     fn rebuild(
@@ -243,8 +243,8 @@ impl LineEdit for LineRemoved {
         (self.body.old, self.body.new)
     }
 
-    fn span(&self) -> Option<LineSpan> {
-        Some(span(&self.body))
+    fn start(&self) -> Option<LineStart> {
+        Some(line_start(&self.body))
     }
 
     fn text(&self) -> Option<&str> {
@@ -253,7 +253,7 @@ impl LineEdit for LineRemoved {
 
     fn extend(&mut self, next: &dyn Change) -> bool {
         let old_len = line_count(&self.body.text);
-        extend_span(self.kind(), &self.scope, &mut self.body, old_len, 0, next)
+        extend_following(self.kind(), &self.scope, &mut self.body, old_len, 0, next)
     }
 
     fn rebuild(
@@ -327,8 +327,8 @@ impl LineEdit for LineModified {
         (self.body.old, self.body.new)
     }
 
-    fn span(&self) -> Option<LineSpan> {
-        Some(span(&self.body))
+    fn start(&self) -> Option<LineStart> {
+        Some(line_start(&self.body))
     }
 
     fn text(&self) -> Option<&str> {
@@ -337,7 +337,7 @@ impl LineEdit for LineModified {
 
     fn extend(&mut self, next: &dyn Change) -> bool {
         let count = line_count(&self.body.text);
-        extend_span(self.kind(), &self.scope, &mut self.body, count, count, next)
+        extend_following(self.kind(), &self.scope, &mut self.body, count, count, next)
     }
 
     fn rebuild(
