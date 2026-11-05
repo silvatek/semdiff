@@ -1,13 +1,14 @@
 //! One record in a semdif file.
 //!
-//! Each kind of change is its own type and implements [`Record`]. The drivers
-//! that write, apply, sort, and merge ask the record instead of matching on
-//! every kind. A new kind registers a parser and implements [`Record`]; those
-//! drivers stay as they are.
+//! Each kind of change is its own type and implements [`Record`]. That trait
+//! is only what every kind has: a name, a scope, the details it writes, and
+//! how it is replayed on its own. A kind that also edits lines, replaces a
+//! file, or removes a directory implements that narrower trait and reveals it
+//! from [`Record`]. A line modification has no path attribute. Its file is
+//! its scope.
 //!
 //! [`Record::apply`] is required, so a kind that does not say how to replay
-//! itself does not compile. [`Record::extend`] leaves the record separate
-//! unless that kind joins an adjacent one.
+//! itself does not compile.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::Path;
@@ -18,38 +19,26 @@ use std::path::Path;
 /// type supplies the fields and the operations that differ.
 pub(crate) type Change = Box<dyn Record>;
 
-/// What every change kind can be asked.
+/// What every change kind has.
 ///
-/// Methods that only some kinds take part in have a default. A line removal
-/// overrides [`Record::extend`]. A directory addition does not, and stays its
-/// own record.
+/// A kind reveals the narrower traits it implements. The defaults say that
+/// this kind does not.
 pub(crate) trait Record {
     /// The semdif type name, such as `line-removed`.
     fn kind(&self) -> &'static str;
-
-    /// The path this record is about.
-    ///
-    /// A rename reports the path it moves from. Sorting uses this path unless
-    /// [`Record::sort_key`] says otherwise.
-    fn path(&self) -> &str;
 
     /// The scope written on the record.
     ///
     /// A content edit is scoped to its file. A change to the tree is scoped
     /// to `.`.
-    fn scope(&self) -> &str {
-        self.path()
-    }
+    fn scope(&self) -> &str;
 
     /// The pair used to order records before they are written.
+    ///
+    /// A content edit is ordered by its file. A tree change overrides this
+    /// when it is ordered by a path in its details.
     fn sort_key(&self) -> (&str, &str) {
-        (self.path(), "")
-    }
-
-    /// The file whose contents this record edits, when it is applied with the
-    /// other edits of that file.
-    fn content_path(&self) -> Option<&str> {
-        None
+        (self.scope(), "")
     }
 
     /// Writes the detail lines, under a `details` key the driver already opened.
@@ -61,64 +50,102 @@ pub(crate) trait Record {
     /// implementation reports that instead of changing anything.
     fn apply(&self, source: &Path) -> Result<(), String>;
 
-    /// Joins `next` onto this record when the two are one adjacent run.
-    ///
-    /// The default keeps them separate. A kind that merges checks the kind,
-    /// the file, and its own positions, then appends the next record's text.
-    fn extend(&mut self, _next: &dyn Record) -> bool {
-        false
-    }
-
-    /// `old`, then `new`, when this record sits on a line.
-    fn line_position(&self) -> Option<(usize, usize)> {
+    /// This record edits lines of its file, when it does.
+    fn line_edit(&self) -> Option<&dyn LineEdit> {
         None
     }
 
-    /// This record rewrites lines of its file.
-    fn edits_lines(&self) -> bool {
-        false
-    }
-
-    /// The old and new spans of a line edit, when this record is one.
-    fn line_span(&self) -> Option<LineSpan> {
+    /// The mutable line edit, when merging needs to append to it.
+    fn line_edit_mut(&mut self) -> Option<&mut dyn LineEdit> {
         None
     }
 
-    /// The line text a following record would append, when this record has any.
-    fn line_text(&self) -> Option<&str> {
+    /// This record is applied with the other edits of its file, when it is.
+    fn content(&self) -> Option<&dyn Content> {
         None
     }
 
-    /// The old and new SHA-256 hex hashes, when this record carries them.
-    fn file_digest(&self) -> Option<(&str, &str)> {
+    /// The old and new hashes of a changed file, when this record carries them.
+    fn digest(&self) -> Option<&dyn Digest> {
         None
     }
 
     /// The bytes that replace a whole file, when this record carries them.
-    fn replacement(&self) -> Option<&[u8]> {
+    fn replacement(&self) -> Option<&dyn Replacement> {
         None
     }
 
-    /// Adds this record's line edit to `plan`.
-    fn rebuild_line(
-        &self,
-        _file: &Path,
-        _source_lines: &[String],
-        _plan: &mut LinePlan,
-    ) -> Result<(), String> {
-        Ok(())
-    }
-
     /// The directory this record removes, when it removes one.
-    fn removed_directory(&self) -> Option<&str> {
+    fn removed_directory(&self) -> Option<&dyn RemovedDirectory> {
         None
     }
 
     /// The file this record adds, when adding that file must wait for a
     /// directory at the same path to be removed.
-    fn added_file_path(&self) -> Option<&str> {
+    fn added_file(&self) -> Option<&dyn AddedFile> {
         None
     }
+}
+
+/// A change applied with the other edits of one file.
+///
+/// The file is the record's scope.
+pub(crate) trait Content {
+    /// The file those edits share.
+    fn file(&self) -> &str;
+}
+
+/// The old and new SHA-256 hex hashes of one changed file.
+pub(crate) trait Digest {
+    fn old_hash(&self) -> &str;
+    fn new_hash(&self) -> &str;
+}
+
+/// Bytes that replace a whole file.
+pub(crate) trait Replacement {
+    fn bytes(&self) -> &[u8];
+}
+
+/// An edit of one or more lines.
+///
+/// `extend` stays separate unless this kind joins an adjacent run of the same
+/// kind. An identifier rename does not.
+pub(crate) trait LineEdit {
+    /// `old`, then `new`.
+    fn position(&self) -> (usize, usize);
+
+    /// Adds this edit to `plan`.
+    fn rebuild(
+        &self,
+        file: &Path,
+        source_lines: &[String],
+        plan: &mut LinePlan,
+    ) -> Result<(), String>;
+
+    /// Joins `next` onto this edit when the two are one adjacent run.
+    fn extend(&mut self, _next: &dyn Record) -> bool {
+        false
+    }
+
+    /// The first old line and the first new line, when this edit can merge.
+    fn span(&self) -> Option<LineSpan> {
+        None
+    }
+
+    /// The line text a following edit would append, when this edit can merge.
+    fn text(&self) -> Option<&str> {
+        None
+    }
+}
+
+/// A directory removed from the tree.
+pub(crate) trait RemovedDirectory {
+    fn directory(&self) -> &str;
+}
+
+/// A file added to the tree.
+pub(crate) trait AddedFile {
+    fn path(&self) -> &str;
 }
 
 /// The first old line and the first new line of a line edit.
@@ -267,7 +294,10 @@ fn extend_span(
     if next.kind() != kind || next.scope() != body.path {
         return false;
     }
-    let Some(following) = next.line_span() else {
+    let Some(line) = next.line_edit() else {
+        return false;
+    };
+    let Some(following) = line.span() else {
         return false;
     };
     let Some(next_old) = body.old.checked_add(old_len) else {
@@ -279,7 +309,7 @@ fn extend_span(
     if next_old != following.old || next_new != following.new {
         return false;
     }
-    let Some(text) = next.line_text() else {
+    let Some(text) = line.text() else {
         return false;
     };
     body.text.push('\n');
@@ -325,10 +355,6 @@ impl Record for FileRenamed {
         "file-renamed"
     }
 
-    fn path(&self) -> &str {
-        &self.from
-    }
-
     fn scope(&self) -> &str {
         "."
     }
@@ -356,12 +382,12 @@ impl Record for FileDeleted {
         "file-deleted"
     }
 
-    fn path(&self) -> &str {
-        &self.path
-    }
-
     fn scope(&self) -> &str {
         "."
+    }
+
+    fn sort_key(&self) -> (&str, &str) {
+        (&self.path, "")
     }
 
     fn write_details(&self, document: &mut String) {
@@ -383,16 +409,16 @@ impl Record for FileAdded {
         "file-added"
     }
 
-    fn path(&self) -> &str {
-        &self.path
-    }
-
     fn scope(&self) -> &str {
         "."
     }
 
-    fn added_file_path(&self) -> Option<&str> {
-        Some(&self.path)
+    fn sort_key(&self) -> (&str, &str) {
+        (&self.path, "")
+    }
+
+    fn added_file(&self) -> Option<&dyn AddedFile> {
+        Some(self)
     }
 
     fn write_details(&self, document: &mut String) {
@@ -402,6 +428,12 @@ impl Record for FileAdded {
 
     fn apply(&self, source: &Path) -> Result<(), String> {
         crate::apply::write_file(source, &self.path, &self.contents)
+    }
+}
+
+impl AddedFile for FileAdded {
+    fn path(&self) -> &str {
+        &self.path
     }
 }
 
@@ -415,16 +447,16 @@ impl Record for FileChanged {
         "file-changed"
     }
 
-    fn path(&self) -> &str {
+    fn scope(&self) -> &str {
         &self.path
     }
 
-    fn content_path(&self) -> Option<&str> {
-        Some(&self.path)
+    fn content(&self) -> Option<&dyn Content> {
+        Some(self)
     }
 
-    fn replacement(&self) -> Option<&[u8]> {
-        Some(&self.contents)
+    fn replacement(&self) -> Option<&dyn Replacement> {
+        Some(self)
     }
 
     fn write_details(&self, document: &mut String) {
@@ -433,6 +465,18 @@ impl Record for FileChanged {
 
     fn apply(&self, _source: &Path) -> Result<(), String> {
         applied_with_its_file(self.kind())
+    }
+}
+
+impl Content for FileChanged {
+    fn file(&self) -> &str {
+        &self.path
+    }
+}
+
+impl Replacement for FileChanged {
+    fn bytes(&self) -> &[u8] {
+        &self.contents
     }
 }
 
@@ -447,16 +491,16 @@ impl Record for FileDigest {
         "file-changed"
     }
 
-    fn path(&self) -> &str {
+    fn scope(&self) -> &str {
         &self.path
     }
 
-    fn content_path(&self) -> Option<&str> {
-        Some(&self.path)
+    fn content(&self) -> Option<&dyn Content> {
+        Some(self)
     }
 
-    fn file_digest(&self) -> Option<(&str, &str)> {
-        Some((&self.old_hash, &self.new_hash))
+    fn digest(&self) -> Option<&dyn Digest> {
+        Some(self)
     }
 
     fn write_details(&self, document: &mut String) {
@@ -466,6 +510,22 @@ impl Record for FileDigest {
 
     fn apply(&self, _source: &Path) -> Result<(), String> {
         applied_with_its_file(self.kind())
+    }
+}
+
+impl Content for FileDigest {
+    fn file(&self) -> &str {
+        &self.path
+    }
+}
+
+impl Digest for FileDigest {
+    fn old_hash(&self) -> &str {
+        &self.old_hash
+    }
+
+    fn new_hash(&self) -> &str {
+        &self.new_hash
     }
 }
 
@@ -491,28 +551,20 @@ impl Record for LineAdded {
         "line-added"
     }
 
-    fn path(&self) -> &str {
+    fn scope(&self) -> &str {
         &self.body.path
     }
 
-    fn content_path(&self) -> Option<&str> {
-        Some(&self.body.path)
+    fn line_edit(&self) -> Option<&dyn LineEdit> {
+        Some(self)
     }
 
-    fn line_position(&self) -> Option<(usize, usize)> {
-        Some((self.body.old, self.body.new))
+    fn line_edit_mut(&mut self) -> Option<&mut dyn LineEdit> {
+        Some(self)
     }
 
-    fn edits_lines(&self) -> bool {
-        true
-    }
-
-    fn line_span(&self) -> Option<LineSpan> {
-        Some(span(&self.body))
-    }
-
-    fn line_text(&self) -> Option<&str> {
-        Some(&self.body.text)
+    fn content(&self) -> Option<&dyn Content> {
+        Some(self)
     }
 
     fn write_details(&self, document: &mut String) {
@@ -522,13 +574,33 @@ impl Record for LineAdded {
     fn apply(&self, _source: &Path) -> Result<(), String> {
         applied_with_its_file(self.kind())
     }
+}
+
+impl Content for LineAdded {
+    fn file(&self) -> &str {
+        &self.body.path
+    }
+}
+
+impl LineEdit for LineAdded {
+    fn position(&self) -> (usize, usize) {
+        (self.body.old, self.body.new)
+    }
+
+    fn span(&self) -> Option<LineSpan> {
+        Some(span(&self.body))
+    }
+
+    fn text(&self) -> Option<&str> {
+        Some(&self.body.text)
+    }
 
     fn extend(&mut self, next: &dyn Record) -> bool {
         let new_len = line_count(&self.body.text);
         extend_span(self.kind(), &mut self.body, 0, new_len, next)
     }
 
-    fn rebuild_line(
+    fn rebuild(
         &self,
         file: &Path,
         _source_lines: &[String],
@@ -560,28 +632,20 @@ impl Record for LineRemoved {
         "line-removed"
     }
 
-    fn path(&self) -> &str {
+    fn scope(&self) -> &str {
         &self.body.path
     }
 
-    fn content_path(&self) -> Option<&str> {
-        Some(&self.body.path)
+    fn line_edit(&self) -> Option<&dyn LineEdit> {
+        Some(self)
     }
 
-    fn line_position(&self) -> Option<(usize, usize)> {
-        Some((self.body.old, self.body.new))
+    fn line_edit_mut(&mut self) -> Option<&mut dyn LineEdit> {
+        Some(self)
     }
 
-    fn edits_lines(&self) -> bool {
-        true
-    }
-
-    fn line_span(&self) -> Option<LineSpan> {
-        Some(span(&self.body))
-    }
-
-    fn line_text(&self) -> Option<&str> {
-        Some(&self.body.text)
+    fn content(&self) -> Option<&dyn Content> {
+        Some(self)
     }
 
     fn write_details(&self, document: &mut String) {
@@ -592,13 +656,33 @@ impl Record for LineRemoved {
     fn apply(&self, _source: &Path) -> Result<(), String> {
         applied_with_its_file(self.kind())
     }
+}
+
+impl Content for LineRemoved {
+    fn file(&self) -> &str {
+        &self.body.path
+    }
+}
+
+impl LineEdit for LineRemoved {
+    fn position(&self) -> (usize, usize) {
+        (self.body.old, self.body.new)
+    }
+
+    fn span(&self) -> Option<LineSpan> {
+        Some(span(&self.body))
+    }
+
+    fn text(&self) -> Option<&str> {
+        Some(&self.body.text)
+    }
 
     fn extend(&mut self, next: &dyn Record) -> bool {
         let old_len = line_count(&self.body.text);
         extend_span(self.kind(), &mut self.body, old_len, 0, next)
     }
 
-    fn rebuild_line(
+    fn rebuild(
         &self,
         file: &Path,
         _source_lines: &[String],
@@ -636,28 +720,20 @@ impl Record for LineModified {
         "line-modified"
     }
 
-    fn path(&self) -> &str {
+    fn scope(&self) -> &str {
         &self.body.path
     }
 
-    fn content_path(&self) -> Option<&str> {
-        Some(&self.body.path)
+    fn line_edit(&self) -> Option<&dyn LineEdit> {
+        Some(self)
     }
 
-    fn line_position(&self) -> Option<(usize, usize)> {
-        Some((self.body.old, self.body.new))
+    fn line_edit_mut(&mut self) -> Option<&mut dyn LineEdit> {
+        Some(self)
     }
 
-    fn edits_lines(&self) -> bool {
-        true
-    }
-
-    fn line_span(&self) -> Option<LineSpan> {
-        Some(span(&self.body))
-    }
-
-    fn line_text(&self) -> Option<&str> {
-        Some(&self.body.text)
+    fn content(&self) -> Option<&dyn Content> {
+        Some(self)
     }
 
     fn write_details(&self, document: &mut String) {
@@ -667,13 +743,33 @@ impl Record for LineModified {
     fn apply(&self, _source: &Path) -> Result<(), String> {
         applied_with_its_file(self.kind())
     }
+}
+
+impl Content for LineModified {
+    fn file(&self) -> &str {
+        &self.body.path
+    }
+}
+
+impl LineEdit for LineModified {
+    fn position(&self) -> (usize, usize) {
+        (self.body.old, self.body.new)
+    }
+
+    fn span(&self) -> Option<LineSpan> {
+        Some(span(&self.body))
+    }
+
+    fn text(&self) -> Option<&str> {
+        Some(&self.body.text)
+    }
 
     fn extend(&mut self, next: &dyn Record) -> bool {
         let count = line_count(&self.body.text);
         extend_span(self.kind(), &mut self.body, count, count, next)
     }
 
-    fn rebuild_line(
+    fn rebuild(
         &self,
         file: &Path,
         _source_lines: &[String],
@@ -703,20 +799,16 @@ impl Record for IdentifierRenamed {
         "identifier-renamed"
     }
 
-    fn path(&self) -> &str {
+    fn scope(&self) -> &str {
         &self.path
     }
 
-    fn content_path(&self) -> Option<&str> {
-        Some(&self.path)
+    fn line_edit(&self) -> Option<&dyn LineEdit> {
+        Some(self)
     }
 
-    fn line_position(&self) -> Option<(usize, usize)> {
-        Some((self.old, self.new))
-    }
-
-    fn edits_lines(&self) -> bool {
-        true
+    fn content(&self) -> Option<&dyn Content> {
+        Some(self)
     }
 
     fn write_details(&self, document: &mut String) {
@@ -729,8 +821,20 @@ impl Record for IdentifierRenamed {
     fn apply(&self, _source: &Path) -> Result<(), String> {
         applied_with_its_file(self.kind())
     }
+}
 
-    fn rebuild_line(
+impl Content for IdentifierRenamed {
+    fn file(&self) -> &str {
+        &self.path
+    }
+}
+
+impl LineEdit for IdentifierRenamed {
+    fn position(&self) -> (usize, usize) {
+        (self.old, self.new)
+    }
+
+    fn rebuild(
         &self,
         file: &Path,
         source_lines: &[String],
@@ -773,12 +877,12 @@ impl Record for DirectoryAdded {
         "directory-added"
     }
 
-    fn path(&self) -> &str {
-        &self.path
-    }
-
     fn scope(&self) -> &str {
         "."
+    }
+
+    fn sort_key(&self) -> (&str, &str) {
+        (&self.path, "")
     }
 
     fn write_details(&self, document: &mut String) {
@@ -799,16 +903,16 @@ impl Record for DirectoryDeleted {
         "directory-deleted"
     }
 
-    fn path(&self) -> &str {
-        &self.path
-    }
-
     fn scope(&self) -> &str {
         "."
     }
 
-    fn removed_directory(&self) -> Option<&str> {
-        Some(&self.path)
+    fn sort_key(&self) -> (&str, &str) {
+        (&self.path, "")
+    }
+
+    fn removed_directory(&self) -> Option<&dyn RemovedDirectory> {
+        Some(self)
     }
 
     fn write_details(&self, document: &mut String) {
@@ -817,5 +921,11 @@ impl Record for DirectoryDeleted {
 
     fn apply(&self, source: &Path) -> Result<(), String> {
         crate::apply::remove_directory(source, &self.path)
+    }
+}
+
+impl RemovedDirectory for DirectoryDeleted {
+    fn directory(&self) -> &str {
+        &self.path
     }
 }

@@ -260,5 +260,8 @@ fn modified_line(
 
 /// `old`, then `new`, so the records walk the file from the top.
 fn line_position(change: &crate::semdif::Change) -> (usize, usize) {
-    change.line_position().unwrap_or((0, 0))
+    change
+        .line_edit()
+        .map(|line| line.position())
+        .unwrap_or((0, 0))
 }

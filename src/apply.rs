@@ -25,13 +25,14 @@ fn apply_changes(semdif: &Path, source: &Path) -> Result<(), String> {
     let changes = crate::semdif::parse_changes(&document)?;
     let mut applied_content = BTreeSet::new();
     for change in &changes {
-        if let Some(path) = change.content_path() {
+        if let Some(content) = change.content() {
+            let path = content.file();
             if !applied_content.insert(path.to_string()) {
                 continue;
             }
             let batch: Vec<_> = changes
                 .iter()
-                .filter(|candidate| candidate.content_path() == Some(path))
+                .filter(|candidate| candidate.content().is_some_and(|item| item.file() == path))
                 .collect();
             apply_content(source, path, &batch)?;
         } else {
@@ -95,14 +96,17 @@ fn apply_content(
 fn file_digest(batch: &[&crate::semdif::Change]) -> Result<Option<(String, String)>, String> {
     let mut found = None;
     for change in batch {
-        if let Some((old_hash, new_hash)) = change.file_digest() {
+        let hashes = change
+            .digest()
+            .map(|digest| (digest.old_hash().to_string(), digest.new_hash().to_string()));
+        if let Some(hashes) = hashes {
             if found.is_some() {
                 return Err(format!(
                     "{} has more than one file-changed hash",
-                    change.path()
+                    change.scope()
                 ));
             }
-            found = Some((old_hash.to_string(), new_hash.to_string()));
+            found = Some(hashes);
         }
     }
     Ok(found)
@@ -131,8 +135,8 @@ fn new_contents(
             if replacement.is_some() {
                 return Err(format!("{} has more than one replacement", path.display()));
             }
-            replacement = Some(contents.to_vec());
-        } else if change.edits_lines() {
+            replacement = Some(contents.bytes().to_vec());
+        } else if change.line_edit().is_some() {
             lines.push(*change);
         }
     }
@@ -153,7 +157,10 @@ fn new_contents(
     let source_lines = crate::line_changes::split_text(&text);
     let mut plan = LinePlan::new();
     for change in &lines {
-        change.rebuild_line(path, &source_lines.lines, &mut plan)?;
+        let Some(line) = change.line_edit() else {
+            continue;
+        };
+        line.rebuild(path, &source_lines.lines, &mut plan)?;
     }
     let rebuilt = plan.rebuild(path, &source_lines.lines)?;
     Ok(crate::line_changes::join_text(&crate::line_changes::Text {

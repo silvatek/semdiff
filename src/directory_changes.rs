@@ -54,14 +54,18 @@ pub(crate) fn place_replacement_files(
 ) -> Vec<crate::semdif::Change> {
     let removed: BTreeSet<_> = changes
         .iter()
-        .filter_map(|change| change.removed_directory().map(str::to_string))
+        .filter_map(|change| {
+            change
+                .removed_directory()
+                .map(|dir| dir.directory().to_string())
+        })
         .collect();
     let mut kept = Vec::new();
     let mut replacements = Vec::new();
     for change in changes {
         if change
-            .added_file_path()
-            .is_some_and(|path| removed.contains(path))
+            .added_file()
+            .is_some_and(|file| removed.contains(file.path()))
         {
             replacements.push(change);
         } else {

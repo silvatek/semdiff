@@ -10,8 +10,11 @@
 pub(crate) fn merge_adjacent(changes: Vec<crate::semdif::Change>) -> Vec<crate::semdif::Change> {
     let mut merged: Vec<crate::semdif::Change> = Vec::new();
     for change in changes {
-        let extended = match merged.last_mut() {
-            Some(previous) => previous.extend(change.as_ref()),
+        let extended = match merged
+            .last_mut()
+            .and_then(|previous| previous.line_edit_mut())
+        {
+            Some(line) => line.extend(change.as_ref()),
             None => false,
         };
         if !extended {
