@@ -6,7 +6,7 @@
 /// another on the new side, so `lines` is `+1` or `+2`. Modifications follow
 /// one another on both sides. They do not change the line count, so `lines`
 /// stays `+0`. The merged record keeps the first line number. Its text keeps
-/// every line, joined by a newline.
+/// every line, joined by a newline. An identifier rename stays its own record.
 pub(crate) fn merge_adjacent(changes: Vec<crate::semdif::Change>) -> Vec<crate::semdif::Change> {
     let mut merged = Vec::new();
     for change in changes {

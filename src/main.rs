@@ -4,6 +4,7 @@ mod content_changes;
 mod dialect;
 mod directory_changes;
 mod file_change;
+mod identifier;
 mod line_changes;
 mod merge;
 mod semdif;

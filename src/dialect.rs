@@ -1,16 +1,16 @@
 //! Languages semdiff can read.
 //!
-//! The comparison does not consult these descriptions yet. They record how a
-//! language writes comments, blocks, and identifiers, so the next semantic
-//! step can ask.
+//! A changed line asks which characters form a name. Comment markers and
+//! block edges are recorded for a later step that can tell a comment or a
+//! string from code.
 
 #![cfg_attr(not(test), allow(dead_code))]
 
 /// A language semdiff knows how to read.
 ///
-/// Extensions select its files. The comment markers, the block edges, and the
-/// identifier characters say what the text means, so a later comparison can
-/// tell a comment from code and can see where a name or a block starts and ends.
+/// Extensions select its files. The identifier characters say which runs of
+/// text are names. Comment markers and block edges are recorded so a later
+/// comparison can tell a comment from code and see where a block starts and ends.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) struct Dialect {
     /// Extensions that identify this dialect, including the leading dot.
