@@ -2,8 +2,8 @@
 //!
 //! A dialect is configuration. It names the files it covers, how comments and
 //! blocks are written, which characters form a name, and which keywords open
-//! a named block. Reading a line with that configuration is separate, so a
-//! dialect stays a table of values.
+//! a named block. `family` selects the reader: brace-delimited languages share
+//! the C-family reader, and Python has its own.
 
 #![cfg_attr(not(test), allow(dead_code))]
 
@@ -16,6 +16,8 @@
 /// function, method, or structure, and which shared category each keyword is.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) struct Dialect {
+    /// Which reader interprets this dialect.
+    pub family: Family,
     /// Extensions that identify this dialect, including the leading dot.
     pub extensions: &'static [&'static str],
     /// Characters that open a comment running to the end of the line.
@@ -53,6 +55,18 @@ pub(crate) struct IdentifierCharacters {
     pub start: &'static str,
     /// ASCII characters that can continue an identifier, including `start`.
     pub continue_with: &'static str,
+}
+
+/// Which reader interprets a dialect.
+///
+/// Brace-delimited languages share one reader. Python is read on its own,
+/// because its blocks are indentation rather than braces.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Family {
+    /// C, C++, Rust, Java, JavaScript, and the other brace-delimited languages.
+    CFamily,
+    /// Python.
+    Python,
 }
 
 const IDENTIFIER_START: &str = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz_";
@@ -162,14 +176,16 @@ pub(crate) enum BlockEdge {
 ///
 /// Rust files use `.rs`. A line comment starts with `//`, which also covers
 /// the doc forms `///` and `//!`. A block comment runs from `/*` to `*/`.
-/// A block of code starts with `{` and ends with `}`. An identifier starts
-/// with a letter or `_` and continues with letters, digits, or `_`. A named
-/// block is opened by `fn`, `struct`, `enum`, `union`, `trait`, or `impl`,
+/// Rust is a C-family language. A block of code starts with `{` and ends with
+/// `}`. An identifier starts with a letter or `_` and continues with letters,
+/// digits, or `_`. A named block is opened by `fn`, `struct`, `enum`, `union`,
+/// `trait`, or `impl`,
 /// optionally after `pub`, `async`, `unsafe`, or `const`. Those keywords are
 /// function, structure, enumeration, union, interface, and implementation.
 /// A method uses `fn` as well, and needs the enclosing type, so a `fn` read
 /// from the added lines alone is a function.
 pub(crate) static RUST: Dialect = Dialect {
+    family: Family::CFamily,
     extensions: &[".rs"],
     line_comment: "//",
     block_comment: Some(BlockComment {
@@ -214,12 +230,13 @@ pub(crate) static RUST: Dialect = Dialect {
 /// The Python dialect.
 ///
 /// Python files use `.py`. A comment starts with `#` and ends at the end of
-/// the line. Python does not denote a multi-line comment: a triple-quoted
-/// string is a string. A block starts by indenting and ends when the
-/// indentation returns. An identifier starts with a letter or `_` and
-/// continues with letters, digits, or `_`. Python does not record named
-/// blocks yet, so a `def` or `class` stays a line addition.
+/// the line. Python is read by its own reader. It does not denote a multi-line
+/// comment: a triple-quoted string is a string. A block starts by indenting
+/// and ends when the indentation returns. An identifier starts with a letter
+/// or `_` and continues with letters, digits, or `_`. Python does not record
+/// named blocks yet, so a `def` or `class` stays a line addition.
 pub(crate) static PYTHON: Dialect = Dialect {
+    family: Family::Python,
     extensions: &[".py"],
     line_comment: "#",
     block_comment: None,
@@ -252,7 +269,7 @@ pub(crate) fn for_path(path: &str) -> Option<&'static Dialect> {
 #[cfg(test)]
 mod tests {
     use super::{
-        for_path, BlockCategory, BlockEdge, IdentifierCharacters, NamedBlockKeyword,
+        for_path, BlockCategory, BlockEdge, Family, IdentifierCharacters, NamedBlockKeyword,
         BLOCK_CATEGORIES, PYTHON, RUST,
     };
 
@@ -265,6 +282,7 @@ mod tests {
 
     #[test]
     fn rust_uses_slashes_and_braces() {
+        assert_eq!(RUST.family, Family::CFamily);
         assert_eq!(RUST.extensions, [".rs"]);
         assert_eq!(RUST.line_comment, "//");
         let comment = RUST.block_comment.expect("Rust denotes a block comment");
@@ -307,6 +325,7 @@ mod tests {
 
     #[test]
     fn python_uses_hash_and_indentation() {
+        assert_eq!(PYTHON.family, Family::Python);
         assert_eq!(PYTHON.extensions, [".py"]);
         assert_eq!(PYTHON.line_comment, "#");
         assert_eq!(PYTHON.block_comment, None);

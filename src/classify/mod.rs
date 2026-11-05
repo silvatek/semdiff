@@ -1,13 +1,13 @@
 //! How a line is read once a dialect has been selected.
 //!
-//! A dialect is configuration: comment marks, block edges, identifier
-//! characters, and the keywords that open a named block. These functions
-//! apply that configuration. A rule for one language is another field on the
-//! dialect, not a branch here.
+//! A line comment and a blank line use the dialect's configuration directly.
+//! A margin and a named block go to the dialect's reader. Brace-delimited
+//! languages share the C-family reader. Python has its own.
 
-use crate::dialect::{
-    for_path, BlockCategory, BlockEdge, Dialect, IdentifierCharacters, NamedBlockKeyword,
-};
+mod c_family;
+mod python;
+
+use crate::dialect::{for_path, BlockCategory, Dialect, Family};
 
 /// The name and category of one named block.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -56,145 +56,37 @@ pub(crate) fn blank_line(path: &str, text: &str) -> bool {
 
 /// Whether `line` contains nothing but ASCII spaces and tabs.
 fn only_ascii_blank(line: &str) -> bool {
-    line.chars().all(is_ascii_blank)
+    line.chars()
+        .all(|character| character == ' ' || character == '\t')
 }
 
 /// Whether changing `old_line` into `new_line` touches only an insignificant margin.
 ///
-/// The lines have to match once ASCII spaces and tabs are removed from both
-/// ends. A brace dialect treats that indentation as formatting. An indentation
-/// dialect treats a leading change as a block boundary, unless both lines are
-/// blank or both are full-line comments. Trailing space is insignificant in
-/// either dialect. A file with no dialect is not whitespace. A carriage return
-/// or any other character stays part of the line.
+/// The dialect's reader decides. In the C family, braces mark the block, so
+/// indentation is formatting. In Python, a leading indent change is a block
+/// boundary. Trailing space is insignificant in either reader. A file with no
+/// dialect is not whitespace. A carriage return stays part of the line.
 pub(crate) fn margin_whitespace(path: &str, old_line: &str, new_line: &str) -> bool {
     let Some(dialect) = for_path(path) else {
         return false;
     };
-    if strip_ascii_blank(old_line) != strip_ascii_blank(new_line) {
-        return false;
+    match dialect.family {
+        Family::CFamily => c_family::margin_whitespace(old_line, new_line),
+        Family::Python => python::margin_whitespace(dialect, old_line, new_line),
     }
-    if leading_ascii_blank(old_line) == leading_ascii_blank(new_line) {
-        return true;
-    }
-    if indent_is_formatting(dialect) {
-        return true;
-    }
-    if only_ascii_blank(old_line) && only_ascii_blank(new_line) {
-        return true;
-    }
-    introduces_line_comment(dialect, old_line) && introduces_line_comment(dialect, new_line)
 }
 
-/// The named block added by `text`, when this dialect sees one.
+/// The named block added by `text`, when the dialect's reader sees one.
 ///
-/// `text` is one `line-added` record and may hold several lines. Only the
-/// first line is read. Leading spaces and tabs are skipped, then any prefix
-/// words, then a keyword that opens a named block, then the identifier that
-/// names it. The keyword selects the category. A comment, a dialect with no
-/// such keywords, and a line that does not open in that shape have no block.
-/// The remainder of the line, and any following lines, are kept as the
-/// block's text and are not inspected.
+/// `text` is one `line-added` record and may hold several lines. The C-family
+/// reader uses the dialect's keywords. The Python reader does not record a
+/// named block yet.
 pub(crate) fn named_block(path: &str, text: &str) -> Option<NamedBlock> {
     let dialect = for_path(path)?;
-    if dialect.named_block_keywords.is_empty() {
-        return None;
+    match dialect.family {
+        Family::CFamily => c_family::named_block(dialect, text),
+        Family::Python => python::named_block(dialect, text),
     }
-    let line = text.split('\n').next().unwrap_or("");
-    if introduces_line_comment(dialect, line) {
-        return None;
-    }
-    let opened = block_name(dialect, line)?;
-    Some(NamedBlock {
-        category: opened.category,
-        name: opened.name.to_string(),
-    })
-}
-
-/// The category and name of the block opened by `line`.
-fn block_name<'a>(dialect: &Dialect, line: &'a str) -> Option<OpenedBlock<'a>> {
-    let mut rest = trim_ascii_blank_start(line);
-    loop {
-        let (word, after) = next_word(&dialect.identifier_characters, rest)?;
-        if let Some(category) = keyword_category(dialect.named_block_keywords, word) {
-            let name_at = trim_ascii_blank_start(after);
-            if name_at.len() == after.len() {
-                return None;
-            }
-            let (name, _) = next_word(&dialect.identifier_characters, name_at)?;
-            return Some(OpenedBlock { category, name });
-        }
-        if !is_listed(dialect.block_prefixes, word) {
-            return None;
-        }
-        let next = trim_ascii_blank_start(after);
-        if next.len() == after.len() {
-            return None;
-        }
-        rest = next;
-    }
-}
-
-/// A named block found on one line, before the name is copied.
-struct OpenedBlock<'a> {
-    category: BlockCategory,
-    name: &'a str,
-}
-
-fn keyword_category(keywords: &[NamedBlockKeyword], word: &str) -> Option<BlockCategory> {
-    keywords
-        .iter()
-        .find(|item| item.keyword == word)
-        .map(|item| item.category)
-}
-
-fn is_listed(words: &[&str], word: &str) -> bool {
-    words.iter().any(|candidate| *candidate == word)
-}
-
-/// The next identifier in `line`, and the text that follows it.
-fn next_word<'a>(characters: &IdentifierCharacters, line: &'a str) -> Option<(&'a str, &'a str)> {
-    let mut chars = line.char_indices();
-    let (_, first) = chars.next()?;
-    if !characters.starts(first) {
-        return None;
-    }
-    let mut end = first.len_utf8();
-    for (index, character) in chars {
-        if !characters.continues(character) {
-            end = index;
-            break;
-        }
-        end = index + character.len_utf8();
-    }
-    Some((&line[..end], &line[end..]))
-}
-
-fn trim_ascii_blank_start(line: &str) -> &str {
-    line.trim_start_matches(is_ascii_blank)
-}
-
-/// Whether a block is delimited by tokens, so indentation is formatting.
-fn indent_is_formatting(dialect: &Dialect) -> bool {
-    matches!(
-        (dialect.block_start, dialect.block_end),
-        (BlockEdge::Token(_), BlockEdge::Token(_))
-    )
-}
-
-fn is_ascii_blank(character: char) -> bool {
-    character == ' ' || character == '\t'
-}
-
-/// `line` without ASCII spaces and tabs at either end.
-fn strip_ascii_blank(line: &str) -> &str {
-    line.trim_matches(is_ascii_blank)
-}
-
-/// The ASCII spaces and tabs at the start of `line`.
-fn leading_ascii_blank(line: &str) -> &str {
-    let rest = line.trim_start_matches(is_ascii_blank);
-    &line[..line.len() - rest.len()]
 }
 
 #[cfg(test)]
