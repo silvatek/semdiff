@@ -163,16 +163,16 @@ fn merges_the_adjacent_removals_in_the_rust_sample() {
     .unwrap();
 
     assert!(document.contains(
-        "  - scope: \"src/main.rs\"\n    type: line-removed\n    details:\n      old: 43\n      lines: -1\n      new: 44\n      text: \"// This single line is deleted.\"\n"
+        "  - scope: \"src/main.rs\"\n    type: line-removed\n    details:\n      old: 43\n      lines: -1\n      new: 44\n      text: \"// This single line is deleted.\"\n      isComment: true\n"
     ));
     assert!(document.contains(
-        "  - scope: \"src/main.rs\"\n    type: line-removed\n    details:\n      old: 49\n      lines: -2\n      new: 49\n      text: \"// This deleted line is first.\\n// This deleted line is second.\"\n"
+        "  - scope: \"src/main.rs\"\n    type: line-removed\n    details:\n      old: 49\n      lines: -2\n      new: 49\n      text: \"// This deleted line is first.\\n// This deleted line is second.\"\n      isComment: true\n"
     ));
     assert!(document.contains(
-        "  - scope: \"src/main.rs\"\n    type: line-added\n    details:\n      old: 18\n      lines: +1\n      new: 18\n      text: \"// Print Fibonacci numbers.\"\n"
+        "  - scope: \"src/main.rs\"\n    type: line-added\n    details:\n      old: 18\n      lines: +1\n      new: 18\n      text: \"// Print Fibonacci numbers.\"\n      isComment: true\n"
     ));
     assert!(document.contains(
-        "  - scope: \"src/main.rs\"\n    type: line-added\n    details:\n      old: 53\n      lines: +2\n      new: 51\n      text: \"// This added line is first.\\n// This added line is second.\"\n"
+        "  - scope: \"src/main.rs\"\n    type: line-added\n    details:\n      old: 53\n      lines: +2\n      new: 51\n      text: \"// This added line is first.\\n// This added line is second.\"\n      isComment: true\n"
     ));
     assert!(document.contains(
         "  - scope: \"src\"\n    type: identifier-renamed\n    details:\n      oldname: \"fibonacci\"\n      newname: \"fib\"\n"
@@ -480,6 +480,180 @@ fn merges_renames_of_one_name_when_the_gap_does_not_keep_that_name() {
 
     tree.apply("edited", &document).unwrap();
     assert_eq!(tree.read("edited/src/main.rs"), after.as_bytes());
+}
+
+#[test]
+fn applies_a_line_addition_marked_as_a_comment() {
+    let tree = Tree::new();
+    tree.write("edited/src/main.rs", "fn main() {}\n");
+
+    tree.apply(
+        "edited",
+        "\
+header:
+  semdiff: \"0.1.0\"
+  timestamp: \"2020-01-01T00:00:00Z\"
+changes:
+  - scope: \"src/main.rs\"
+    type: line-added
+    details:
+      old: 1
+      lines: +1
+      new: 1
+      text: \"// note\"
+      isComment: true
+",
+    )
+    .unwrap();
+
+    assert_eq!(tree.read("edited/src/main.rs"), b"// note\nfn main() {}\n");
+}
+
+#[test]
+fn rejects_a_line_change_with_an_invalid_comment_flag() {
+    let tree = Tree::new();
+    tree.write("edited/src/main.rs", "fn main() {}\n");
+
+    let message = tree
+        .apply(
+            "edited",
+            "\
+header:
+  semdiff: \"0.1.0\"
+  timestamp: \"2020-01-01T00:00:00Z\"
+changes:
+  - scope: \"src/main.rs\"
+    type: line-added
+    details:
+      old: 1
+      lines: +1
+      new: 1
+      text: \"// note\"
+      isComment: yes
+",
+        )
+        .unwrap_err();
+
+    assert!(message.contains("invalid isComment yes"), "{message}");
+    assert_eq!(tree.read("edited/src/main.rs"), b"fn main() {}\n");
+}
+
+#[test]
+fn flags_a_line_that_opens_with_the_dialect_line_comment() {
+    let tree = Tree::new();
+    let rust_before = "fn main() {\n    let kept = 1;\n}\n// gone\n";
+    let rust_after = "// header\nfn main() {\n    // note\n    let kept = 1;\n    /* block */\n}\n";
+    let attr_before = "fn main() {}\n";
+    let attr_after = "#[allow(dead_code)]\nfn main() {}\n";
+    let python_before = "x = 1\n";
+    let python_after = "# note\nx = 1\n";
+    let note_before = "hello\n";
+    let note_after = "// note\nhello\n";
+    tree.write("left/src/main.rs", rust_before);
+    tree.write("right/src/main.rs", rust_after);
+    tree.write("edited/src/main.rs", rust_before);
+    tree.write("left/src/attr.rs", attr_before);
+    tree.write("right/src/attr.rs", attr_after);
+    tree.write("edited/src/attr.rs", attr_before);
+    tree.write("left/calc.py", python_before);
+    tree.write("right/calc.py", python_after);
+    tree.write("edited/calc.py", python_before);
+    tree.write("left/notes.txt", note_before);
+    tree.write("right/notes.txt", note_after);
+    tree.write("edited/notes.txt", note_before);
+
+    let document = tree.compare("left", "right");
+
+    assert!(document.contains(
+        "  - scope: \"src/main.rs\"\n    type: line-added\n    details:\n      old: 1\n      lines: +1\n      new: 1\n      text: \"// header\"\n      isComment: true\n"
+    ));
+    assert!(document.contains(
+        "  - scope: \"src/main.rs\"\n    type: line-added\n    details:\n      old: 2\n      lines: +1\n      new: 3\n      text: \"    // note\"\n      isComment: true\n"
+    ));
+    assert!(document.contains(
+        "  - scope: \"src/main.rs\"\n    type: line-removed\n    details:\n      old: 4\n      lines: -1\n      new: 7\n      text: \"// gone\"\n      isComment: true\n"
+    ));
+    assert!(document.contains(
+        "  - scope: \"src/main.rs\"\n    type: line-added\n    details:\n      old: 3\n      lines: +1\n      new: 5\n      text: \"    /* block */\"\n"
+    ));
+    assert!(!document.contains("/* block */\"\n      isComment:"));
+    assert!(document.contains(
+        "  - scope: \"src/attr.rs\"\n    type: line-added\n    details:\n      old: 1\n      lines: +1\n      new: 1\n      text: \"#[allow(dead_code)]\"\n"
+    ));
+    assert!(!document.contains("#[allow(dead_code)]\"\n      isComment:"));
+    assert!(document.contains(
+        "  - scope: \"calc.py\"\n    type: line-added\n    details:\n      old: 1\n      lines: +1\n      new: 1\n      text: \"# note\"\n      isComment: true\n"
+    ));
+    assert!(document.contains(
+        "  - scope: \"notes.txt\"\n    type: line-added\n    details:\n      old: 1\n      lines: +1\n      new: 1\n      text: \"// note\"\n"
+    ));
+    assert!(!document.contains("scope: \"notes.txt\"\n    type: line-added\n    details:\n      old: 1\n      lines: +1\n      new: 1\n      text: \"// note\"\n      isComment:"));
+
+    tree.apply("edited", &document).unwrap();
+    assert_eq!(tree.read("edited/src/main.rs"), rust_after.as_bytes());
+    assert_eq!(tree.read("edited/src/attr.rs"), attr_after.as_bytes());
+    assert_eq!(tree.read("edited/calc.py"), python_after.as_bytes());
+    assert_eq!(tree.read("edited/notes.txt"), note_after.as_bytes());
+}
+
+#[test]
+fn flags_a_modification_when_both_lines_are_comments() {
+    let tree = Tree::new();
+    let before = "// keep this\nunchanged\nlet value = 1;\n// zero\n";
+    let after = "// keep this note\nunchanged\n// let value = 1;\n// one\n";
+    tree.write("left/src/edit.rs", before);
+    tree.write("right/src/edit.rs", after);
+    tree.write("edited/src/edit.rs", before);
+
+    let document = tree.compare("left", "right");
+
+    assert!(document.contains(
+        "  - scope: \"src/edit.rs\"\n    type: line-modified\n    details:\n      old: 1\n      lines: +0\n      new: 1\n      text: \"// keep this note\"\n      isComment: true\n"
+    ));
+    assert!(document.contains(
+        "  - scope: \"src/edit.rs\"\n    type: line-modified\n    details:\n      old: 3\n      lines: +0\n      new: 3\n      text: \"// let value = 1;\"\n"
+    ));
+    assert!(!document.contains("let value = 1;\"\n      isComment:"));
+    assert!(document.contains(
+        "  - scope: \"src/edit.rs:4\"\n    type: identifier-renamed\n    details:\n      new: 4\n      oldname: \"zero\"\n      newname: \"one\"\n"
+    ));
+    assert!(!document.contains("oldname: \"zero\"\n      newname: \"one\"\n      isComment:"));
+
+    tree.apply("edited", &document).unwrap();
+    assert_eq!(tree.read("edited/src/edit.rs"), after.as_bytes());
+}
+
+#[test]
+fn a_comment_does_not_merge_with_an_adjacent_code_edit() {
+    let tree = Tree::new();
+    let before = "middle\n// old comment\nlet value = 1;\n// gone\nlet removed = 1;\ntail\n";
+    let after = "// one\n// two\nmiddle\n// new comment here\nlet total = 2;\ntail\n";
+    tree.write("left/src/merge.rs", before);
+    tree.write("right/src/merge.rs", after);
+    tree.write("edited/src/merge.rs", before);
+
+    let document = tree.compare("left", "right");
+
+    assert!(document.contains(
+        "  - scope: \"src/merge.rs\"\n    type: line-added\n    details:\n      old: 1\n      lines: +2\n      new: 1\n      text: \"// one\\n// two\"\n      isComment: true\n"
+    ));
+    assert!(document.contains(
+        "  - scope: \"src/merge.rs\"\n    type: line-modified\n    details:\n      old: 2\n      lines: +0\n      new: 4\n      text: \"// new comment here\"\n      isComment: true\n"
+    ));
+    assert!(document.contains(
+        "  - scope: \"src/merge.rs\"\n    type: line-modified\n    details:\n      old: 3\n      lines: +0\n      new: 5\n      text: \"let total = 2;\"\n"
+    ));
+    assert!(!document.contains("let total = 2;\"\n      isComment:"));
+    assert!(document.contains(
+        "  - scope: \"src/merge.rs\"\n    type: line-removed\n    details:\n      old: 4\n      lines: -1\n      new: 6\n      text: \"// gone\"\n      isComment: true\n"
+    ));
+    assert!(document.contains(
+        "  - scope: \"src/merge.rs\"\n    type: line-removed\n    details:\n      old: 5\n      lines: -1\n      new: 6\n      text: \"let removed = 1;\"\n"
+    ));
+    assert!(!document.contains("let removed = 1;\"\n      isComment:"));
+
+    tree.apply("edited", &document).unwrap();
+    assert_eq!(tree.read("edited/src/merge.rs"), after.as_bytes());
 }
 
 fn changed_note() -> (Tree, String) {

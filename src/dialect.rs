@@ -1,16 +1,16 @@
 //! Languages semdiff can read.
 //!
-//! A changed line asks which characters form a name. Comment markers and
-//! block edges are recorded for a later step that can tell a comment or a
-//! string from code.
+//! A changed line asks which characters form a name. A line whose first
+//! non-whitespace characters are the line comment is a full-line comment.
+//! Block comments and block edges are recorded for a later step.
 
 #![cfg_attr(not(test), allow(dead_code))]
 
 /// A language semdiff knows how to read.
 ///
 /// Extensions select its files. The identifier characters say which runs of
-/// text are names. Comment markers and block edges are recorded so a later
-/// comparison can tell a comment from code and see where a block starts and ends.
+/// text are names. The line comment flags a full-line comment. Block comments
+/// and block edges are recorded so a later comparison can see the rest.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) struct Dialect {
     /// Extensions that identify this dialect, including the leading dot.
@@ -121,9 +121,35 @@ pub(crate) fn for_path(path: &str) -> Option<&'static Dialect> {
     })
 }
 
+/// Whether `line` introduces this dialect's line comment before any other text.
+///
+/// Leading whitespace is skipped. The line-comment marker then has to be the
+/// next characters. A block comment is not recognized here.
+pub(crate) fn introduces_line_comment(dialect: &Dialect, line: &str) -> bool {
+    line.trim_start().starts_with(dialect.line_comment)
+}
+
+/// Whether `text` is a full-line comment for the file at `path`.
+///
+/// Every line has to introduce the dialect's line comment. A file with no
+/// dialect is not a comment. An empty line is not one either.
+pub(crate) fn full_line_comment(path: &str, text: &str) -> bool {
+    let Some(dialect) = for_path(path) else {
+        return false;
+    };
+    if text.is_empty() {
+        return false;
+    }
+    text.split('\n')
+        .all(|line| introduces_line_comment(dialect, line))
+}
+
 #[cfg(test)]
 mod tests {
-    use super::{for_path, BlockEdge, IdentifierCharacters, PYTHON, RUST};
+    use super::{
+        for_path, full_line_comment, introduces_line_comment, BlockEdge, IdentifierCharacters,
+        PYTHON, RUST,
+    };
 
     fn ascii_identifiers() -> IdentifierCharacters {
         IdentifierCharacters {
@@ -160,5 +186,33 @@ mod tests {
         assert_eq!(for_path("pkg/__init__.py"), Some(&PYTHON));
         assert_eq!(for_path("notes.txt"), None);
         assert_eq!(for_path("main.rs.bak"), None);
+    }
+
+    #[test]
+    fn a_line_comment_is_the_first_non_whitespace() {
+        assert!(introduces_line_comment(&RUST, "// note"));
+        assert!(introduces_line_comment(&RUST, "    /// doc"));
+        assert!(introduces_line_comment(&RUST, "//! inner"));
+        assert!(!introduces_line_comment(&RUST, "let x = 1; // note"));
+        assert!(!introduces_line_comment(&RUST, "/* block */"));
+        assert!(!introduces_line_comment(&RUST, "#[allow(dead_code)]"));
+        assert!(!introduces_line_comment(&RUST, ""));
+        assert!(!introduces_line_comment(&RUST, "    "));
+        assert!(introduces_line_comment(&PYTHON, "# note"));
+        assert!(introduces_line_comment(&PYTHON, "  # note"));
+        assert!(!introduces_line_comment(&PYTHON, "x = 1  # note"));
+        assert!(!introduces_line_comment(&PYTHON, "// not python"));
+    }
+
+    #[test]
+    fn a_full_line_comment_needs_a_known_dialect() {
+        assert!(full_line_comment("src/main.rs", "// note"));
+        assert!(full_line_comment("src/main.rs", "// one\n// two"));
+        assert!(!full_line_comment("src/main.rs", "// one\nlet x = 1;"));
+        assert!(!full_line_comment("src/main.rs", "/* note */"));
+        assert!(full_line_comment("calc.py", "# note"));
+        assert!(!full_line_comment("notes.txt", "// note"));
+        assert!(!full_line_comment("main.rs.bak", "// note"));
+        assert!(!full_line_comment("src/main.rs", ""));
     }
 }

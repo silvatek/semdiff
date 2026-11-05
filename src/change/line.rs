@@ -1,7 +1,9 @@
 //! Line additions, removals, and modifications.
 //!
 //! A line change's scope is the file. A span change names one old line instead,
-//! and lives in its own module.
+//! and lives in its own module. The same line record can say that the edit is
+//! a full-line comment. That is `isComment: true` in the semdif. False is the
+//! default and is left out.
 
 use std::path::Path;
 
@@ -18,17 +20,22 @@ struct LineBody {
     old: usize,
     new: usize,
     text: String,
+    /// Whether this edit is a full-line comment.
+    ///
+    /// Written as `isComment: true`. False is omitted from the semdif.
+    is_comment: bool,
 }
 
 fn line_count(text: &str) -> usize {
     text.split('\n').count()
 }
 
-/// Joins `next` onto `current` when it continues the same kind and scope.
+/// Joins `next` onto `current` when it continues the same kind, scope, and comment flag.
 ///
 /// `old_len` and `new_len` are how far `current` already reaches. The next
 /// change continues it when each side's first line plus that length equals
 /// the next change's first line. The joined text is stored on `current`.
+/// A comment does not join a line that is not a comment, so those stay two records.
 fn extend_following(
     current: &mut dyn Change,
     old_len: usize,
@@ -44,9 +51,16 @@ fn extend_following(
     let Some(following) = line.start() else {
         return false;
     };
-    let Some((old, new)) = current.line_edit().map(|line| line.position()) else {
-        return false;
+    let (old, new, current_is_comment) = match current.line_edit() {
+        Some(current_line) => {
+            let (old, new) = current_line.position();
+            (old, new, current_line.is_comment())
+        }
+        None => return false,
     };
+    if line.is_comment() != current_is_comment {
+        return false;
+    }
     let Some(next_old) = old.checked_add(old_len) else {
         return false;
     };
@@ -71,11 +85,14 @@ fn append_line(body: &mut LineBody, text: &str) {
     body.text.push_str(text);
 }
 
-fn write_line(document: &mut String, body: &LineBody, lines: isize) {
+fn write_line(document: &mut String, body: &LineBody, lines: isize, is_comment: bool) {
     crate::semdif::write_plain(document, "old", &body.old.to_string());
     crate::semdif::write_plain(document, "lines", &format_lines(lines));
     crate::semdif::write_plain(document, "new", &body.new.to_string());
     crate::semdif::write_detail(document, "text", &body.text);
+    if is_comment {
+        crate::semdif::write_plain(document, "isComment", "true");
+    }
 }
 
 fn format_lines(lines: isize) -> String {
@@ -97,13 +114,15 @@ fn line_start(body: &LineBody) -> LineStart {
 
 /// Collapses adjacent line edits before they are written to the semdif file.
 ///
-/// A run of line edits in one scope becomes one change. Removals follow one
-/// another on the old side and share the new line that follows them, so
-/// `lines` is `-1` or `-2`. Additions share an insertion point and follow one
-/// another on the new side, so `lines` is `+1` or `+2`. Modifications follow
-/// one another on both sides. They do not change the line count, so `lines`
-/// stays `+0`. The merged change keeps the first line number. Its text keeps
-/// every line, joined by a newline. A span change stays its own change.
+/// A run of line edits in one scope becomes one change when every line is a
+/// comment, or none of them is. Removals follow one another on the old side
+/// and share the new line that follows them, so `lines` is `-1` or `-2`.
+/// Additions share an insertion point and follow one another on the new side,
+/// so `lines` is `+1` or `+2`. Modifications follow one another on both sides.
+/// They do not change the line count, so `lines` stays `+0`. The merged change
+/// keeps the first line number. Its text keeps every line, joined by a newline.
+/// A comment stays apart from a neighboring line that is not a comment. A span
+/// change stays its own change.
 pub(crate) fn merge_adjacent(changes: Vec<Box<dyn super::Change>>) -> Vec<Box<dyn super::Change>> {
     let mut merged: Vec<Box<dyn super::Change>> = Vec::new();
     for change in changes {
@@ -127,10 +146,21 @@ pub(crate) struct LineAdded {
 }
 
 impl LineAdded {
-    pub(crate) fn new(scope: String, old: usize, new: usize, text: String) -> Self {
+    pub(crate) fn new(
+        scope: String,
+        old: usize,
+        new: usize,
+        text: String,
+        is_comment: bool,
+    ) -> Self {
         Self {
             scope,
-            body: LineBody { old, new, text },
+            body: LineBody {
+                old,
+                new,
+                text,
+                is_comment,
+            },
         }
     }
 }
@@ -157,7 +187,12 @@ impl Change for LineAdded {
     }
 
     fn write_details(&self, document: &mut String) {
-        write_line(document, &self.body, line_count(&self.body.text) as isize);
+        write_line(
+            document,
+            &self.body,
+            line_count(&self.body.text) as isize,
+            self.is_comment(),
+        );
     }
 
     fn apply(&self, _fs: &dyn FileSystem, _source: &Path) -> Result<(), String> {
@@ -189,6 +224,10 @@ impl LineEdit for LineAdded {
         true
     }
 
+    fn is_comment(&self) -> bool {
+        self.body.is_comment
+    }
+
     fn extend(&mut self, next: &dyn Change) -> bool {
         let new_len = line_count(&self.body.text);
         extend_following(self, 0, new_len, next)
@@ -210,10 +249,21 @@ pub(crate) struct LineRemoved {
 }
 
 impl LineRemoved {
-    pub(crate) fn new(scope: String, old: usize, new: usize, text: String) -> Self {
+    pub(crate) fn new(
+        scope: String,
+        old: usize,
+        new: usize,
+        text: String,
+        is_comment: bool,
+    ) -> Self {
         Self {
             scope,
-            body: LineBody { old, new, text },
+            body: LineBody {
+                old,
+                new,
+                text,
+                is_comment,
+            },
         }
     }
 }
@@ -241,7 +291,7 @@ impl Change for LineRemoved {
 
     fn write_details(&self, document: &mut String) {
         let count = line_count(&self.body.text) as isize;
-        write_line(document, &self.body, -count);
+        write_line(document, &self.body, -count, self.is_comment());
     }
 
     fn apply(&self, _fs: &dyn FileSystem, _source: &Path) -> Result<(), String> {
@@ -273,6 +323,10 @@ impl LineEdit for LineRemoved {
         true
     }
 
+    fn is_comment(&self) -> bool {
+        self.body.is_comment
+    }
+
     fn extend(&mut self, next: &dyn Change) -> bool {
         let old_len = line_count(&self.body.text);
         extend_following(self, old_len, 0, next)
@@ -300,10 +354,21 @@ pub(crate) struct LineModified {
 }
 
 impl LineModified {
-    pub(crate) fn new(scope: String, old: usize, new: usize, text: String) -> Self {
+    pub(crate) fn new(
+        scope: String,
+        old: usize,
+        new: usize,
+        text: String,
+        is_comment: bool,
+    ) -> Self {
         Self {
             scope,
-            body: LineBody { old, new, text },
+            body: LineBody {
+                old,
+                new,
+                text,
+                is_comment,
+            },
         }
     }
 }
@@ -330,7 +395,7 @@ impl Change for LineModified {
     }
 
     fn write_details(&self, document: &mut String) {
-        write_line(document, &self.body, 0);
+        write_line(document, &self.body, 0, self.is_comment());
     }
 
     fn apply(&self, _fs: &dyn FileSystem, _source: &Path) -> Result<(), String> {
@@ -360,6 +425,10 @@ impl LineEdit for LineModified {
     fn append_text(&mut self, text: &str) -> bool {
         append_line(&mut self.body, text);
         true
+    }
+
+    fn is_comment(&self) -> bool {
+        self.body.is_comment
     }
 
     fn extend(&mut self, next: &dyn Change) -> bool {

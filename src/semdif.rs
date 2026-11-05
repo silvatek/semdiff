@@ -262,6 +262,7 @@ fn parse_line_added(
         required_line(&fields, "old", "line-added")?,
         required_line(&fields, "new", "line-added")?,
         text,
+        comment_flag(&fields, "line-added")?,
     )))
 }
 
@@ -277,6 +278,7 @@ fn parse_line_removed(
         old,
         required_line(&fields, "new", "line-removed")?,
         text,
+        comment_flag(&fields, "line-removed")?,
     )))
 }
 
@@ -291,6 +293,7 @@ fn parse_line_modified(
         required_line(&fields, "old", "line-modified")?,
         required_line(&fields, "new", "line-modified")?,
         text,
+        comment_flag(&fields, "line-modified")?,
     )))
 }
 
@@ -446,6 +449,19 @@ fn invalid_lines(kind: &str, fields: &BTreeMap<String, String>) -> String {
     }
 }
 
+/// The `isComment` detail on a line change.
+///
+/// A full-line comment sets `true`. The attribute is left out when the change
+/// is not a comment, so a missing value is false. An explicit `false` is the
+/// same. Any other value is rejected.
+fn comment_flag(fields: &BTreeMap<String, String>, kind: &str) -> Result<bool, String> {
+    match fields.get("isComment").map(String::as_str) {
+        None | Some("false") => Ok(false),
+        Some("true") => Ok(true),
+        Some(other) => Err(format!("{kind} has invalid isComment {other}")),
+    }
+}
+
 /// A 1-based line number recorded for a line change.
 fn required_line(
     fields: &BTreeMap<String, String>,
@@ -516,4 +532,65 @@ fn decode_hex_char(chars: &mut std::str::Chars<'_>, value: &str) -> Result<char,
     let code =
         u32::from_str_radix(&hex, 16).map_err(|_| format!("invalid quoted value: {value}"))?;
     char::from_u32(code).ok_or_else(|| format!("invalid quoted value: {value}"))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::parse_changes;
+
+    fn line_change(kind: &str, lines: &str, flag: &str) -> String {
+        let flag_line = if flag.is_empty() {
+            String::new()
+        } else {
+            format!("      isComment: {flag}\n")
+        };
+        format!(
+            "\
+changes:
+  - scope: \"src/main.rs\"
+    type: {kind}
+    details:
+      old: 1
+      lines: {lines}
+      new: 1
+      text: \"// note\"
+{flag_line}"
+        )
+    }
+
+    fn assert_comment(document: &str, is_comment: bool) {
+        let changes = parse_changes(document).expect("line change");
+        assert_eq!(changes.len(), 1);
+        let line = changes[0].line_edit().expect("line edit");
+        assert_eq!(line.is_comment(), is_comment);
+        let mut details = String::new();
+        changes[0].write_details(&mut details);
+        if is_comment {
+            assert!(details.ends_with("isComment: true\n"), "{details}");
+        } else {
+            assert!(!details.contains("isComment"), "{details}");
+        }
+    }
+
+    #[test]
+    fn a_comment_flag_round_trips_and_defaults_to_false() {
+        for (kind, lines) in [
+            ("line-added", "+1"),
+            ("line-removed", "-1"),
+            ("line-modified", "+0"),
+        ] {
+            assert_comment(&line_change(kind, lines, "true"), true);
+            assert_comment(&line_change(kind, lines, ""), false);
+            assert_comment(&line_change(kind, lines, "false"), false);
+        }
+    }
+
+    #[test]
+    fn rejects_an_invalid_comment_flag() {
+        let message = match parse_changes(&line_change("line-added", "+1", "yes")) {
+            Err(message) => message,
+            Ok(_) => panic!("invalid isComment was accepted"),
+        };
+        assert!(message.contains("invalid isComment yes"), "{message}");
+    }
 }

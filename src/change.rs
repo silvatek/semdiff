@@ -207,6 +207,15 @@ pub(crate) trait LineEdit {
     fn append_text(&mut self, _text: &str) -> bool {
         false
     }
+
+    /// Whether this edit is a full-line comment.
+    ///
+    /// The semdif writes `isComment: true` and leaves the attribute out when
+    /// this is false. A span change is not a comment change. Adjacent line
+    /// edits join only when this flag matches.
+    fn is_comment(&self) -> bool {
+        false
+    }
 }
 
 /// A directory removed from the tree.
