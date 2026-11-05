@@ -144,11 +144,29 @@ pub(crate) fn full_line_comment(path: &str, text: &str) -> bool {
         .all(|line| introduces_line_comment(dialect, line))
 }
 
+/// Whether `text` is a blank line for the file at `path`.
+///
+/// A blank line is empty or holds only ASCII spaces and tabs. Rust and Python
+/// both ignore that line, so editing one has no functional effect. A file with
+/// no dialect is not blank for this purpose. A comment, a carriage return, or
+/// any other character keeps the line unflagged.
+pub(crate) fn blank_line(path: &str, text: &str) -> bool {
+    if for_path(path).is_none() {
+        return false;
+    }
+    text.split('\n').all(only_ascii_blank)
+}
+
+/// Whether `line` contains nothing but ASCII spaces and tabs.
+fn only_ascii_blank(line: &str) -> bool {
+    line.bytes().all(|byte| byte == b' ' || byte == b'\t')
+}
+
 #[cfg(test)]
 mod tests {
     use super::{
-        for_path, full_line_comment, introduces_line_comment, BlockEdge, IdentifierCharacters,
-        PYTHON, RUST,
+        blank_line, for_path, full_line_comment, introduces_line_comment, BlockEdge,
+        IdentifierCharacters, PYTHON, RUST,
     };
 
     fn ascii_identifiers() -> IdentifierCharacters {
@@ -214,5 +232,27 @@ mod tests {
         assert!(!full_line_comment("notes.txt", "// note"));
         assert!(!full_line_comment("main.rs.bak", "// note"));
         assert!(!full_line_comment("src/main.rs", ""));
+    }
+
+    #[test]
+    fn a_blank_line_needs_a_known_dialect() {
+        assert!(blank_line("src/main.rs", ""));
+        assert!(blank_line("src/main.rs", " "));
+        assert!(blank_line("src/main.rs", "\t"));
+        assert!(blank_line("src/main.rs", " \t "));
+        assert!(blank_line("calc.py", ""));
+        assert!(blank_line("calc.py", "  "));
+        assert!(!blank_line("src/main.rs", "\r"));
+        assert!(!blank_line("src/main.rs", " \r"));
+        assert!(!blank_line("src/main.rs", "\u{00a0}"));
+        assert!(!blank_line("src/main.rs", "let x = 1;"));
+        assert!(!blank_line("src/main.rs", "    let x = 1;"));
+        assert!(!blank_line("calc.py", "    x = 1"));
+        assert!(!blank_line("src/main.rs", "// note"));
+        assert!(!blank_line("src/main.rs", "  // note"));
+        assert!(!blank_line("calc.py", "# note"));
+        assert!(!blank_line("notes.txt", ""));
+        assert!(!blank_line("notes.txt", " "));
+        assert!(!blank_line("main.rs.bak", " "));
     }
 }
