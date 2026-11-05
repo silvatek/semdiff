@@ -4,6 +4,8 @@ use std::path::Path;
 
 use super::{applied_with_its_file, Change, Content, LineEdit, LinePlan, LineStart};
 
+use crate::filesystem::FileSystem;
+
 /// The line numbers and text shared by a line addition, removal, and modification.
 ///
 /// The scope stays on each of those changes. These three differ in how long
@@ -148,7 +150,7 @@ impl Change for LineAdded {
         write_line(document, &self.body, line_count(&self.body.text) as isize);
     }
 
-    fn apply(&self, _source: &Path) -> Result<(), String> {
+    fn apply(&self, _fs: &dyn FileSystem, _source: &Path) -> Result<(), String> {
         applied_with_its_file(self.kind())
     }
 }
@@ -227,7 +229,7 @@ impl Change for LineRemoved {
         write_line(document, &self.body, -count);
     }
 
-    fn apply(&self, _source: &Path) -> Result<(), String> {
+    fn apply(&self, _fs: &dyn FileSystem, _source: &Path) -> Result<(), String> {
         applied_with_its_file(self.kind())
     }
 }
@@ -311,7 +313,7 @@ impl Change for LineModified {
         write_line(document, &self.body, 0);
     }
 
-    fn apply(&self, _source: &Path) -> Result<(), String> {
+    fn apply(&self, _fs: &dyn FileSystem, _source: &Path) -> Result<(), String> {
         applied_with_its_file(self.kind())
     }
 }
@@ -389,7 +391,7 @@ impl Change for IdentifierRenamed {
         crate::semdif::write_detail(document, "newname", &self.newname);
     }
 
-    fn apply(&self, _source: &Path) -> Result<(), String> {
+    fn apply(&self, _fs: &dyn FileSystem, _source: &Path) -> Result<(), String> {
         applied_with_its_file(self.kind())
     }
 }

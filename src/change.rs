@@ -18,6 +18,8 @@ pub(crate) use line::{merge_adjacent, IdentifierRenamed, LineAdded, LineModified
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::Path;
 
+use crate::filesystem::FileSystem;
+
 /// Scope written for a change that is not the contents of one file.
 ///
 /// A rename, an added or deleted file, and an added or deleted directory use
@@ -58,7 +60,7 @@ pub(crate) trait Change {
     ///
     /// A content edit is replayed with the other edits of its file, so its
     /// implementation reports that instead of changing anything.
-    fn apply(&self, source: &Path) -> Result<(), String>;
+    fn apply(&self, fs: &dyn FileSystem, source: &Path) -> Result<(), String>;
 
     /// This change edits lines of its file, when it does.
     fn line_edit(&self) -> Option<&dyn LineEdit> {

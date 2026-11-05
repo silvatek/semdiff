@@ -1,6 +1,8 @@
 use super::run;
 
 use std::collections::BTreeSet;
+
+use semdiff::FileSystem;
 use std::fs;
 use std::path::Path;
 
@@ -38,17 +40,28 @@ fn applying_the_rust_sample_makes_a_copy_of_v1_match_v2() {
 }
 
 fn copy_tree(from: &Path, to: &Path) {
-    fs::create_dir_all(to).unwrap();
-    for entry in fs::read_dir(from).unwrap() {
-        let entry = entry.unwrap();
-        if entry.file_name() == "target" {
+    let fs = semdiff::StdFileSystem::new();
+    copy_children(&fs, from, from, to);
+}
+
+fn copy_children(fs: &semdiff::StdFileSystem, root: &Path, from: &Path, to: &Path) {
+    fs.create_dir(to).unwrap();
+    for (name, kind) in fs.read_dir(from).unwrap() {
+        let path = from.join(&name);
+        let relative = path
+            .strip_prefix(root)
+            .unwrap()
+            .to_string_lossy()
+            .replace('\\', "/");
+        if fs.is_ignored(&relative) {
             continue;
         }
-        let dest = to.join(entry.file_name());
-        if entry.path().is_dir() {
-            copy_tree(&entry.path(), &dest);
-        } else {
-            fs::copy(entry.path(), dest).unwrap();
+        let dest = to.join(name);
+        match kind {
+            semdiff::NodeKind::Directory => copy_children(fs, root, &path, &dest),
+            semdiff::NodeKind::File => {
+                fs::copy(&path, &dest).unwrap();
+            }
         }
     }
 }
@@ -87,25 +100,11 @@ fn tree_difference(actual: &Path, expected: &Path) -> String {
 }
 
 fn project_files(root: &Path) -> BTreeSet<String> {
-    let mut files = BTreeSet::new();
-    collect_project_files(root, root, &mut files);
-    files
-}
-
-fn collect_project_files(root: &Path, dir: &Path, files: &mut BTreeSet<String>) {
-    for entry in fs::read_dir(dir).unwrap() {
-        let entry = entry.unwrap();
-        if entry.file_name() == "target" {
-            continue;
-        }
-        if entry.path().is_dir() {
-            collect_project_files(root, &entry.path(), files);
-        } else {
-            let path = entry.path();
-            let relative = path.strip_prefix(root).unwrap();
-            files.insert(relative.to_string_lossy().replace('\\', "/"));
-        }
-    }
+    semdiff::StdFileSystem::new()
+        .collect_files(root)
+        .unwrap()
+        .into_iter()
+        .collect()
 }
 
 fn line_difference(actual: &str, expected: &str) -> String {

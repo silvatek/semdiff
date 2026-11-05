@@ -1,6 +1,8 @@
 use std::env;
 use std::path::Path;
 
+use crate::filesystem::{FileSystem, StdFileSystem};
+
 const USAGE: &str = "\
 Usage: semdiff <left> <right> <output>
        semdiff --apply <semdif> <directory>
@@ -82,10 +84,11 @@ where
         if args.next().is_some() {
             return Err(CliError::Usage);
         }
-        if !Path::new(&semdif).is_file() {
+        let fs = StdFileSystem::new();
+        if !fs.is_file(Path::new(&semdif)) {
             return Err(CliError::NotFile(semdif));
         }
-        if !Path::new(&source).is_dir() {
+        if !fs.is_dir(Path::new(&source)) {
             return Err(CliError::NotDirectory(source));
         }
         return Ok(Command::Apply { semdif, source });
@@ -109,11 +112,11 @@ where
 ///
 /// A missing path cannot be compared.
 fn require_source(path: &str) -> Result<(), CliError> {
-    let path = Path::new(path);
-    if path.is_file() || path.is_dir() {
+    let fs = StdFileSystem::new();
+    if fs.is_file(Path::new(path)) || fs.is_dir(Path::new(path)) {
         Ok(())
     } else {
-        Err(CliError::NotSource(path.display().to_string()))
+        Err(CliError::NotSource(path.to_string()))
     }
 }
 
@@ -121,7 +124,8 @@ fn require_source(path: &str) -> Result<(), CliError> {
 ///
 /// A file and a directory are different comparison units, so they are not paired.
 fn require_same_kind(left: &str, right: &str) -> Result<(), CliError> {
-    if Path::new(left).is_dir() == Path::new(right).is_dir() {
+    let fs = StdFileSystem::new();
+    if fs.is_dir(Path::new(left)) == fs.is_dir(Path::new(right)) {
         Ok(())
     } else {
         Err(CliError::MixedSources)

@@ -46,13 +46,12 @@ fn prints_name_and_version_when_comparing_directories() {
 
 #[test]
 fn rejects_a_change_that_is_not_a_rename() {
-    let root = std::env::temp_dir().join(format!("semdiff-apply-type-{}", std::process::id()));
-    let source = root.join("source");
-    fs::create_dir_all(&source).unwrap();
-    let semdif = root.join("out.yml");
-    fs::write(
-        &semdif,
-        "\
+    let tree = super::tree::Tree::new();
+    tree.dir("source");
+    let message = tree
+        .apply(
+            "source",
+            "\
 header:
   semdiff: \"0.1.0\"
   timestamp: \"2020-01-01T00:00:00Z\"
@@ -63,16 +62,8 @@ changes:
       line: 1
       text: \"/// note\"
 ",
-    )
-    .unwrap();
+        )
+        .unwrap_err();
 
-    let source = source.to_str().unwrap();
-    let semdif = semdif.to_str().unwrap();
-    let output = run(&["--apply", semdif, source]);
-    let stderr = String::from_utf8(output.stderr).expect("stderr was not utf-8");
-
-    assert_eq!(output.status.code(), Some(1));
-    assert_eq!(stderr, "unknown change type line-comment-added\n");
-
-    let _ = fs::remove_dir_all(root);
+    assert_eq!(message, "unknown change type line-comment-added");
 }

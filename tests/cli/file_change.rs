@@ -1,63 +1,38 @@
-use super::run;
-
-use std::fs;
+use super::tree::Tree;
 
 #[test]
 fn writes_a_file_renamed_change() {
-    let root = std::env::temp_dir().join(format!("semdiff-rename-{}", std::process::id()));
-    let left = root.join("left");
-    let right = root.join("right");
-    fs::create_dir_all(&left).unwrap();
-    fs::create_dir_all(&right).unwrap();
+    let tree = Tree::new();
     let quote = "Brevity is the soul of wit.\n";
-    fs::write(left.join("quote.txt"), quote).unwrap();
-    fs::write(right.join("quotation.txt"), quote).unwrap();
-    fs::write(left.join("notes.txt"), "left only\n").unwrap();
-    fs::write(right.join("other.txt"), "right only\n").unwrap();
+    tree.write("left/quote.txt", quote);
+    tree.write("right/quotation.txt", quote);
+    tree.write("left/notes.txt", "left only\n");
+    tree.write("right/other.txt", "right only\n");
 
-    let output_path = root.join("out.yml");
-    let left = left.to_str().unwrap();
-    let right = right.to_str().unwrap();
-    let output_path = output_path.to_str().unwrap();
-    let output = run(&[left, right, output_path]);
-    let document = fs::read_to_string(output_path).expect("failed to read semdiff file");
+    let document = tree.compare("left", "right");
 
-    assert!(output.status.success());
     let changes = document.split_once("changes:\n").expect("changes list").1;
     assert_eq!(
         changes,
         "  - scope: \".\"\n    type: file-deleted\n    details:\n      path: \"notes.txt\"\n  - scope: \".\"\n    type: file-added\n    details:\n      path: \"other.txt\"\n      contents: \"right only\\n\"\n  - scope: \".\"\n    type: file-renamed\n    details:\n      from: \"quote.txt\"\n      to: \"quotation.txt\"\n"
     );
-
-    let _ = fs::remove_dir_all(root);
 }
 
 #[test]
 fn hashes_past_the_first_buffer() {
-    let root = std::env::temp_dir().join(format!("semdiff-hash-{}", std::process::id()));
-    let left = root.join("left");
-    let right = root.join("right");
-    fs::create_dir_all(&left).unwrap();
-    fs::create_dir_all(&right).unwrap();
-
+    let tree = Tree::new();
     let mut same = vec![1_u8; 9_000];
     same[8_500] = 7;
     let shared_prefix = vec![2_u8; 9_000];
     let mut shared_prefix_changed = shared_prefix.clone();
     shared_prefix_changed[8_500] = 4;
-    fs::write(left.join("same.bin"), &same).unwrap();
-    fs::write(right.join("same-renamed.bin"), &same).unwrap();
-    fs::write(left.join("left.bin"), &shared_prefix).unwrap();
-    fs::write(right.join("right.bin"), &shared_prefix_changed).unwrap();
+    tree.write("left/same.bin", &same);
+    tree.write("right/same-renamed.bin", &same);
+    tree.write("left/left.bin", &shared_prefix);
+    tree.write("right/right.bin", &shared_prefix_changed);
 
-    let output_path = root.join("out.yml");
-    let left = left.to_str().unwrap();
-    let right = right.to_str().unwrap();
-    let output_path = output_path.to_str().unwrap();
-    let output = run(&[left, right, output_path]);
-    let document = fs::read_to_string(output_path).expect("failed to read semdiff file");
+    let document = tree.compare("left", "right");
 
-    assert!(output.status.success());
     let changes = document.split_once("changes:\n").expect("changes list").1;
     assert!(changes.contains(
         "  - scope: \".\"\n    type: file-deleted\n    details:\n      path: \"left.bin\"\n"
@@ -73,42 +48,23 @@ fn hashes_past_the_first_buffer() {
     assert!(!contents_line
         .chars()
         .any(|character| (character as u32) < 0x20));
-
-    let _ = fs::remove_dir_all(root);
 }
 
 #[test]
 fn adds_a_file_and_restores_contents_that_yaml_cannot_hold_literally() {
-    let root = std::env::temp_dir().join(format!("semdiff-added-{}", std::process::id()));
-    let left = root.join("left");
-    let right = root.join("right");
-    let edited = root.join("edited");
-    fs::create_dir_all(&left).unwrap();
-    fs::create_dir_all(right.join("nested")).unwrap();
-    fs::create_dir_all(&edited).unwrap();
+    let tree = Tree::new();
     let kept = "same\n";
     let tricky = "He said \"hello\"\tand wrote C:\\temp.\r\nNext: line\n  spaced\0\u{2028}";
     let binary = b"\x00\xff\"\\\n: ";
-    fs::write(left.join("keep.txt"), kept).unwrap();
-    fs::write(right.join("keep.txt"), kept).unwrap();
-    fs::write(edited.join("keep.txt"), kept).unwrap();
-    fs::write(right.join("tricky.txt"), tricky).unwrap();
-    fs::write(right.join("empty.txt"), "").unwrap();
-    fs::write(right.join("nested/data.bin"), binary).unwrap();
+    tree.write("left/keep.txt", kept);
+    tree.write("right/keep.txt", kept);
+    tree.write("edited/keep.txt", kept);
+    tree.write("right/tricky.txt", tricky);
+    tree.write("right/empty.txt", "");
+    tree.write("right/nested/data.bin", binary);
 
-    let output_path = root.join("out.yml");
-    let left_arg = left.to_str().unwrap();
-    let right_arg = right.to_str().unwrap();
-    let edited_arg = edited.to_str().unwrap();
-    let output_arg = output_path.to_str().unwrap();
-    let compared = run(&[left_arg, right_arg, output_arg]);
-    let document = fs::read_to_string(&output_path).expect("failed to read semdiff file");
+    let document = tree.compare("left", "right");
 
-    assert!(
-        compared.status.success(),
-        "{}",
-        String::from_utf8_lossy(&compared.stderr)
-    );
     let tricky_line = document
         .lines()
         .find(|line| line.contains("hello"))
@@ -133,49 +89,25 @@ fn adds_a_file_and_restores_contents_that_yaml_cannot_hold_literally() {
     assert!(document.contains("path: \"nested/data.bin\""));
     assert!(!document.as_bytes().contains(&0xff));
 
-    let applied = run(&["--apply", output_arg, edited_arg]);
-    assert!(
-        applied.status.success(),
-        "{}",
-        String::from_utf8_lossy(&applied.stderr)
-    );
-    assert_eq!(fs::read_to_string(edited.join("keep.txt")).unwrap(), kept);
-    assert_eq!(
-        fs::read(edited.join("tricky.txt")).unwrap(),
-        tricky.as_bytes()
-    );
-    assert_eq!(fs::read(edited.join("empty.txt")).unwrap(), b"");
-    assert_eq!(fs::read(edited.join("nested/data.bin")).unwrap(), binary);
-
-    let _ = fs::remove_dir_all(root);
+    tree.apply("edited", &document).unwrap();
+    assert_eq!(tree.read("edited/keep.txt"), kept.as_bytes());
+    assert_eq!(tree.read("edited/tricky.txt"), tricky.as_bytes());
+    assert_eq!(tree.read("edited/empty.txt"), b"");
+    assert_eq!(tree.read("edited/nested/data.bin"), binary);
 }
 
 #[test]
 fn detects_a_rename_between_individual_files() {
-    let root = std::env::temp_dir().join(format!("semdiff-file-rename-{}", std::process::id()));
-    let left_dir = root.join("left");
-    let right_dir = root.join("right");
-    fs::create_dir_all(&left_dir).unwrap();
-    fs::create_dir_all(&right_dir).unwrap();
+    let tree = Tree::new();
     let quote = "Brevity is the soul of wit.\n";
-    fs::write(left_dir.join("quote.txt"), quote).unwrap();
-    fs::write(right_dir.join("quotation.txt"), quote).unwrap();
+    tree.write("left/quote.txt", quote);
+    tree.write("right/quotation.txt", quote);
 
-    let output_path = root.join("out.yml");
-    let left = left_dir.join("quote.txt");
-    let right = right_dir.join("quotation.txt");
-    let left = left.to_str().unwrap();
-    let right = right.to_str().unwrap();
-    let output_path = output_path.to_str().unwrap();
-    let output = run(&[left, right, output_path]);
-    let document = fs::read_to_string(output_path).expect("failed to read semdiff file");
+    let document = tree.compare("left/quote.txt", "right/quotation.txt");
 
-    assert!(output.status.success());
     let changes = document.split_once("changes:\n").expect("changes list").1;
     assert_eq!(
         changes,
         "  - scope: \".\"\n    type: file-renamed\n    details:\n      from: \"quote.txt\"\n      to: \"quotation.txt\"\n"
     );
-
-    let _ = fs::remove_dir_all(root);
 }
