@@ -22,20 +22,18 @@ fn line_count(text: &str) -> usize {
     text.split('\n').count()
 }
 
-/// Joins `next` onto a line edit when it continues the same kind and scope.
+/// Joins `next` onto `current` when it continues the same kind and scope.
 ///
-/// `old_len` and `new_len` are how far this edit already reaches. The next
+/// `old_len` and `new_len` are how far `current` already reaches. The next
 /// change continues it when each side's first line plus that length equals
-/// the next change's first line.
+/// the next change's first line. The joined text is stored on `current`.
 fn extend_following(
-    kind: &str,
-    scope: &str,
-    body: &mut LineBody,
+    current: &mut dyn Change,
     old_len: usize,
     new_len: usize,
     next: &dyn Change,
 ) -> bool {
-    if next.kind() != kind || next.scope() != scope {
+    if next.kind() != current.kind() || next.scope() != current.scope() {
         return false;
     }
     let Some(line) = next.line_edit() else {
@@ -44,10 +42,13 @@ fn extend_following(
     let Some(following) = line.start() else {
         return false;
     };
-    let Some(next_old) = body.old.checked_add(old_len) else {
+    let Some((old, new)) = current.line_edit().map(|line| line.position()) else {
         return false;
     };
-    let Some(next_new) = body.new.checked_add(new_len) else {
+    let Some(next_old) = old.checked_add(old_len) else {
+        return false;
+    };
+    let Some(next_new) = new.checked_add(new_len) else {
         return false;
     };
     if next_old != following.old || next_new != following.new {
@@ -56,9 +57,16 @@ fn extend_following(
     let Some(text) = line.text() else {
         return false;
     };
+    let Some(current_line) = current.line_edit_mut() else {
+        return false;
+    };
+    current_line.append_text(text)
+}
+
+/// Stores another line on this edit, after the lines already there.
+fn append_line(body: &mut LineBody, text: &str) {
     body.text.push('\n');
     body.text.push_str(text);
-    true
 }
 
 fn write_line(document: &mut String, body: &LineBody, lines: isize) {
@@ -174,9 +182,14 @@ impl LineEdit for LineAdded {
         Some(&self.body.text)
     }
 
+    fn append_text(&mut self, text: &str) -> bool {
+        append_line(&mut self.body, text);
+        true
+    }
+
     fn extend(&mut self, next: &dyn Change) -> bool {
         let new_len = line_count(&self.body.text);
-        extend_following(self.kind(), &self.scope, &mut self.body, 0, new_len, next)
+        extend_following(self, 0, new_len, next)
     }
 
     fn rebuild(
@@ -253,9 +266,14 @@ impl LineEdit for LineRemoved {
         Some(&self.body.text)
     }
 
+    fn append_text(&mut self, text: &str) -> bool {
+        append_line(&mut self.body, text);
+        true
+    }
+
     fn extend(&mut self, next: &dyn Change) -> bool {
         let old_len = line_count(&self.body.text);
-        extend_following(self.kind(), &self.scope, &mut self.body, old_len, 0, next)
+        extend_following(self, old_len, 0, next)
     }
 
     fn rebuild(
@@ -337,9 +355,14 @@ impl LineEdit for LineModified {
         Some(&self.body.text)
     }
 
+    fn append_text(&mut self, text: &str) -> bool {
+        append_line(&mut self.body, text);
+        true
+    }
+
     fn extend(&mut self, next: &dyn Change) -> bool {
         let count = line_count(&self.body.text);
-        extend_following(self.kind(), &self.scope, &mut self.body, count, count, next)
+        extend_following(self, count, count, next)
     }
 
     fn rebuild(

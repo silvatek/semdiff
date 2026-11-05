@@ -154,6 +154,15 @@ pub(crate) trait LineEdit {
     fn text(&self) -> Option<&str> {
         None
     }
+
+    /// Appends one following line onto this edit.
+    ///
+    /// The text of a joined run is stored as one string, with a newline between
+    /// lines. A kind that does not join, such as an identifier rename, leaves
+    /// its text unchanged and returns false.
+    fn append_text(&mut self, _text: &str) -> bool {
+        false
+    }
 }
 
 /// A directory removed from the tree.
