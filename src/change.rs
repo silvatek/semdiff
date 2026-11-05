@@ -211,16 +211,11 @@ pub(crate) trait LineEdit {
     /// Whether this edit is a full-line comment.
     ///
     /// The semdif writes `isComment: true` and leaves the attribute out when
-    /// this is false. A span change is not a comment change.
+    /// this is false. A span change is not a comment change. Adjacent line
+    /// edits join only when this flag matches.
     fn is_comment(&self) -> bool {
         false
     }
-
-    /// Keeps the comment flag only when the following joined line is a comment.
-    ///
-    /// Adjacent lines become one record. That record is a comment when every
-    /// line in it is a full-line comment. A span change does not join.
-    fn join_comment(&mut self, _following: bool) {}
 }
 
 /// A directory removed from the tree.

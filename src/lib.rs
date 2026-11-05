@@ -64,7 +64,8 @@ struct Differences {
 /// Files that exist on both sides are paired and compared in place.
 /// Empty directories that appear or disappear are recorded too, including one
 /// left empty because its files moved. Adjacent removed, added, or modified
-/// lines in one file become one record before the semdif file is written.
+/// lines in one file become one record before the semdif file is written
+/// when every line in the run is a comment, or none of them is.
 /// Identifier renames of one name then join across files when the directory
 /// that covers them has no other occurrence of that name.
 fn find_differences(fs: &dyn FileSystem, sources: &Sources) -> Result<Differences, String> {

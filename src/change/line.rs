@@ -30,12 +30,12 @@ fn line_count(text: &str) -> usize {
     text.split('\n').count()
 }
 
-/// Joins `next` onto `current` when it continues the same kind and scope.
+/// Joins `next` onto `current` when it continues the same kind, scope, and comment flag.
 ///
 /// `old_len` and `new_len` are how far `current` already reaches. The next
 /// change continues it when each side's first line plus that length equals
 /// the next change's first line. The joined text is stored on `current`.
-/// The comment flag stays set only when the following line is a comment too.
+/// A comment does not join a line that is not a comment, so those stay two records.
 fn extend_following(
     current: &mut dyn Change,
     old_len: usize,
@@ -51,9 +51,16 @@ fn extend_following(
     let Some(following) = line.start() else {
         return false;
     };
-    let Some((old, new)) = current.line_edit().map(|line| line.position()) else {
-        return false;
+    let (old, new, current_is_comment) = match current.line_edit() {
+        Some(current_line) => {
+            let (old, new) = current_line.position();
+            (old, new, current_line.is_comment())
+        }
+        None => return false,
     };
+    if line.is_comment() != current_is_comment {
+        return false;
+    }
     let Some(next_old) = old.checked_add(old_len) else {
         return false;
     };
@@ -63,14 +70,12 @@ fn extend_following(
     if next_old != following.old || next_new != following.new {
         return false;
     }
-    let following_is_comment = line.is_comment();
     let Some(text) = line.text() else {
         return false;
     };
     let Some(current_line) = current.line_edit_mut() else {
         return false;
     };
-    current_line.join_comment(following_is_comment);
     current_line.append_text(text)
 }
 
@@ -109,13 +114,15 @@ fn line_start(body: &LineBody) -> LineStart {
 
 /// Collapses adjacent line edits before they are written to the semdif file.
 ///
-/// A run of line edits in one scope becomes one change. Removals follow one
-/// another on the old side and share the new line that follows them, so
-/// `lines` is `-1` or `-2`. Additions share an insertion point and follow one
-/// another on the new side, so `lines` is `+1` or `+2`. Modifications follow
-/// one another on both sides. They do not change the line count, so `lines`
-/// stays `+0`. The merged change keeps the first line number. Its text keeps
-/// every line, joined by a newline. A span change stays its own change.
+/// A run of line edits in one scope becomes one change when every line is a
+/// comment, or none of them is. Removals follow one another on the old side
+/// and share the new line that follows them, so `lines` is `-1` or `-2`.
+/// Additions share an insertion point and follow one another on the new side,
+/// so `lines` is `+1` or `+2`. Modifications follow one another on both sides.
+/// They do not change the line count, so `lines` stays `+0`. The merged change
+/// keeps the first line number. Its text keeps every line, joined by a newline.
+/// A comment stays apart from a neighboring line that is not a comment. A span
+/// change stays its own change.
 pub(crate) fn merge_adjacent(changes: Vec<Box<dyn super::Change>>) -> Vec<Box<dyn super::Change>> {
     let mut merged: Vec<Box<dyn super::Change>> = Vec::new();
     for change in changes {
@@ -221,10 +228,6 @@ impl LineEdit for LineAdded {
         self.body.is_comment
     }
 
-    fn join_comment(&mut self, following: bool) {
-        self.body.is_comment = self.body.is_comment && following;
-    }
-
     fn extend(&mut self, next: &dyn Change) -> bool {
         let new_len = line_count(&self.body.text);
         extend_following(self, 0, new_len, next)
@@ -322,10 +325,6 @@ impl LineEdit for LineRemoved {
 
     fn is_comment(&self) -> bool {
         self.body.is_comment
-    }
-
-    fn join_comment(&mut self, following: bool) {
-        self.body.is_comment = self.body.is_comment && following;
     }
 
     fn extend(&mut self, next: &dyn Change) -> bool {
@@ -430,10 +429,6 @@ impl LineEdit for LineModified {
 
     fn is_comment(&self) -> bool {
         self.body.is_comment
-    }
-
-    fn join_comment(&mut self, following: bool) {
-        self.body.is_comment = self.body.is_comment && following;
     }
 
     fn extend(&mut self, next: &dyn Change) -> bool {

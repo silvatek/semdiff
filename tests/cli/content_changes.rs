@@ -624,13 +624,13 @@ fn flags_a_modification_when_both_lines_are_comments() {
 }
 
 #[test]
-fn a_comment_joined_to_code_is_not_flagged() {
+fn a_comment_does_not_merge_with_an_adjacent_code_edit() {
     let tree = Tree::new();
-    tree.write("left/src/merge.rs", "middle\n");
-    tree.write(
-        "right/src/merge.rs",
-        "// one\n// two\nmiddle\n// note\nlet x = 1;\n",
-    );
+    let before = "middle\n// old comment\nlet value = 1;\n// gone\nlet removed = 1;\ntail\n";
+    let after = "// one\n// two\nmiddle\n// new comment here\nlet total = 2;\ntail\n";
+    tree.write("left/src/merge.rs", before);
+    tree.write("right/src/merge.rs", after);
+    tree.write("edited/src/merge.rs", before);
 
     let document = tree.compare("left", "right");
 
@@ -638,9 +638,22 @@ fn a_comment_joined_to_code_is_not_flagged() {
         "  - scope: \"src/merge.rs\"\n    type: line-added\n    details:\n      old: 1\n      lines: +2\n      new: 1\n      text: \"// one\\n// two\"\n      isComment: true\n"
     ));
     assert!(document.contains(
-        "  - scope: \"src/merge.rs\"\n    type: line-added\n    details:\n      old: 2\n      lines: +2\n      new: 4\n      text: \"// note\\nlet x = 1;\"\n"
+        "  - scope: \"src/merge.rs\"\n    type: line-modified\n    details:\n      old: 2\n      lines: +0\n      new: 4\n      text: \"// new comment here\"\n      isComment: true\n"
     ));
-    assert!(!document.contains("let x = 1;\"\n      isComment:"));
+    assert!(document.contains(
+        "  - scope: \"src/merge.rs\"\n    type: line-modified\n    details:\n      old: 3\n      lines: +0\n      new: 5\n      text: \"let total = 2;\"\n"
+    ));
+    assert!(!document.contains("let total = 2;\"\n      isComment:"));
+    assert!(document.contains(
+        "  - scope: \"src/merge.rs\"\n    type: line-removed\n    details:\n      old: 4\n      lines: -1\n      new: 6\n      text: \"// gone\"\n      isComment: true\n"
+    ));
+    assert!(document.contains(
+        "  - scope: \"src/merge.rs\"\n    type: line-removed\n    details:\n      old: 5\n      lines: -1\n      new: 6\n      text: \"let removed = 1;\"\n"
+    ));
+    assert!(!document.contains("let removed = 1;\"\n      isComment:"));
+
+    tree.apply("edited", &document).unwrap();
+    assert_eq!(tree.read("edited/src/merge.rs"), after.as_bytes());
 }
 
 fn changed_note() -> (Tree, String) {
