@@ -660,27 +660,31 @@ fn flags_a_blank_line_for_a_known_dialect() {
     assert!(document.contains(
         "  - scope: \"src/add.rs\"\n    type: line-added\n    details:\n      old: 2\n      lines: +1\n      new: 2\n      text: \"\"\n      isWhitespace: true\n"
     ), "{document}");
-    assert!(document.contains(
-        "  - scope: \"src/add.rs\"\n    type: line-added\n    details:\n      old: 2\n      lines: +1\n      new: 3\n      text: \"    let value = 1;\"\n"
-    ), "{document}");
     assert!(
-        !document.contains("let value = 1;\"\n      isWhitespace:"),
+        !follows_with_whitespace(
+            &document,
+            "  - scope: \"src/add.rs\"\n    type: line-added\n    details:\n      old: 2\n      lines: +1\n      new: 3\n      text: \"    let value = 1;\"\n"
+        ),
+        "{document}"
+    );
+    assert!(
+        !follows_with_whitespace(
+            &document,
+            "  - scope: \"src/fill.rs\"\n    type: line-modified\n    details:\n      old: 2\n      lines: +0\n      new: 2\n      text: \"    let value = 1;\"\n"
+        ),
         "{document}"
     );
     assert!(document.contains(
-        "  - scope: \"src/fill.rs\"\n    type: line-modified\n    details:\n      old: 2\n      lines: +0\n      new: 2\n      text: \"    let value = 1;\"\n"
-    ), "{document}");
-    assert!(document.contains(
-        "  - scope: \"src/indent.rs\"\n    type: line-modified\n    details:\n      old: 2\n      lines: +0\n      new: 2\n      text: \"    let value = 1;\"\n"
+        "  - scope: \"src/indent.rs\"\n    type: line-modified\n    details:\n      old: 2\n      lines: +0\n      new: 2\n      text: \"    let value = 1;\"\n      isWhitespace: true\n"
     ), "{document}");
     assert!(document.contains(
         "  - scope: \"calc.py\"\n    type: line-removed\n    details:\n      old: 2\n      lines: -2\n      new: 2\n      text: \"\\n    \"\n      isWhitespace: true\n"
     ), "{document}");
-    assert!(document.contains(
-        "  - scope: \"indent.py\"\n    type: line-modified\n    details:\n      old: 2\n      lines: +0\n      new: 2\n      text: \"        x = 1\"\n"
-    ), "{document}");
     assert!(
-        !document.contains("x = 1\"\n      isWhitespace:"),
+        !follows_with_whitespace(
+            &document,
+            "  - scope: \"indent.py\"\n    type: line-modified\n    details:\n      old: 2\n      lines: +0\n      new: 2\n      text: \"        x = 1\"\n"
+        ),
         "{document}"
     );
     assert!(document.contains(
@@ -699,6 +703,118 @@ fn flags_a_blank_line_for_a_known_dialect() {
         tree.read("edited/indent.py"),
         python_indent_after.as_bytes()
     );
+    assert_eq!(tree.read("edited/notes.txt"), note_after.as_bytes());
+}
+
+#[test]
+fn flags_leading_and_trailing_space_from_the_dialect() {
+    let tree = Tree::new();
+    let rust_indent_before = "fn main() {\nlet a = 1;\nlet b = 1;\n}\n";
+    let rust_indent_after = "fn main() {\n    let a = 1;\n    let b = 1;\n}\n";
+    let rust_mixed_before = "fn main() {\nlet a = 1;\nlet b = 1;\n}\n";
+    let rust_mixed_after = "fn main() {\n    let a = 1;\nlet b = 2;\n}\n";
+    let rust_trail_before = "fn main() {\nlet value = 1;\n}\n";
+    let rust_trail_after = "fn main() {\nlet value = 1; \n}\n";
+    let rust_comment_before = "fn main() {}\n// note\n";
+    let rust_comment_after = "fn main() {}\n    // note\n";
+    let python_trail_before = "x = 1\n";
+    let python_trail_after = "x = 1 \n";
+    let python_comment_before = "# note\nx = 1\n";
+    let python_comment_after = "    # note\nx = 1\n";
+    let inside_before = "let value = 1;\n";
+    let inside_after = "let  value = 1;\n";
+    let note_before = "hello\n";
+    let note_after = "hello \n";
+    tree.write("left/src/indent.rs", rust_indent_before);
+    tree.write("right/src/indent.rs", rust_indent_after);
+    tree.write("edited/src/indent.rs", rust_indent_before);
+    tree.write("left/src/mixed.rs", rust_mixed_before);
+    tree.write("right/src/mixed.rs", rust_mixed_after);
+    tree.write("edited/src/mixed.rs", rust_mixed_before);
+    tree.write("left/src/trail.rs", rust_trail_before);
+    tree.write("right/src/trail.rs", rust_trail_after);
+    tree.write("edited/src/trail.rs", rust_trail_before);
+    tree.write("left/src/comment.rs", rust_comment_before);
+    tree.write("right/src/comment.rs", rust_comment_after);
+    tree.write("edited/src/comment.rs", rust_comment_before);
+    tree.write("left/trail.py", python_trail_before);
+    tree.write("right/trail.py", python_trail_after);
+    tree.write("edited/trail.py", python_trail_before);
+    tree.write("left/comment.py", python_comment_before);
+    tree.write("right/comment.py", python_comment_after);
+    tree.write("edited/comment.py", python_comment_before);
+    tree.write("left/src/inside.rs", inside_before);
+    tree.write("right/src/inside.rs", inside_after);
+    tree.write("edited/src/inside.rs", inside_before);
+    tree.write("left/notes.txt", note_before);
+    tree.write("right/notes.txt", note_after);
+    tree.write("edited/notes.txt", note_before);
+
+    let document = tree.compare("left", "right");
+
+    assert!(document.contains(
+        "  - scope: \"src/indent.rs\"\n    type: line-modified\n    details:\n      old: 2\n      lines: +0\n      new: 2\n      text: \"    let a = 1;\\n    let b = 1;\"\n      isWhitespace: true\n"
+    ), "{document}");
+    assert!(document.contains(
+        "  - scope: \"src/mixed.rs\"\n    type: line-modified\n    details:\n      old: 2\n      lines: +0\n      new: 2\n      text: \"    let a = 1;\"\n      isWhitespace: true\n"
+    ), "{document}");
+    assert!(
+        !follows_with_whitespace(
+            &document,
+            "  - scope: \"src/mixed.rs\"\n    type: line-modified\n    details:\n      old: 3\n      lines: +0\n      new: 3\n      text: \"let b = 2;\"\n"
+        ),
+        "{document}"
+    );
+    assert!(document.contains(
+        "  - scope: \"src/trail.rs\"\n    type: line-modified\n    details:\n      old: 2\n      lines: +0\n      new: 2\n      text: \"let value = 1; \"\n      isWhitespace: true\n"
+    ), "{document}");
+    assert!(document.contains(
+        "  - scope: \"src/comment.rs\"\n    type: line-modified\n    details:\n      old: 2\n      lines: +0\n      new: 2\n      text: \"    // note\"\n      isComment: true\n      isWhitespace: true\n"
+    ), "{document}");
+    assert!(document.contains(
+        "  - scope: \"trail.py\"\n    type: line-modified\n    details:\n      old: 1\n      lines: +0\n      new: 1\n      text: \"x = 1 \"\n      isWhitespace: true\n"
+    ), "{document}");
+    assert!(document.contains(
+        "  - scope: \"comment.py\"\n    type: line-modified\n    details:\n      old: 1\n      lines: +0\n      new: 1\n      text: \"    # note\"\n      isComment: true\n      isWhitespace: true\n"
+    ), "{document}");
+    assert!(
+        !follows_with_whitespace(
+            &document,
+            "  - scope: \"src/inside.rs\"\n    type: line-modified\n    details:\n      old: 1\n      lines: +0\n      new: 1\n      text: \"let  value = 1;\"\n"
+        ),
+        "{document}"
+    );
+    assert!(
+        !follows_with_whitespace(
+            &document,
+            "  - scope: \"notes.txt\"\n    type: line-modified\n    details:\n      old: 1\n      lines: +0\n      new: 1\n      text: \"hello \"\n"
+        ),
+        "{document}"
+    );
+
+    tree.apply("edited", &document).unwrap();
+    assert_eq!(
+        tree.read("edited/src/indent.rs"),
+        rust_indent_after.as_bytes()
+    );
+    assert_eq!(
+        tree.read("edited/src/mixed.rs"),
+        rust_mixed_after.as_bytes()
+    );
+    assert_eq!(
+        tree.read("edited/src/trail.rs"),
+        rust_trail_after.as_bytes()
+    );
+    assert_eq!(
+        tree.read("edited/src/comment.rs"),
+        rust_comment_after.as_bytes()
+    );
+    assert_eq!(tree.read("edited/trail.py"), python_trail_after.as_bytes());
+    assert_eq!(
+        tree.read("edited/comment.py"),
+        python_comment_after.as_bytes()
+    );
+    assert_eq!(tree.read("edited/src/inside.rs"), inside_after.as_bytes());
     assert_eq!(tree.read("edited/notes.txt"), note_after.as_bytes());
 }
 
@@ -818,6 +934,14 @@ fn a_comment_does_not_merge_with_an_adjacent_code_edit() {
 
     tree.apply("edited", &document).unwrap();
     assert_eq!(tree.read("edited/src/merge.rs"), after.as_bytes());
+}
+
+/// Whether `record` is present and its next detail is `isWhitespace`.
+fn follows_with_whitespace(document: &str, record: &str) -> bool {
+    let Some((_, rest)) = document.split_once(record) else {
+        panic!("missing record in:\n{document}");
+    };
+    rest.starts_with("      isWhitespace:")
 }
 
 fn changed_note() -> (Tree, String) {

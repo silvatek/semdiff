@@ -159,14 +159,64 @@ pub(crate) fn blank_line(path: &str, text: &str) -> bool {
 
 /// Whether `line` contains nothing but ASCII spaces and tabs.
 fn only_ascii_blank(line: &str) -> bool {
-    line.bytes().all(|byte| byte == b' ' || byte == b'\t')
+    line.chars().all(is_ascii_blank)
+}
+
+/// Whether changing `old_line` into `new_line` touches only an insignificant margin.
+///
+/// The lines have to match once ASCII spaces and tabs are removed from both
+/// ends. A brace dialect treats that indentation as formatting. An indentation
+/// dialect treats a leading change as a block boundary, unless both lines are
+/// blank or both are full-line comments. Trailing space is insignificant in
+/// either dialect. A file with no dialect is not whitespace. A carriage return
+/// or any other character stays part of the line.
+pub(crate) fn margin_whitespace(path: &str, old_line: &str, new_line: &str) -> bool {
+    let Some(dialect) = for_path(path) else {
+        return false;
+    };
+    if strip_ascii_blank(old_line) != strip_ascii_blank(new_line) {
+        return false;
+    }
+    if leading_ascii_blank(old_line) == leading_ascii_blank(new_line) {
+        return true;
+    }
+    if indent_is_formatting(dialect) {
+        return true;
+    }
+    if only_ascii_blank(old_line) && only_ascii_blank(new_line) {
+        return true;
+    }
+    introduces_line_comment(dialect, old_line) && introduces_line_comment(dialect, new_line)
+}
+
+/// Whether a block is delimited by tokens, so indentation is formatting.
+fn indent_is_formatting(dialect: &Dialect) -> bool {
+    matches!(
+        (dialect.block_start, dialect.block_end),
+        (BlockEdge::Token(_), BlockEdge::Token(_))
+    )
+}
+
+fn is_ascii_blank(character: char) -> bool {
+    character == ' ' || character == '\t'
+}
+
+/// `line` without ASCII spaces and tabs at either end.
+fn strip_ascii_blank(line: &str) -> &str {
+    line.trim_matches(is_ascii_blank)
+}
+
+/// The ASCII spaces and tabs at the start of `line`.
+fn leading_ascii_blank(line: &str) -> &str {
+    let rest = line.trim_start_matches(is_ascii_blank);
+    &line[..line.len() - rest.len()]
 }
 
 #[cfg(test)]
 mod tests {
     use super::{
-        blank_line, for_path, full_line_comment, introduces_line_comment, BlockEdge,
-        IdentifierCharacters, PYTHON, RUST,
+        blank_line, for_path, full_line_comment, introduces_line_comment, margin_whitespace,
+        BlockEdge, IdentifierCharacters, PYTHON, RUST,
     };
 
     fn ascii_identifiers() -> IdentifierCharacters {
@@ -254,5 +304,51 @@ mod tests {
         assert!(!blank_line("notes.txt", ""));
         assert!(!blank_line("notes.txt", " "));
         assert!(!blank_line("main.rs.bak", " "));
+    }
+
+    #[test]
+    fn margin_whitespace_follows_the_block_edge() {
+        assert!(margin_whitespace(
+            "src/main.rs",
+            "let value = 1;",
+            "    let value = 1;"
+        ));
+        assert!(margin_whitespace(
+            "src/main.rs",
+            "let value = 1;",
+            "let value = 1; "
+        ));
+        assert!(margin_whitespace(
+            "src/main.rs",
+            "let value = 1;",
+            "\tlet value = 1;\t"
+        ));
+        assert!(margin_whitespace("src/main.rs", "// note", "    // note"));
+        assert!(margin_whitespace("calc.py", "x = 1", "x = 1 "));
+        assert!(margin_whitespace("calc.py", "x = 1", "x = 1\t"));
+        assert!(margin_whitespace("calc.py", "# note", "  # note"));
+        assert!(margin_whitespace("calc.py", "# note", "# note "));
+        assert!(margin_whitespace("src/main.rs", "    ", "\t"));
+        assert!(margin_whitespace("calc.py", "", "  "));
+        assert!(!margin_whitespace("calc.py", "x = 1", "    x = 1"));
+        assert!(!margin_whitespace("calc.py", "x = 1", " x = 1 "));
+        assert!(!margin_whitespace(
+            "src/main.rs",
+            "let value = 1;",
+            "let  value = 1;"
+        ));
+        assert!(!margin_whitespace(
+            "src/main.rs",
+            "let value = 1;",
+            "let value = 1;\r"
+        ));
+        assert!(!margin_whitespace("src/main.rs", "    ", "let value = 1;"));
+        assert!(!margin_whitespace("notes.txt", "hello", "hello "));
+        assert!(!margin_whitespace("notes.txt", "hello", "  hello"));
+        assert!(!margin_whitespace(
+            "main.rs.bak",
+            "let value = 1;",
+            "  let value = 1;"
+        ));
     }
 }

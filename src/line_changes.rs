@@ -251,7 +251,8 @@ fn changes_in_hunk(path: &str, hunk: &Hunk) -> Vec<Box<dyn Change>> {
 ///
 /// The rename's scope is `path:line`, with the old line. Anything else is a
 /// line modification. It is a full-line comment when both lines open with the
-/// dialect's line comment. It is whitespace when both lines are blank.
+/// dialect's line comment. It is whitespace when the edit is a blank line or
+/// only an insignificant margin.
 fn modified_line(
     path: &str,
     old: usize,
@@ -274,7 +275,7 @@ fn modified_line(
         new_text.to_string(),
         crate::dialect::full_line_comment(path, old_text)
             && crate::dialect::full_line_comment(path, new_text),
-        crate::dialect::blank_line(path, old_text) && crate::dialect::blank_line(path, new_text),
+        crate::dialect::margin_whitespace(path, old_text, new_text),
     ))
 }
 
