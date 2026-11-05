@@ -69,3 +69,6 @@ fn marked() {
 }
 
 // A blank line is added below in v2.
+// A function is added below in v2.
+
+// A structure is added below in v2.

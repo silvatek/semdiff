@@ -233,8 +233,8 @@ pub(crate) static RUST: Dialect = Dialect {
 /// the line. Python is read by its own reader. It does not denote a multi-line
 /// comment: a triple-quoted string is a string. A block starts by indenting
 /// and ends when the indentation returns. An identifier starts with a letter
-/// or `_` and continues with letters, digits, or `_`. Python does not record
-/// named blocks yet, so a `def` or `class` stays a line addition.
+/// or `_` and continues with letters, digits, or `_`. A named block is opened
+/// by `def` or `class`, which are a function and a class.
 pub(crate) static PYTHON: Dialect = Dialect {
     family: Family::Python,
     extensions: &[".py"],
@@ -247,7 +247,16 @@ pub(crate) static PYTHON: Dialect = Dialect {
         continue_with: IDENTIFIER_CONTINUE,
     },
     block_prefixes: &[],
-    named_block_keywords: &[],
+    named_block_keywords: &[
+        NamedBlockKeyword {
+            keyword: "def",
+            category: BlockCategory::Function,
+        },
+        NamedBlockKeyword {
+            keyword: "class",
+            category: BlockCategory::Class,
+        },
+    ],
 };
 
 /// Every dialect semdiff knows.
@@ -333,7 +342,19 @@ mod tests {
         assert_eq!(PYTHON.block_end, BlockEdge::Indentation);
         assert_eq!(PYTHON.identifier_characters, ascii_identifiers());
         assert_eq!(PYTHON.block_prefixes, [] as [&str; 0]);
-        assert_eq!(PYTHON.named_block_keywords, [] as [NamedBlockKeyword; 0]);
+        assert_eq!(
+            PYTHON.named_block_keywords,
+            [
+                NamedBlockKeyword {
+                    keyword: "def",
+                    category: BlockCategory::Function,
+                },
+                NamedBlockKeyword {
+                    keyword: "class",
+                    category: BlockCategory::Class,
+                },
+            ]
+        );
     }
 
     #[test]

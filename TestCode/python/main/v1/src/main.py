@@ -67,3 +67,6 @@ trailing = 1
 # margin
 
 # A blank line is added below in v2.
+# A function is added below in v2.
+
+# A class is added below in v2.

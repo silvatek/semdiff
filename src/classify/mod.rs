@@ -78,9 +78,8 @@ pub(crate) fn margin_whitespace(path: &str, old_line: &str, new_line: &str) -> b
 
 /// The named block added by `text`, when the dialect's reader sees one.
 ///
-/// `text` is one `line-added` record and may hold several lines. The C-family
-/// reader uses the dialect's keywords. The Python reader does not record a
-/// named block yet.
+/// `text` is one `line-added` record and may hold several lines. Each reader
+/// uses its dialect's keywords.
 pub(crate) fn named_block(path: &str, text: &str) -> Option<NamedBlock> {
     let dialect = for_path(path)?;
     match dialect.family {
@@ -238,6 +237,14 @@ mod tests {
             opened("src/main.rs", "trait Draw {"),
             Some((BlockCategory::Interface, "Draw".to_string()))
         );
+        assert_eq!(
+            opened("calc.py", "def fib():\n    return 1"),
+            Some((BlockCategory::Function, "fib".to_string()))
+        );
+        assert_eq!(
+            opened("calc.py", "class Point:"),
+            Some((BlockCategory::Class, "Point".to_string()))
+        );
     }
 
     #[test]
@@ -257,8 +264,7 @@ mod tests {
         assert_eq!(named_block("src/main.rs", "fn"), None);
         assert_eq!(named_block("src/main.rs", ""), None);
         assert_eq!(named_block("src/main.rs", "\nfn fib() {}"), None);
-        assert_eq!(named_block("calc.py", "def fib():\n    return 1"), None);
-        assert_eq!(named_block("calc.py", "class Point:"), None);
+        assert_eq!(named_block("calc.py", "@decorator\ndef fib():"), None);
         assert_eq!(named_block("notes.txt", "fn fib() {}"), None);
     }
 }
