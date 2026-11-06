@@ -10,7 +10,7 @@ fn requires_an_output_path() {
     assert_eq!(output.status.code(), Some(2));
     assert_eq!(
         stderr,
-        "Usage: semdiff <left> <right> <output>\n       semdiff --apply [--ignore-hash] <semdif> <directory>\n"
+        "Usage: semdiff [--ignore=<file>] <left> <right> <output>\n       semdiff --apply [--ignore=<file>] [--ignore-hash] <semdif> <directory>\n"
     );
 }
 
@@ -147,6 +147,76 @@ changes:
         b"Brevity is the soul of wit.\n"
     );
     assert_eq!(fs::read(source.join("other.txt")).unwrap(), b"right only\n");
+
+    let _ = fs::remove_dir_all(root);
+}
+
+#[test]
+fn an_ignore_file_hides_those_paths_from_compare_and_apply() {
+    let root = std::env::temp_dir().join(format!("semdiff-ignore-file-{}", std::process::id()));
+    let left = root.join("left");
+    let right = root.join("right");
+    let edited = root.join("edited");
+    fs::create_dir_all(left.join("src/target")).unwrap();
+    fs::create_dir_all(right.join("src/target")).unwrap();
+    fs::create_dir_all(edited.join("src/target")).unwrap();
+    fs::create_dir_all(left.join("target")).unwrap();
+    fs::create_dir_all(right.join("target")).unwrap();
+    fs::create_dir_all(edited.join("target")).unwrap();
+    fs::write(left.join("src/main.rs"), "old\n").unwrap();
+    fs::write(right.join("src/main.rs"), "new\n").unwrap();
+    fs::write(edited.join("src/main.rs"), "old\n").unwrap();
+    fs::write(left.join("src/target/lib.rs"), "old\n").unwrap();
+    fs::write(right.join("src/target/lib.rs"), "new\n").unwrap();
+    fs::write(edited.join("src/target/lib.rs"), "old\n").unwrap();
+    fs::write(left.join("target/skip.txt"), "old\n").unwrap();
+    fs::write(right.join("target/skip.txt"), "new\n").unwrap();
+    fs::write(edited.join("target/skip.txt"), "old\n").unwrap();
+    fs::write(left.join("build.txt"), "old\n").unwrap();
+    fs::write(right.join("build.txt"), "new\n").unwrap();
+    fs::write(edited.join("build.txt"), "old\n").unwrap();
+    let ignore = root.join("ignore.txt");
+    fs::write(&ignore, "target\n\nbuild.txt\n").unwrap();
+
+    let output_path = root.join("out.yml");
+    let left_arg = left.to_str().unwrap();
+    let right_arg = right.to_str().unwrap();
+    let output_arg = output_path.to_str().unwrap();
+    let ignore_arg = format!("--ignore={}", ignore.display());
+    let compared = run(&[&ignore_arg, left_arg, right_arg, output_arg]);
+    let stderr = String::from_utf8(compared.stderr).expect("stderr was not utf-8");
+    let stdout = String::from_utf8(compared.stdout).expect("stdout was not utf-8");
+    assert!(compared.status.success(), "{stderr}");
+    let document = fs::read_to_string(&output_path).unwrap();
+    assert!(!document.contains("target/skip.txt"), "{document}");
+    assert!(!document.contains("build.txt"), "{document}");
+    assert!(document.contains("src/main.rs"), "{document}");
+    assert!(document.contains("src/target/lib.rs"), "{document}");
+    assert!(!stdout.contains("target/skip.txt"), "{stdout}");
+    assert!(stdout.contains("src/target/lib.rs"), "{stdout}");
+
+    let edited_arg = edited.to_str().unwrap();
+    let applied = run(&["--apply", &ignore_arg, output_arg, edited_arg]);
+    let stderr = String::from_utf8(applied.stderr).expect("stderr was not utf-8");
+    assert!(applied.status.success(), "{stderr}");
+    assert_eq!(fs::read(edited.join("src/main.rs")).unwrap(), b"new\n");
+    assert_eq!(
+        fs::read(edited.join("src/target/lib.rs")).unwrap(),
+        b"new\n"
+    );
+    assert_eq!(fs::read(edited.join("target/skip.txt")).unwrap(), b"old\n");
+    assert_eq!(fs::read(edited.join("build.txt")).unwrap(), b"old\n");
+
+    let missing = run(&["--ignore=missing-ignore", left_arg, right_arg, output_arg]);
+    let stderr = String::from_utf8(missing.stderr).expect("stderr was not utf-8");
+    assert_eq!(missing.status.code(), Some(1));
+    assert_eq!(stderr, "not a file: missing-ignore\n");
+
+    let repeated = run(&[&ignore_arg, &ignore_arg, left_arg, right_arg, output_arg]);
+    assert_eq!(repeated.status.code(), Some(2));
+
+    let empty = run(&["--ignore=", left_arg, right_arg, output_arg]);
+    assert_eq!(empty.status.code(), Some(2));
 
     let _ = fs::remove_dir_all(root);
 }

@@ -25,21 +25,56 @@ use std::process::ExitCode;
 ///
 /// Argument errors stop the command before a comparison or edit starts.
 pub fn run() -> ExitCode {
-    let fs = StdFileSystem::new();
     match args::parse_args() {
-        args::Command::Compare(args) => match find_differences(&fs, &args.sources) {
-            Ok(differences) => semdif::write_output(&fs, &args.output, &args.sources, &differences),
-            Err(message) => {
-                eprintln!("{message}");
-                ExitCode::from(1)
+        args::Command::Compare(args) => {
+            let fs = match filesystem_for(args.ignore.as_deref()) {
+                Ok(fs) => fs,
+                Err(message) => {
+                    eprintln!("{message}");
+                    return ExitCode::from(1);
+                }
+            };
+            match find_differences(&fs, &args.sources) {
+                Ok(differences) => {
+                    semdif::write_output(&fs, &args.output, &args.sources, &differences)
+                }
+                Err(message) => {
+                    eprintln!("{message}");
+                    ExitCode::from(1)
+                }
             }
-        },
+        }
         args::Command::Apply {
             semdif,
             source,
             ignore_hash,
-        } => apply::apply(&fs, &semdif, &source, ignore_hash),
+            ignore,
+        } => {
+            let fs = match filesystem_for(ignore.as_deref()) {
+                Ok(fs) => fs,
+                Err(message) => {
+                    eprintln!("{message}");
+                    return ExitCode::from(1);
+                }
+            };
+            apply::apply(&fs, &semdif, &source, ignore_hash)
+        }
     }
+}
+
+/// The filesystem for this command.
+///
+/// Without an ignore file, nothing is left out. The file's paths are the
+/// filesystem's ignore list.
+fn filesystem_for(ignore: Option<&str>) -> Result<StdFileSystem, String> {
+    let Some(path) = ignore else {
+        return Ok(StdFileSystem::new());
+    };
+    let text =
+        std::fs::read_to_string(path).map_err(|error| format!("cannot read {path}: {error}"))?;
+    Ok(StdFileSystem::with_ignores(filesystem::ignore_entries(
+        &text,
+    )))
 }
 
 /// The semdif text for `left` compared with `right`.

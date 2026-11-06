@@ -2,7 +2,7 @@ use super::tree::Tree;
 
 #[test]
 fn records_empty_directories_added_and_removed() {
-    let tree = Tree::new();
+    let tree = Tree::with_ignores(["target"]);
     tree.dir("left/gone/nested");
     tree.dir("left/target/skipped");
     tree.dir("right/vacant/nested");
@@ -29,7 +29,7 @@ fn records_empty_directories_added_and_removed() {
 
 #[test]
 fn ignores_the_target_path_and_keeps_a_nested_directory_named_target() {
-    let tree = Tree::new();
+    let tree = Tree::with_ignores(["target"]);
     tree.write("left/target/skip.txt", "old\n");
     tree.write("right/target/skip.txt", "new\n");
     tree.write("left/src/target/lib.rs", "old\n");
@@ -45,7 +45,7 @@ fn ignores_the_target_path_and_keeps_a_nested_directory_named_target() {
     assert!(document.contains("src/target/lib.rs"), "{document}");
     assert!(document.contains("targeting/note.txt"), "{document}");
 
-    let open = Tree::with_ignores(std::iter::empty::<&str>());
+    let open = Tree::new();
     open.write("left/target/skip.txt", "old\n");
     open.write("right/target/skip.txt", "new\n");
     let document = open.compare("left", "right");
