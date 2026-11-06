@@ -110,6 +110,12 @@ pub(crate) struct Dialect {
     /// `if (n) {` is a statement. ANSI C and JavaScript each list the words
     /// they use. `baseline` leaves the list empty.
     pub statement_keywords: &'static [&'static str],
+    /// Words that do not produce a value, so a following `-` can start a negative integer.
+    ///
+    /// `return -1` is the integer `-1`. `count-1` is subtraction, because
+    /// `count` is not listed. `baseline` lists `return`. A language with more
+    /// such words replaces the list.
+    pub unary_minus_keywords: &'static [&'static str],
 }
 
 impl Dialect {
@@ -118,8 +124,8 @@ impl Dialect {
     /// The shape is the C family: `//` and `/* */` comments, `{` `}` blocks,
     /// a `"` string escaped by `\`, and the shared identifier characters.
     /// Extensions are empty. Prefixes, named-block keywords, method scopes,
-    /// and c-style functions are off. A language static replaces the fields
-    /// that differ.
+    /// and c-style functions are off. `return` can precede a negative integer.
+    /// A language static replaces the fields that differ.
     pub(crate) const fn baseline() -> Self {
         Self {
             family: Family::CFamily,
@@ -146,6 +152,7 @@ impl Dialect {
             c_style_functions: false,
             c_fun_type_prefix: false,
             statement_keywords: &[],
+            unary_minus_keywords: &["return"],
         }
     }
 }

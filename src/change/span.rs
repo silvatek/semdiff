@@ -514,6 +514,7 @@ impl LineEdit for ConstantChanged {
             ));
         }
         let replaced = match crate::constant::replace_integer(
+            self.span.file(),
             &source_lines[line_no - 1],
             &self.old_value,
             &self.new_value,

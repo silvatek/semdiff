@@ -118,9 +118,12 @@ What a comparison records
   when the directory that covers them has no other occurrence of that name.
   A file with no dialect stays a line modification.
 
-  A line edit whose only change is one sequence of digits is constant-changed.
+  A line edit whose only change is one integer is constant-changed. The
+  integer is a sequence of digits, with a leading - when that minus starts
+  the number. A minus after a value, as in count-1 or a[i]-1, is subtraction
+  and is not part of the number. A -- glued to the digits stays an operator.
   The line is not a comment, and the digits are not inside a string. The
-  record names the old digits, the new digits, and which sequence on the line
+  record names the old integer, the new integer, and which one on the line
   changed. A sequence that continues an identifier stays an identifier rename.
   A file with no dialect stays a line modification.
 
