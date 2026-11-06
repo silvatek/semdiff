@@ -1,9 +1,6 @@
 //! The ANSI C dialect.
 
-use super::{
-    BlockComment, BlockEdge, Dialect, Family, IdentifierCharacters, IDENTIFIER_CONTINUE,
-    IDENTIFIER_START,
-};
+use super::Dialect;
 
 /// The ANSI C dialect.
 ///
@@ -16,23 +13,10 @@ use super::{
 /// `int fib(int n) {`, optionally after `static` or `extern`. `step() {` stays
 /// a line edit. `if`, `while`, `for`, and `switch` stay line edits.
 pub(crate) static ANSI_C: Dialect = Dialect {
-    family: Family::CFamily,
     extensions: &[".c", ".h"],
-    line_comment: "//",
-    block_comment: Some(BlockComment {
-        start: "/*",
-        end: "*/",
-    }),
-    block_start: BlockEdge::Token("{"),
-    block_end: BlockEdge::Token("}"),
-    identifier_characters: IdentifierCharacters {
-        start: IDENTIFIER_START,
-        continue_with: IDENTIFIER_CONTINUE,
-    },
     block_prefixes: &["static", "extern"],
-    named_block_keywords: &[],
-    method_scopes: &[],
     c_style_functions: true,
     c_fun_type_prefix: true,
     statement_keywords: &["if", "while", "for", "switch"],
+    ..Dialect::baseline()
 };

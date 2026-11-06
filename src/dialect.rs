@@ -38,7 +38,8 @@ pub(crate) fn for_path(path: &str) -> Option<&'static Dialect> {
 
 /// A language semdiff knows how to read.
 ///
-/// The fields are the whole dialect. Extensions select its files. The
+/// The fields are the whole dialect. `baseline` fills every field a language
+/// static leaves out. Extensions select its files. The
 /// identifier characters say which runs of text are names. The line comment
 /// marks a full-line comment. Block comments and block edges describe the
 /// rest of a block. The named-block keywords say which added runs are a new
@@ -81,22 +82,54 @@ pub(crate) struct Dialect {
     pub method_scopes: &'static [&'static str],
     /// Whether this dialect records a c-style function.
     ///
-    /// The name is the identifier immediately before `(`. ANSI C and
-    /// JavaScript set this. Rust and Python clear it, so a block of that
-    /// shape stays a line edit.
+    /// The name is the identifier immediately before `(`. `baseline` clears
+    /// this, so Rust and Python leave it out and a block of that shape stays
+    /// a line edit. ANSI C and JavaScript set it.
     pub c_style_functions: bool,
     /// Whether a c-style function has a type before its name.
     ///
-    /// ANSI C sets this. `int step(int n) {` is a function, and `step() {` is
-    /// not. JavaScript clears it. `step() {` is a function, and a type before
-    /// the name is not this form. A method scope around either one records a
-    /// method.
+    /// `baseline` clears this. JavaScript leaves it out. `step() {` is a
+    /// function, and a type before the name is not this form. ANSI C sets it.
+    /// `int step(int n) {` is a function, and `step() {` is not. A method
+    /// scope around either one records a method.
     pub c_fun_type_prefix: bool,
     /// Words that take the shape of a c-style function and are not one.
     ///
     /// `if (n) {` is a statement. ANSI C and JavaScript each list the words
-    /// they use.
+    /// they use. `baseline` leaves the list empty.
     pub statement_keywords: &'static [&'static str],
+}
+
+impl Dialect {
+    /// The values a language leaves unwritten.
+    ///
+    /// The shape is the C family: `//` and `/* */` comments, `{` `}` blocks,
+    /// and the shared identifier characters. Extensions are empty. Prefixes,
+    /// named-block keywords, method scopes, and c-style functions are off.
+    /// A language static replaces the fields that differ.
+    pub(crate) const fn baseline() -> Self {
+        Self {
+            family: Family::CFamily,
+            extensions: &[],
+            line_comment: "//",
+            block_comment: Some(BlockComment {
+                start: "/*",
+                end: "*/",
+            }),
+            block_start: BlockEdge::Token("{"),
+            block_end: BlockEdge::Token("}"),
+            identifier_characters: IdentifierCharacters {
+                start: IDENTIFIER_START,
+                continue_with: IDENTIFIER_CONTINUE,
+            },
+            block_prefixes: &[],
+            named_block_keywords: &[],
+            method_scopes: &[],
+            c_style_functions: false,
+            c_fun_type_prefix: false,
+            statement_keywords: &[],
+        }
+    }
 }
 
 /// ASCII characters that can appear in an identifier.
