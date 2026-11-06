@@ -1,0 +1,96 @@
+//! The JavaScript dialect.
+
+use super::{
+    BlockCategory, BlockComment, BlockEdge, Dialect, Family, IdentifierCharacters,
+    NamedBlockKeyword,
+};
+
+const IDENTIFIER_START: &str = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz_$";
+const IDENTIFIER_CONTINUE: &str =
+    "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz_$0123456789";
+
+/// The JavaScript dialect.
+///
+/// JavaScript files use `.js`. A line comment starts with `//`. A block
+/// comment runs from `/*` to `*/`. JavaScript is a C-family language. A block
+/// of code starts with `{` and ends with `}`. An identifier starts with a
+/// letter, `_`, or `$` and continues with letters, digits, `_`, or `$`. A
+/// named block is opened by `function` or `class`, which are a function and a
+/// class, optionally after a listed qualifier: `export`, `default`, `async`,
+/// or `static`. A `function` inside `class` is a method. A `function` inside
+/// another `function` is a function. A method written as `step() {`, a
+/// generator written `function*`, and text above the keyword stay line edits.
+pub(crate) static JAVASCRIPT: Dialect = Dialect {
+    family: Family::CFamily,
+    extensions: &[".js"],
+    line_comment: "//",
+    block_comment: Some(BlockComment {
+        start: "/*",
+        end: "*/",
+    }),
+    block_start: BlockEdge::Token("{"),
+    block_end: BlockEdge::Token("}"),
+    identifier_characters: IdentifierCharacters {
+        start: IDENTIFIER_START,
+        continue_with: IDENTIFIER_CONTINUE,
+    },
+    block_prefixes: &["export", "default", "async", "static"],
+    named_block_keywords: &[
+        NamedBlockKeyword {
+            keyword: "function",
+            category: BlockCategory::Function,
+        },
+        NamedBlockKeyword {
+            keyword: "class",
+            category: BlockCategory::Class,
+        },
+    ],
+    method_scopes: &["class"],
+};
+
+#[cfg(test)]
+mod tests {
+    use super::JAVASCRIPT;
+    use crate::dialect::{
+        BlockCategory, BlockEdge, Family, IdentifierCharacters, NamedBlockKeyword,
+    };
+
+    #[test]
+    fn javascript_uses_slashes_braces_and_dollar() {
+        assert_eq!(JAVASCRIPT.family, Family::CFamily);
+        assert_eq!(JAVASCRIPT.extensions, [".js"]);
+        assert_eq!(JAVASCRIPT.line_comment, "//");
+        let comment = JAVASCRIPT
+            .block_comment
+            .expect("JavaScript denotes a block comment");
+        assert_eq!(comment.start, "/*");
+        assert_eq!(comment.end, "*/");
+        assert_eq!(JAVASCRIPT.block_start, BlockEdge::Token("{"));
+        assert_eq!(JAVASCRIPT.block_end, BlockEdge::Token("}"));
+        assert_eq!(
+            JAVASCRIPT.identifier_characters,
+            IdentifierCharacters {
+                start: "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz_$",
+                continue_with: "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz_$0123456789",
+            }
+        );
+        assert_eq!(
+            JAVASCRIPT.block_prefixes,
+            ["export", "default", "async", "static"]
+        );
+        assert_eq!(
+            JAVASCRIPT.named_block_keywords,
+            [
+                NamedBlockKeyword {
+                    keyword: "function",
+                    category: BlockCategory::Function,
+                },
+                NamedBlockKeyword {
+                    keyword: "class",
+                    category: BlockCategory::Class,
+                },
+            ]
+        );
+        assert_eq!(JAVASCRIPT.method_scopes, ["class"]);
+    }
+}

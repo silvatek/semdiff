@@ -3,9 +3,36 @@
 //! A dialect is configuration. It names the files it covers, how comments and
 //! blocks are written, which characters form a name, and which keywords open
 //! a named block. `family` selects the reader: brace-delimited languages share
-//! the C-family reader, and Python has its own.
+//! the C-family reader, and Python has its own. Each language lives in its own
+//! file under `dialect/`.
 
 #![cfg_attr(not(test), allow(dead_code))]
+
+/// Every dialect semdiff knows.
+///
+/// Each static is defined in its language file.
+const DIALECTS: &[&Dialect] = &[&RUST, &PYTHON, &JAVASCRIPT];
+
+mod javascript;
+mod python;
+mod rust;
+
+pub(crate) use javascript::JAVASCRIPT;
+pub(crate) use python::PYTHON;
+pub(crate) use rust::RUST;
+
+/// The dialect for a file path, when semdiff knows that language.
+///
+/// The path's extension is matched. A file with no known extension has no
+/// dialect, so its text is not read as Rust, Python, or JavaScript.
+pub(crate) fn for_path(path: &str) -> Option<&'static Dialect> {
+    DIALECTS.iter().copied().find(|dialect| {
+        dialect
+            .extensions
+            .iter()
+            .any(|extension| path.ends_with(extension))
+    })
+}
 
 /// A language semdiff knows how to read.
 ///
@@ -78,11 +105,9 @@ pub(crate) enum Family {
     Python,
 }
 
-const IDENTIFIER_START: &str = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz_";
-const IDENTIFIER_CONTINUE: &str = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz_0123456789";
-const JAVASCRIPT_IDENTIFIER_START: &str = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz_$";
-const JAVASCRIPT_IDENTIFIER_CONTINUE: &str =
-    "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz_$0123456789";
+pub(super) const IDENTIFIER_START: &str = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz_";
+pub(super) const IDENTIFIER_CONTINUE: &str =
+    "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz_0123456789";
 
 /// The opening and closing text of a comment that can span lines.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -184,292 +209,9 @@ pub(crate) enum BlockEdge {
     Indentation,
 }
 
-/// The Rust dialect.
-///
-/// Rust files use `.rs`. A line comment starts with `//`, which also covers
-/// the doc forms `///` and `//!`. A block comment runs from `/*` to `*/`.
-/// Rust is a C-family language. A block of code starts with `{` and ends with
-/// `}`. An identifier starts with a letter or `_` and continues with letters,
-/// digits, or `_`. A named block is opened by `fn`, `struct`, `enum`, `union`,
-/// `trait`, or `impl`, optionally after a listed qualifier: `pub`,
-/// `pub(crate)`, `pub(super)`, `pub(self)`, `async`, `unsafe`, or `const`.
-/// Those keywords are function, structure, enumeration, union, interface, and
-/// implementation. A `fn` inside `impl` or `trait` is a method. A `fn` inside
-/// another `fn` is a function.
-pub(crate) static RUST: Dialect = Dialect {
-    family: Family::CFamily,
-    extensions: &[".rs"],
-    line_comment: "//",
-    block_comment: Some(BlockComment {
-        start: "/*",
-        end: "*/",
-    }),
-    block_start: BlockEdge::Token("{"),
-    block_end: BlockEdge::Token("}"),
-    identifier_characters: IdentifierCharacters {
-        start: IDENTIFIER_START,
-        continue_with: IDENTIFIER_CONTINUE,
-    },
-    block_prefixes: &[
-        "pub(crate)",
-        "pub(super)",
-        "pub(self)",
-        "pub",
-        "async",
-        "unsafe",
-        "const",
-    ],
-    named_block_keywords: &[
-        NamedBlockKeyword {
-            keyword: "fn",
-            category: BlockCategory::Function,
-        },
-        NamedBlockKeyword {
-            keyword: "struct",
-            category: BlockCategory::Structure,
-        },
-        NamedBlockKeyword {
-            keyword: "enum",
-            category: BlockCategory::Enumeration,
-        },
-        NamedBlockKeyword {
-            keyword: "union",
-            category: BlockCategory::Union,
-        },
-        NamedBlockKeyword {
-            keyword: "trait",
-            category: BlockCategory::Interface,
-        },
-        NamedBlockKeyword {
-            keyword: "impl",
-            category: BlockCategory::Implementation,
-        },
-    ],
-    method_scopes: &["impl", "trait"],
-};
-
-/// The Python dialect.
-///
-/// Python files use `.py`. A comment starts with `#` and ends at the end of
-/// the line. Python is read by its own reader. It does not denote a multi-line
-/// comment: a triple-quoted string is a string. A block starts by indenting
-/// and ends when the indentation returns. An identifier starts with a letter
-/// or `_` and continues with letters, digits, or `_`. A named block is opened
-/// by `def` or `class`, which are a function and a class. A `def` inside
-/// `class` is a method. A `def` inside another `def` is a function.
-pub(crate) static PYTHON: Dialect = Dialect {
-    family: Family::Python,
-    extensions: &[".py"],
-    line_comment: "#",
-    block_comment: None,
-    block_start: BlockEdge::Indentation,
-    block_end: BlockEdge::Indentation,
-    identifier_characters: IdentifierCharacters {
-        start: IDENTIFIER_START,
-        continue_with: IDENTIFIER_CONTINUE,
-    },
-    block_prefixes: &[],
-    named_block_keywords: &[
-        NamedBlockKeyword {
-            keyword: "def",
-            category: BlockCategory::Function,
-        },
-        NamedBlockKeyword {
-            keyword: "class",
-            category: BlockCategory::Class,
-        },
-    ],
-    method_scopes: &["class"],
-};
-
-/// The JavaScript dialect.
-///
-/// JavaScript files use `.js`. A line comment starts with `//`. A block
-/// comment runs from `/*` to `*/`. JavaScript is a C-family language. A block
-/// of code starts with `{` and ends with `}`. An identifier starts with a
-/// letter, `_`, or `$` and continues with letters, digits, `_`, or `$`. A
-/// named block is opened by `function` or `class`, which are a function and a
-/// class, optionally after a listed qualifier: `export`, `default`, `async`,
-/// or `static`. A `function` inside `class` is a method. A `function` inside
-/// another `function` is a function. A method written as `step() {`, a
-/// generator written `function*`, and text above the keyword stay line edits.
-pub(crate) static JAVASCRIPT: Dialect = Dialect {
-    family: Family::CFamily,
-    extensions: &[".js"],
-    line_comment: "//",
-    block_comment: Some(BlockComment {
-        start: "/*",
-        end: "*/",
-    }),
-    block_start: BlockEdge::Token("{"),
-    block_end: BlockEdge::Token("}"),
-    identifier_characters: IdentifierCharacters {
-        start: JAVASCRIPT_IDENTIFIER_START,
-        continue_with: JAVASCRIPT_IDENTIFIER_CONTINUE,
-    },
-    block_prefixes: &["export", "default", "async", "static"],
-    named_block_keywords: &[
-        NamedBlockKeyword {
-            keyword: "function",
-            category: BlockCategory::Function,
-        },
-        NamedBlockKeyword {
-            keyword: "class",
-            category: BlockCategory::Class,
-        },
-    ],
-    method_scopes: &["class"],
-};
-
-/// Every dialect semdiff knows.
-const DIALECTS: &[&Dialect] = &[&RUST, &PYTHON, &JAVASCRIPT];
-
-/// The dialect for a file path, when semdiff knows that language.
-///
-/// The path's extension is matched. A file with no known extension has no
-/// dialect, so its text is not read as Rust, Python, or JavaScript.
-pub(crate) fn for_path(path: &str) -> Option<&'static Dialect> {
-    DIALECTS.iter().copied().find(|dialect| {
-        dialect
-            .extensions
-            .iter()
-            .any(|extension| path.ends_with(extension))
-    })
-}
-
 #[cfg(test)]
 mod tests {
-    use super::{
-        for_path, BlockCategory, BlockEdge, Family, IdentifierCharacters, NamedBlockKeyword,
-        BLOCK_CATEGORIES, JAVASCRIPT, PYTHON, RUST,
-    };
-
-    fn ascii_identifiers() -> IdentifierCharacters {
-        IdentifierCharacters {
-            start: "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz_",
-            continue_with: "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz_0123456789",
-        }
-    }
-
-    #[test]
-    fn rust_uses_slashes_and_braces() {
-        assert_eq!(RUST.family, Family::CFamily);
-        assert_eq!(RUST.extensions, [".rs"]);
-        assert_eq!(RUST.line_comment, "//");
-        let comment = RUST.block_comment.expect("Rust denotes a block comment");
-        assert_eq!(comment.start, "/*");
-        assert_eq!(comment.end, "*/");
-        assert_eq!(RUST.block_start, BlockEdge::Token("{"));
-        assert_eq!(RUST.block_end, BlockEdge::Token("}"));
-        assert_eq!(RUST.identifier_characters, ascii_identifiers());
-        assert_eq!(
-            RUST.block_prefixes,
-            [
-                "pub(crate)",
-                "pub(super)",
-                "pub(self)",
-                "pub",
-                "async",
-                "unsafe",
-                "const",
-            ]
-        );
-        assert_eq!(
-            RUST.named_block_keywords,
-            [
-                NamedBlockKeyword {
-                    keyword: "fn",
-                    category: BlockCategory::Function,
-                },
-                NamedBlockKeyword {
-                    keyword: "struct",
-                    category: BlockCategory::Structure,
-                },
-                NamedBlockKeyword {
-                    keyword: "enum",
-                    category: BlockCategory::Enumeration,
-                },
-                NamedBlockKeyword {
-                    keyword: "union",
-                    category: BlockCategory::Union,
-                },
-                NamedBlockKeyword {
-                    keyword: "trait",
-                    category: BlockCategory::Interface,
-                },
-                NamedBlockKeyword {
-                    keyword: "impl",
-                    category: BlockCategory::Implementation,
-                },
-            ]
-        );
-        assert_eq!(RUST.method_scopes, ["impl", "trait"]);
-    }
-
-    #[test]
-    fn python_uses_hash_and_indentation() {
-        assert_eq!(PYTHON.family, Family::Python);
-        assert_eq!(PYTHON.extensions, [".py"]);
-        assert_eq!(PYTHON.line_comment, "#");
-        assert_eq!(PYTHON.block_comment, None);
-        assert_eq!(PYTHON.block_start, BlockEdge::Indentation);
-        assert_eq!(PYTHON.block_end, BlockEdge::Indentation);
-        assert_eq!(PYTHON.identifier_characters, ascii_identifiers());
-        assert_eq!(PYTHON.block_prefixes, [] as [&str; 0]);
-        assert_eq!(
-            PYTHON.named_block_keywords,
-            [
-                NamedBlockKeyword {
-                    keyword: "def",
-                    category: BlockCategory::Function,
-                },
-                NamedBlockKeyword {
-                    keyword: "class",
-                    category: BlockCategory::Class,
-                },
-            ]
-        );
-        assert_eq!(PYTHON.method_scopes, ["class"]);
-    }
-
-    #[test]
-    fn javascript_uses_slashes_braces_and_dollar() {
-        assert_eq!(JAVASCRIPT.family, Family::CFamily);
-        assert_eq!(JAVASCRIPT.extensions, [".js"]);
-        assert_eq!(JAVASCRIPT.line_comment, "//");
-        let comment = JAVASCRIPT
-            .block_comment
-            .expect("JavaScript denotes a block comment");
-        assert_eq!(comment.start, "/*");
-        assert_eq!(comment.end, "*/");
-        assert_eq!(JAVASCRIPT.block_start, BlockEdge::Token("{"));
-        assert_eq!(JAVASCRIPT.block_end, BlockEdge::Token("}"));
-        assert_eq!(
-            JAVASCRIPT.identifier_characters,
-            IdentifierCharacters {
-                start: "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz_$",
-                continue_with: "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz_$0123456789",
-            }
-        );
-        assert_eq!(
-            JAVASCRIPT.block_prefixes,
-            ["export", "default", "async", "static"]
-        );
-        assert_eq!(
-            JAVASCRIPT.named_block_keywords,
-            [
-                NamedBlockKeyword {
-                    keyword: "function",
-                    category: BlockCategory::Function,
-                },
-                NamedBlockKeyword {
-                    keyword: "class",
-                    category: BlockCategory::Class,
-                },
-            ]
-        );
-        assert_eq!(JAVASCRIPT.method_scopes, ["class"]);
-    }
+    use super::{for_path, BlockCategory, BLOCK_CATEGORIES, JAVASCRIPT, PYTHON, RUST};
 
     #[test]
     fn every_dialect_shares_one_category_list() {
