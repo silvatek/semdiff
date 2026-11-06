@@ -264,6 +264,9 @@ fn records_named_blocks_in_the_samples() {
     .unwrap();
 
     assert!(rust.contains(
+        "  - scope: \"src/main.rs:106\"\n    type: constant-changed\n    details:\n      new: 107\n      oldvalue: \"10\"\n      newvalue: \"20\"\n      occurrence: 1\n"
+    ), "{rust}");
+    assert!(rust.contains(
         "  - scope: \"src/main.rs\"\n    type: named-block-added\n    details:\n      old: 73\n      lines: +3\n      new: 74\n      text: \"fn shifted(n: u32) -> u64 {\\n    n + 1\\n}\"\n      category: \"function\"\n      name: \"shifted\"\n"
     ), "{rust}");
     assert!(rust.contains(
@@ -272,6 +275,9 @@ fn records_named_blocks_in_the_samples() {
     assert!(rust.contains(
         "  - scope: \"src/main.rs[Count]\"\n    type: named-block-added\n    details:\n      old: 82\n      lines: +3\n      new: 89\n      text: \"    fn step(&self) -> u32 {\\n        self.by\\n    }\"\n      category: \"method\"\n      name: \"step\"\n"
     ), "{rust}");
+    assert!(python.contains(
+        "  - scope: \"src/main.py:93\"\n    type: constant-changed\n    details:\n      new: 94\n      oldvalue: \"10\"\n      newvalue: \"20\"\n      occurrence: 1\n"
+    ), "{python}");
     assert!(python.contains(
         "  - scope: \"src/main.py\"\n    type: named-block-added\n    details:\n      old: 71\n      lines: +2\n      new: 72\n      text: \"def shifted(n):\\n    return n + 1\"\n      category: \"function\"\n      name: \"shifted\"\n"
     ), "{python}");
@@ -342,6 +348,9 @@ fn classifies_the_javascript_sample() {
         "  - scope: \"src/main.js\"\n    type: line-added\n    details:\n      old: 67\n      lines: +1\n      new: 67\n      text: \"\"\n      isWhitespace: true\n"
     ), "{javascript}");
     assert!(javascript.contains(
+        "  - scope: \"src/main.js:95\"\n    type: constant-changed\n    details:\n      new: 96\n      oldvalue: \"10\"\n      newvalue: \"20\"\n      occurrence: 1\n"
+    ), "{javascript}");
+    assert!(javascript.contains(
         "  - scope: \"src/main.js\"\n    type: named-block-added\n    details:\n      old: 68\n      lines: +3\n      new: 69\n      text: \"function shifted(n) {\\n    return n + 1;\\n}\"\n      category: \"function\"\n      name: \"shifted\"\n"
     ), "{javascript}");
     assert!(javascript.contains(
@@ -394,6 +403,9 @@ fn classifies_the_c_sample() {
     ), "{c}");
     assert!(c.contains(
         "  - scope: \"src/main.c\"\n    type: line-added\n    details:\n      old: 76\n      lines: +1\n      new: 76\n      text: \"\"\n      isWhitespace: true\n"
+    ), "{c}");
+    assert!(c.contains(
+        "  - scope: \"src/main.c:91\"\n    type: constant-changed\n    details:\n      new: 92\n      oldvalue: \"10\"\n      newvalue: \"20\"\n      occurrence: 1\n"
     ), "{c}");
     assert!(c.contains(
         "  - scope: \"src/main.c\"\n    type: named-block-added\n    details:\n      old: 77\n      lines: +3\n      new: 78\n      text: \"int shifted(int n) {\\n    return n + 1;\\n}\"\n      category: \"function\"\n      name: \"shifted\"\n"

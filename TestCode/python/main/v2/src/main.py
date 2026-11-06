@@ -89,3 +89,6 @@ class Count:
 # A method is removed in v2.
 class Total:
     left = 0
+
+# An integer changes in v2.
+LIMIT = 20

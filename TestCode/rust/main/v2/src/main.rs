@@ -102,3 +102,6 @@ struct Total {
 
 impl Total {
 }
+
+// An integer changes in v2.
+const LIMIT: usize = 20;

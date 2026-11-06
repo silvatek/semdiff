@@ -91,3 +91,6 @@ class Count {
 class Total {
     left = 0;
 }
+
+// An integer changes in v2.
+const LIMIT = 20;
