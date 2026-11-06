@@ -49,6 +49,7 @@ pub(crate) static JAVASCRIPT: Dialect = Dialect {
         },
     ],
     method_scopes: &["class"],
+    c_style_functions: true,
     c_fun_type_prefix: false,
     statement_keywords: &["if", "while", "for", "switch", "catch"],
 };

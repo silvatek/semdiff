@@ -32,6 +32,7 @@ pub(crate) static ANSI_C: Dialect = Dialect {
     block_prefixes: &["static", "extern"],
     named_block_keywords: &[],
     method_scopes: &[],
+    c_style_functions: true,
     c_fun_type_prefix: true,
     statement_keywords: &["if", "while", "for", "switch"],
 };

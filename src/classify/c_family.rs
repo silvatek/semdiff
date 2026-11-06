@@ -67,13 +67,13 @@ fn keyword_block(dialect: &Dialect, text: &str) -> Option<NamedBlock> {
 /// keyword in that position is not a function. `c_fun_type_prefix` requires a
 /// type before the name, as in `int step(int n) {`, or rejects one, as in
 /// JavaScript `step() {`. Inside a method scope the function is a method.
-/// A dialect that lists no statement keywords does not use this form.
+/// A dialect that clears `c_style_functions` does not use this form.
 fn c_style_function(
     dialect: &Dialect,
     text: &str,
     enclosing: Option<&super::EnclosingBlock>,
 ) -> Option<NamedBlock> {
-    if dialect.statement_keywords.is_empty() {
+    if !dialect.c_style_functions {
         return None;
     }
     let line = text.split('\n').next().unwrap_or("");
