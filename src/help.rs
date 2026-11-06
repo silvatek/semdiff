@@ -138,6 +138,7 @@ Dialects
   Rust (.rs)
   Python (.py)
   JavaScript (.js)
+  ANSI C (.c, .h)
 
   The language documentation describes how a dialect reads comments, blocks,
   and names. A file with another extension has no dialect. These files are

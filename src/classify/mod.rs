@@ -43,9 +43,11 @@ pub(super) struct EnclosingBlock {
 /// Whether `line` introduces this dialect's line comment before any other text.
 ///
 /// Leading whitespace is skipped. The line-comment marker then has to be the
-/// next characters. A block comment is not recognized here.
+/// next characters. An empty marker is not a line comment, so a language
+/// without one leaves every line unflagged. A block comment is not recognized
+/// here.
 pub(crate) fn introduces_line_comment(dialect: &Dialect, line: &str) -> bool {
-    line.trim_start().starts_with(dialect.line_comment)
+    !dialect.line_comment.is_empty() && line.trim_start().starts_with(dialect.line_comment)
 }
 
 /// Whether `text` is a full-line comment for the file at `path`.
@@ -238,7 +240,7 @@ mod tests {
         blank_line, full_line_comment, introduces_line_comment, margin_whitespace, named_block,
         named_block_in,
     };
-    use crate::dialect::{BlockCategory, JAVASCRIPT, PYTHON, RUST};
+    use crate::dialect::{BlockCategory, ANSI_C, JAVASCRIPT, PYTHON, RUST};
 
     #[test]
     fn a_line_comment_is_the_first_non_whitespace() {
@@ -261,6 +263,9 @@ mod tests {
             "const x = 1; // note"
         ));
         assert!(!introduces_line_comment(&JAVASCRIPT, "/* block */"));
+        assert!(!introduces_line_comment(&ANSI_C, "/* note */"));
+        assert!(!introduces_line_comment(&ANSI_C, "int n;"));
+        assert!(!introduces_line_comment(&ANSI_C, ""));
     }
 
     #[test]
@@ -273,6 +278,8 @@ mod tests {
         assert!(full_line_comment("src/main.js", "// note"));
         assert!(full_line_comment("src/main.js", "// one\n// two"));
         assert!(!full_line_comment("src/main.js", "/* note */"));
+        assert!(!full_line_comment("src/main.c", "/* note */"));
+        assert!(!full_line_comment("src/main.c", "int n;"));
         assert!(!full_line_comment("notes.txt", "// note"));
         assert!(!full_line_comment("main.rs.bak", "// note"));
         assert!(!full_line_comment("src/main.rs", ""));
@@ -288,6 +295,8 @@ mod tests {
         assert!(blank_line("calc.py", "  "));
         assert!(blank_line("src/main.js", ""));
         assert!(blank_line("src/main.js", "  "));
+        assert!(blank_line("src/main.c", ""));
+        assert!(blank_line("src/main.c", "  "));
         assert!(!blank_line("src/main.rs", "\r"));
         assert!(!blank_line("src/main.rs", " \r"));
         assert!(!blank_line("src/main.rs", "\u{00a0}"));
@@ -334,6 +343,16 @@ mod tests {
             "src/main.js",
             "// margin",
             "    // margin"
+        ));
+        assert!(margin_whitespace(
+            "src/main.c",
+            "int value = 1;",
+            "    int value = 1;"
+        ));
+        assert!(margin_whitespace(
+            "src/main.c",
+            "int trailing = 1;",
+            "int trailing = 1; "
         ));
         assert!(margin_whitespace("calc.py", "x = 1", "x = 1 "));
         assert!(margin_whitespace("calc.py", "x = 1", "x = 1\t"));
@@ -509,6 +528,10 @@ mod tests {
         );
         assert_eq!(
             named_block("src/main.js", "// note\nfunction fib() {}"),
+            None
+        );
+        assert_eq!(
+            named_block("src/main.c", "int shifted(int n) {\n    return n + 1;\n}"),
             None
         );
     }
