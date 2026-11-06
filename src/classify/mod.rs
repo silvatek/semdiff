@@ -186,23 +186,24 @@ pub(super) fn identifier_after<'a>(
     Some(&name_at[..end])
 }
 
-/// The named block added by `text`, when the dialect's reader sees one.
+/// The named block in `text`, when the dialect's reader sees one.
 ///
-/// `text` is one `line-added` record and may hold several lines. Each reader
-/// uses its dialect's keywords, and the text has to be that one complete block.
-/// The addition is read as if it stood at the top of the file.
+/// `text` is one line record and may hold several lines. Each reader uses its
+/// dialect's keywords, and the text has to be that one complete block. The
+/// block is read as if it stood at the top of the file.
 #[cfg_attr(not(test), allow(dead_code))]
 pub(crate) fn named_block(path: &str, text: &str) -> Option<NamedBlock> {
     named_block_in(path, text, "")
 }
 
-/// The named block added by `text`, read with the file above it.
+/// The named block in `text`, read with the file above it.
 ///
-/// `before` is the new file above the addition, without the addition itself.
-/// A function or procedure becomes a method when the innermost open block that
-/// is a callable or a method scope is one of the dialect's method scopes. The
-/// method records that block's name. An empty `before` means the addition is
-/// at the top of the file.
+/// `before` is the file above the block, without the block itself. An
+/// addition uses the new file. A removal uses the old file. A function or
+/// procedure becomes a method when the innermost open block that is a
+/// callable or a method scope is one of the dialect's method scopes. The
+/// method records that block's name. An empty `before` means the block is at
+/// the top of the file.
 pub(crate) fn named_block_in(path: &str, text: &str, before: &str) -> Option<NamedBlock> {
     let dialect = for_path(path)?;
     let mut block = match dialect.family {

@@ -457,6 +457,76 @@ fn records_an_added_rust_function_as_a_named_block() {
 }
 
 #[test]
+fn records_a_removed_named_block() {
+    let tree = Tree::new();
+    tree.write(
+        "left/src/drop.rs",
+        "fn kept() {}\nfn dropped() {\n    let value = 1;\n}\n",
+    );
+    tree.write("right/src/drop.rs", "fn kept() {}\n");
+    tree.write(
+        "edited/src/drop.rs",
+        "fn kept() {}\nfn dropped() {\n    let value = 1;\n}\n",
+    );
+    tree.write("left/src/note.rs", "fn kept() {}\nlet value = 1;\n");
+    tree.write("right/src/note.rs", "fn kept() {}\n");
+    tree.write("edited/src/note.rs", "fn kept() {}\nlet value = 1;\n");
+    tree.write(
+        "left/calc.py",
+        "def kept():\n    return 1\ndef dropped():\n    return 2\n",
+    );
+    tree.write("right/calc.py", "def kept():\n    return 1\n");
+    tree.write(
+        "edited/calc.py",
+        "def kept():\n    return 1\ndef dropped():\n    return 2\n",
+    );
+    tree.write("left/src/types.rs", "impl Foo {\n    fn dropped() {}\n}\n");
+    tree.write("right/src/types.rs", "impl Foo {\n}\n");
+    tree.write(
+        "edited/src/types.rs",
+        "impl Foo {\n    fn dropped() {}\n}\n",
+    );
+    tree.write(
+        "left/types.py",
+        "class Foo:\n    x = 1\n    def dropped(self):\n        return 1\n",
+    );
+    tree.write("right/types.py", "class Foo:\n    x = 1\n");
+    tree.write(
+        "edited/types.py",
+        "class Foo:\n    x = 1\n    def dropped(self):\n        return 1\n",
+    );
+
+    let document = tree.compare("left", "right");
+
+    assert!(document.contains(
+        "  - scope: \"src/drop.rs\"\n    type: named-block-removed\n    details:\n      old: 2\n      lines: -3\n      new: 2\n      text: \"fn dropped() {\\n    let value = 1;\\n}\"\n      category: \"function\"\n      name: \"dropped\"\n"
+    ), "{document}");
+    assert!(
+        !document.contains("scope: \"src/drop.rs\"\n    type: line-removed"),
+        "{document}"
+    );
+    assert!(document.contains(
+        "  - scope: \"src/note.rs\"\n    type: line-removed\n    details:\n      old: 2\n      lines: -1\n      new: 2\n      text: \"let value = 1;\"\n"
+    ), "{document}");
+    assert!(document.contains(
+        "  - scope: \"calc.py\"\n    type: named-block-removed\n    details:\n      old: 3\n      lines: -2\n      new: 3\n      text: \"def dropped():\\n    return 2\"\n      category: \"function\"\n      name: \"dropped\"\n"
+    ), "{document}");
+    assert!(document.contains(
+        "  - scope: \"src/types.rs[Foo]\"\n    type: named-block-removed\n    details:\n      old: 2\n      lines: -1\n      new: 2\n      text: \"    fn dropped() {}\"\n      category: \"method\"\n      name: \"dropped\"\n"
+    ), "{document}");
+    assert!(document.contains(
+        "  - scope: \"types.py[Foo]\"\n    type: named-block-removed\n    details:\n      old: 3\n      lines: -2\n      new: 3\n      text: \"    def dropped(self):\\n        return 1\"\n      category: \"method\"\n      name: \"dropped\"\n"
+    ), "{document}");
+
+    tree.apply("edited", &document).unwrap();
+    assert_eq!(tree.read("edited/src/drop.rs"), b"fn kept() {}\n");
+    assert_eq!(tree.read("edited/src/note.rs"), b"fn kept() {}\n");
+    assert_eq!(tree.read("edited/calc.py"), b"def kept():\n    return 1\n");
+    assert_eq!(tree.read("edited/src/types.rs"), b"impl Foo {\n}\n");
+    assert_eq!(tree.read("edited/types.py"), b"class Foo:\n    x = 1\n");
+}
+
+#[test]
 fn rejects_a_line_removal_whose_line_count_is_positive() {
     let tree = Tree::new();
     tree.write("edited/note.txt", "keep\ngone\n");

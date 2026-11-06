@@ -26,7 +26,7 @@ pub(super) fn margin_whitespace(dialect: &Dialect, old_line: &str, new_line: &st
     is_line_comment(dialect, old_line) && is_line_comment(dialect, new_line)
 }
 
-/// The named block added by `text`, when this dialect's keywords say so.
+/// The named block in `text`, when this dialect's keywords say so.
 ///
 /// The first line is read for the keyword and the name. Leading spaces and
 /// tabs are skipped, then any listed qualifiers, then a keyword, then the

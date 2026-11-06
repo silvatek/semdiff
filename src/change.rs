@@ -21,6 +21,7 @@ pub(crate) use directory::{DirectoryAdded, DirectoryDeleted};
 pub(crate) use file::{FileAdded, FileChanged, FileDeleted, FileRenamed};
 pub(crate) use line::{
     merge_adjacent, promote_named_blocks, LineAdded, LineModified, LineRemoved, NamedBlockAdded,
+    NamedBlockRemoved,
 };
 pub(crate) use span::{
     merge_identifier_files, merge_identifier_spans, parse_rename_scope, IdentifierRenamed,

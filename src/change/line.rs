@@ -7,7 +7,8 @@
 //! insignificant whitespace. Those are `isComment: true` and
 //! `isWhitespace: true` in the semdif. False is the default and is left out.
 //! A record may carry both. An addition the dialect reads as a new function,
-//! method, or structure is `named-block-added` and carries that block's name.
+//! method, or structure is `named-block-added`, and a removal of one is
+//! `named-block-removed`. Each record carries that block's name.
 
 use std::path::Path;
 
@@ -159,42 +160,52 @@ pub(crate) fn merge_adjacent(changes: Vec<Box<dyn super::Change>>) -> Vec<Box<dy
     merged
 }
 
-/// Records a line addition as a named block when it is one complete block.
+/// Records a line addition or removal as a named block when it is one complete block.
 ///
-/// Merging has already joined adjacent added lines into one record. A blank
-/// line stays its own record, and so does a comment. This pass reads one
-/// addition and, when its first line opens a function, method, or structure
-/// and the text is that one block, replaces it with [`NamedBlockAdded`]. The
-/// line text is unchanged, so apply inserts the same lines. A header without
-/// its body, a run of two blocks, and an addition whose block continues on a
-/// following record stay line additions. `sources` is the new text of each
-/// file, so a callable inside a type's block can be recorded as a method.
+/// Merging has already joined adjacent lines of one kind into one record. A
+/// blank line stays its own record, and so does a comment. This pass reads
+/// one addition or removal and, when its first line opens a function, method,
+/// or structure and the text is that one block, replaces it with
+/// [`NamedBlockAdded`] or [`NamedBlockRemoved`]. The line text is unchanged,
+/// so apply inserts or deletes the same lines. A header without its body, a
+/// run of two blocks, and a block that continues on a following record stay
+/// line additions or removals. `new_sources` is the new text of each file and
+/// `old_sources` is the old text, so a callable inside a type's block can be
+/// recorded as a method.
 pub(crate) fn promote_named_blocks(
-    sources: &[super::SourceText],
+    new_sources: &[super::SourceText],
+    old_sources: &[super::SourceText],
     mut changes: Vec<Box<dyn super::Change>>,
 ) -> Vec<Box<dyn super::Change>> {
     for index in 0..changes.len() {
         if followed_by_more_of_the_block(&changes, index) {
             continue;
         }
-        if let Some(promoted) = named_block_from_addition(sources, changes[index].as_ref()) {
+        if let Some(promoted) = named_block_from_addition(new_sources, changes[index].as_ref()) {
+            changes[index] = Box::new(promoted);
+            continue;
+        }
+        if let Some(promoted) = named_block_from_removal(old_sources, changes[index].as_ref()) {
             changes[index] = Box::new(promoted);
         }
     }
     changes
 }
 
-/// Whether a later addition is still inside the block opened by `changes[index]`.
+/// Whether a later record is still inside the block opened by `changes[index]`.
 ///
 /// Blank lines between the two are skipped, because a blank line does not end
-/// an indented block and does not join the addition. The next line that is
-/// not blank answers. Braces do not use this: an unclosed brace block is
-/// already left as a line addition.
+/// an indented block and does not join the record. The next line that is not
+/// blank answers. An addition continues on the new side. A removal continues
+/// on the old side. Braces do not use this: an unclosed brace block is
+/// already left as a line addition or removal.
 fn followed_by_more_of_the_block(changes: &[Box<dyn super::Change>], index: usize) -> bool {
     let current = changes[index].as_ref();
-    if current.kind() != "line-added" {
-        return false;
-    }
+    let removal = match current.kind() {
+        "line-added" => false,
+        "line-removed" => true,
+        _ => return false,
+    };
     let Some(line) = current.line_edit() else {
         return false;
     };
@@ -205,30 +216,45 @@ fn followed_by_more_of_the_block(changes: &[Box<dyn super::Change>], index: usiz
         return false;
     };
     let (old, new) = line.position();
-    let Some(mut new_at) = new.checked_add(line_count(text)) else {
-        return false;
+    let (mut old_at, mut new_at) = if removal {
+        let Some(next_old) = old.checked_add(line_count(text)) else {
+            return false;
+        };
+        (next_old, new)
+    } else {
+        let Some(next_new) = new.checked_add(line_count(text)) else {
+            return false;
+        };
+        (old, next_new)
     };
     let mut cursor = index + 1;
     while cursor < changes.len() {
         let next = changes[cursor].as_ref();
-        if next.kind() != "line-added" || next.scope() != current.scope() {
+        if next.kind() != current.kind() || next.scope() != current.scope() {
             return false;
         }
         let Some(next_line) = next.line_edit() else {
             return false;
         };
         let (next_old, next_new) = next_line.position();
-        if next_old != old || next_new != new_at {
+        if next_old != old_at || next_new != new_at {
             return false;
         }
         let Some(next_text) = next_line.text() else {
             return false;
         };
         if next_line.is_whitespace() && !next_line.is_comment() {
-            let Some(advanced) = new_at.checked_add(line_count(next_text)) else {
-                return false;
-            };
-            new_at = advanced;
+            if removal {
+                let Some(advanced) = old_at.checked_add(line_count(next_text)) else {
+                    return false;
+                };
+                old_at = advanced;
+            } else {
+                let Some(advanced) = new_at.checked_add(line_count(next_text)) else {
+                    return false;
+                };
+                new_at = advanced;
+            }
             cursor += 1;
             continue;
         }
@@ -253,6 +279,31 @@ fn named_block_from_addition(
     let before = lines_before(sources, change.scope(), new);
     let block = crate::classify::named_block_in(change.scope(), text, &before)?;
     Some(NamedBlockAdded::new(
+        block_scope(change.scope(), block.enclosing.as_deref()),
+        old,
+        new,
+        text.to_string(),
+        block.category,
+        block.name,
+    ))
+}
+
+fn named_block_from_removal(
+    sources: &[super::SourceText],
+    change: &dyn super::Change,
+) -> Option<NamedBlockRemoved> {
+    if change.kind() != "line-removed" {
+        return None;
+    }
+    let line = change.line_edit()?;
+    if line.is_comment() || line.is_whitespace() {
+        return None;
+    }
+    let text = line.text()?;
+    let (old, new) = line.position();
+    let before = lines_before(sources, change.scope(), old);
+    let block = crate::classify::named_block_in(change.scope(), text, &before)?;
+    Some(NamedBlockRemoved::new(
         block_scope(change.scope(), block.enclosing.as_deref()),
         old,
         new,
@@ -290,15 +341,17 @@ fn scope_file(scope: &str) -> &str {
     &scope[..open]
 }
 
-/// The new file above line `new_line`, joined the way the addition is joined.
+/// The file above line `line`, joined the way the record is joined.
 ///
-/// `new_line` is 1-based. Line 1 has nothing above it. A file that is not in
-/// `sources` has nothing above it either, so the addition is read at the top.
-fn lines_before(sources: &[super::SourceText], path: &str, new_line: usize) -> String {
+/// `line` is 1-based. Line 1 has nothing above it. A file that is not in
+/// `sources` has nothing above it either, so the block is read at the top.
+/// An addition uses the new file and its new line. A removal uses the old
+/// file and its old line.
+fn lines_before(sources: &[super::SourceText], path: &str, line: usize) -> String {
     let Some(source) = sources.iter().find(|source| source.path == path) else {
         return String::new();
     };
-    let end = new_line.saturating_sub(1).min(source.lines.len());
+    let end = line.saturating_sub(1).min(source.lines.len());
     source.lines[..end].join("\n")
 }
 
@@ -510,6 +563,120 @@ impl LineEdit for NamedBlockAdded {
         plan: &mut LinePlan,
     ) -> Result<(), String> {
         plan.insert(file, self.body.old, self.body.new, &self.body.text)
+    }
+}
+
+/// A line removal that deletes a named block.
+///
+/// `category` is the shared kind of block, and `name` is the identifier that
+/// follows the dialect's keyword. A method's scope is the file and the
+/// enclosing block, as `src/main.rs[Count]`, read from the old file. The
+/// record keeps the removed lines, and apply deletes them from the file. It
+/// does not join a neighboring edit: the name belongs to this one block.
+pub(crate) struct NamedBlockRemoved {
+    scope: String,
+    body: LineBody,
+    category: crate::dialect::BlockCategory,
+    name: String,
+}
+
+impl NamedBlockRemoved {
+    pub(crate) fn new(
+        scope: String,
+        old: usize,
+        new: usize,
+        text: String,
+        category: crate::dialect::BlockCategory,
+        name: String,
+    ) -> Self {
+        Self {
+            scope,
+            body: LineBody {
+                old,
+                new,
+                text,
+                is_comment: false,
+                is_whitespace: false,
+            },
+            category,
+            name,
+        }
+    }
+}
+
+impl Change for NamedBlockRemoved {
+    fn kind(&self) -> &'static str {
+        "named-block-removed"
+    }
+
+    fn scope(&self) -> &str {
+        &self.scope
+    }
+
+    fn line_edit(&self) -> Option<&dyn LineEdit> {
+        Some(self)
+    }
+
+    fn line_edit_mut(&mut self) -> Option<&mut dyn LineEdit> {
+        Some(self)
+    }
+
+    fn content(&self) -> Option<&dyn Content> {
+        Some(self)
+    }
+
+    fn write_details(&self, document: &mut String) {
+        let count = line_count(&self.body.text) as isize;
+        write_line(document, &self.body, -count);
+        crate::semdif::write_detail(document, "category", self.category.as_str());
+        crate::semdif::write_detail(document, "name", &self.name);
+    }
+
+    fn apply(&self, _fs: &dyn FileSystem, _source: &Path) -> Result<(), String> {
+        applied_with_its_file(self.kind())
+    }
+}
+
+impl Content for NamedBlockRemoved {
+    fn file(&self) -> &str {
+        scope_file(&self.scope)
+    }
+}
+
+impl LineEdit for NamedBlockRemoved {
+    fn position(&self) -> (usize, usize) {
+        (self.body.old, self.body.new)
+    }
+
+    fn start(&self) -> Option<LineStart> {
+        Some(line_start(&self.body))
+    }
+
+    fn text(&self) -> Option<&str> {
+        Some(&self.body.text)
+    }
+
+    fn is_comment(&self) -> bool {
+        false
+    }
+
+    fn is_whitespace(&self) -> bool {
+        false
+    }
+
+    fn rebuild(
+        &self,
+        file: &Path,
+        _source_lines: &[String],
+        plan: &mut LinePlan,
+    ) -> Result<(), String> {
+        let count = line_count(&self.body.text);
+        let old_end = self
+            .body
+            .old
+            .checked_add(count - 1)
+            .ok_or_else(|| format!("line {} is outside {}", self.body.old, file.display()))?;
+        plan.remove_range(file, self.body.old, old_end)
     }
 }
 
@@ -737,7 +904,7 @@ impl LineEdit for LineModified {
 
 #[cfg(test)]
 mod tests {
-    use super::{merge_adjacent, promote_named_blocks, LineAdded};
+    use super::{merge_adjacent, promote_named_blocks, LineAdded, LineRemoved};
 
     /// An added line at one insertion point. `new` is its line in the new file.
     fn added(new: usize, text: &str, is_comment: bool, is_whitespace: bool) -> LineAdded {
@@ -745,6 +912,18 @@ mod tests {
             "src/main.rs".to_string(),
             1,
             new,
+            text.to_string(),
+            is_comment,
+            is_whitespace,
+        )
+    }
+
+    /// A removed line. `old` is its line in the old file.
+    fn removed(old: usize, text: &str, is_comment: bool, is_whitespace: bool) -> LineRemoved {
+        LineRemoved::new(
+            "src/main.rs".to_string(),
+            old,
+            old,
             text.to_string(),
             is_comment,
             is_whitespace,
@@ -785,6 +964,7 @@ mod tests {
     fn a_function_addition_becomes_a_named_block() {
         let merged = promote_named_blocks(
             &[],
+            &[],
             vec![Box::new(added(
                 2,
                 "fn added() {\n    let value = 1;\n}",
@@ -817,6 +997,7 @@ mod tests {
         }];
         let merged = promote_named_blocks(
             &sources,
+            &[],
             vec![Box::new(added(2, "    fn added() {}", false, false))],
         );
 
@@ -830,8 +1011,142 @@ mod tests {
     }
 
     #[test]
+    fn a_function_removal_becomes_a_named_block() {
+        let merged = promote_named_blocks(
+            &[],
+            &[],
+            vec![Box::new(removed(
+                2,
+                "fn dropped() {\n    let value = 1;\n}",
+                false,
+                false,
+            ))],
+        );
+
+        assert_eq!(merged.len(), 1);
+        assert_eq!(merged[0].kind(), "named-block-removed");
+        assert_eq!(merged[0].scope(), "src/main.rs");
+        let mut details = String::new();
+        merged[0].write_details(&mut details);
+        assert!(details.contains("lines: -3\n"), "{details}");
+        assert!(details.contains("category: \"function\"\n"), "{details}");
+        assert!(details.contains("name: \"dropped\"\n"), "{details}");
+    }
+
+    #[test]
+    fn a_method_removal_inside_the_old_file_type_names_that_type() {
+        let sources = [crate::change::SourceText {
+            path: "src/main.rs".to_string(),
+            lines: vec![
+                "impl Foo {".to_string(),
+                "    fn dropped() {}".to_string(),
+                "}".to_string(),
+            ],
+        }];
+        let merged = promote_named_blocks(
+            &[],
+            &sources,
+            vec![Box::new(removed(2, "    fn dropped() {}", false, false))],
+        );
+
+        assert_eq!(merged[0].kind(), "named-block-removed");
+        assert_eq!(merged[0].scope(), "src/main.rs[Foo]");
+        assert_eq!(merged[0].content().expect("content").file(), "src/main.rs");
+        let mut details = String::new();
+        merged[0].write_details(&mut details);
+        assert!(details.contains("lines: -1\n"), "{details}");
+        assert!(details.contains("category: \"method\"\n"), "{details}");
+        assert!(details.contains("name: \"dropped\"\n"), "{details}");
+
+        let nested = [crate::change::SourceText {
+            path: "src/main.rs".to_string(),
+            lines: vec![
+                "fn outer() {".to_string(),
+                "    fn dropped() {}".to_string(),
+                "    let value = 1;".to_string(),
+                "}".to_string(),
+            ],
+        }];
+        let inner = promote_named_blocks(
+            &[],
+            &nested,
+            vec![Box::new(removed(2, "    fn dropped() {}", false, false))],
+        );
+        assert_eq!(inner[0].kind(), "named-block-removed");
+        assert_eq!(inner[0].scope(), "src/main.rs");
+        let mut details = String::new();
+        inner[0].write_details(&mut details);
+        assert!(details.contains("category: \"function\"\n"), "{details}");
+    }
+
+    #[test]
+    fn an_unclosed_or_paired_function_stays_a_line_removal() {
+        let unclosed = promote_named_blocks(
+            &[],
+            &[],
+            vec![Box::new(removed(
+                2,
+                "fn dropped() {\n    let value = 1;",
+                false,
+                false,
+            ))],
+        );
+        assert_eq!(unclosed[0].kind(), "line-removed");
+
+        let pair = promote_named_blocks(
+            &[],
+            &[],
+            vec![Box::new(removed(
+                2,
+                "fn one() {}\nfn two() {}",
+                false,
+                false,
+            ))],
+        );
+        assert_eq!(pair[0].kind(), "line-removed");
+    }
+
+    #[test]
+    fn a_python_block_that_continues_after_the_removal_stays_a_line_removal() {
+        let continued = promote_named_blocks(
+            &[],
+            &[],
+            vec![
+                Box::new(LineRemoved::new(
+                    "calc.py".to_string(),
+                    1,
+                    1,
+                    "def dropped():\n    return 1".to_string(),
+                    false,
+                    false,
+                )),
+                Box::new(LineRemoved::new(
+                    "calc.py".to_string(),
+                    3,
+                    1,
+                    "".to_string(),
+                    false,
+                    true,
+                )),
+                Box::new(LineRemoved::new(
+                    "calc.py".to_string(),
+                    4,
+                    1,
+                    "    return 2".to_string(),
+                    false,
+                    false,
+                )),
+            ],
+        );
+        assert_eq!(continued[0].kind(), "line-removed");
+        assert!(continued[1].line_edit().expect("blank").is_whitespace());
+        assert_eq!(continued[2].kind(), "line-removed");
+    }
+
+    #[test]
     fn an_unclosed_or_paired_function_stays_a_line_addition() {
         let unclosed = promote_named_blocks(
+            &[],
             &[],
             vec![Box::new(added(
                 2,
@@ -844,6 +1159,7 @@ mod tests {
 
         let pair = promote_named_blocks(
             &[],
+            &[],
             vec![Box::new(added(2, "fn one() {}\nfn two() {}", false, false))],
         );
         assert_eq!(pair[0].kind(), "line-added");
@@ -852,6 +1168,7 @@ mod tests {
     #[test]
     fn a_python_block_that_continues_after_the_addition_stays_a_line_addition() {
         let continued = promote_named_blocks(
+            &[],
             &[],
             vec![
                 Box::new(LineAdded::new(
@@ -886,6 +1203,7 @@ mod tests {
 
         let commented = promote_named_blocks(
             &[],
+            &[],
             vec![
                 Box::new(LineAdded::new(
                     "calc.py".to_string(),
@@ -912,6 +1230,7 @@ mod tests {
     #[test]
     fn a_blank_line_between_python_functions_leaves_each_one() {
         let merged = promote_named_blocks(
+            &[],
             &[],
             vec![
                 Box::new(LineAdded::new(
@@ -949,6 +1268,7 @@ mod tests {
     #[test]
     fn a_comment_or_plain_addition_stays_a_line_addition() {
         let merged = promote_named_blocks(
+            &[],
             &[],
             vec![
                 Box::new(added(1, "// fn fake() {}", true, false)),
