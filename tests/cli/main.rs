@@ -17,6 +17,18 @@ fn run(args: &[&str]) -> std::process::Output {
         .expect("failed to run semdiff")
 }
 
+fn run_with_stdin(args: &[&str], stdin: &[u8]) -> std::process::Output {
+    let mut child = Command::new(env!("CARGO_BIN_EXE_semdiff"))
+        .args(args)
+        .stdin(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        .spawn()
+        .expect("failed to run semdiff");
+    std::io::Write::write_all(child.stdin.as_mut().expect("stdin"), stdin).expect("write stdin");
+    child.wait_with_output().expect("failed to run semdiff")
+}
+
 #[test]
 fn prints_paths_present_in_both_directories() {
     let root = std::env::temp_dir().join(format!("semdiff-pairs-{}", std::process::id()));

@@ -1,4 +1,4 @@
-use super::run;
+use super::{run, run_with_stdin};
 
 use std::fs;
 
@@ -43,6 +43,46 @@ fn prints_name_and_version_when_comparing_directories() {
     assert_eq!(lines.next(), Some("  text-encoding: \"utf-8\""));
     assert_eq!(lines.next(), Some("  binary-encoding: \"base64\""));
     assert!(lines.next().is_none());
+
+    let _ = fs::remove_dir_all(root);
+}
+
+#[test]
+fn a_dash_writes_the_semdif_to_stdout_and_reads_it_from_stdin() {
+    let root = std::env::temp_dir().join(format!("semdiff-stdio-{}", std::process::id()));
+    let left = root.join("left");
+    let right = root.join("right");
+    let edited = root.join("edited");
+    fs::create_dir_all(&left).unwrap();
+    fs::create_dir_all(&right).unwrap();
+    fs::create_dir_all(&edited).unwrap();
+    fs::write(left.join("note.txt"), "old\n").unwrap();
+    fs::write(right.join("note.txt"), "new\n").unwrap();
+    fs::write(edited.join("note.txt"), "old\n").unwrap();
+
+    let left = left.to_str().unwrap();
+    let right = right.to_str().unwrap();
+    let output = run(&[left, right, "-"]);
+    let stdout = String::from_utf8(output.stdout).expect("stdout was not utf-8");
+    let stderr = String::from_utf8(output.stderr).expect("stderr was not utf-8");
+
+    assert!(output.status.success(), "{stderr}");
+    assert!(stdout.starts_with("header:\n"), "{stdout}");
+    assert!(stdout.contains("text: \"new\"\n"), "{stdout}");
+    assert!(!stdout.contains("Semdiff "), "{stdout}");
+    assert_eq!(
+        stderr,
+        format!(
+            "Semdiff {}\nComparing {left} and {right}\nnote.txt\n",
+            env!("CARGO_PKG_VERSION")
+        )
+    );
+
+    let edited = edited.to_str().unwrap();
+    let applied = run_with_stdin(&["--apply", "-", edited], stdout.as_bytes());
+    let apply_stderr = String::from_utf8(applied.stderr).expect("stderr was not utf-8");
+    assert!(applied.status.success(), "{apply_stderr}");
+    assert_eq!(fs::read(root.join("edited/note.txt")).unwrap(), b"new\n");
 
     let _ = fs::remove_dir_all(root);
 }

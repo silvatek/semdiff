@@ -1,4 +1,5 @@
 use std::collections::BTreeSet;
+use std::io::Read;
 use std::path::Path;
 use std::process::ExitCode;
 
@@ -8,19 +9,19 @@ use crate::filesystem::FileSystem;
 /// Edits `source` so it gains the changes recorded in `semdif`.
 ///
 /// The semdif file is the record of what changed, so the same edits can be replayed
-/// on another copy of that directory. `ignore_hash` still applies an added,
-/// deleted, or renamed file when its recorded hash does not match. A problem
-/// is reported on stderr.
+/// on another copy of that directory. A semdif path of `-` is read from standard
+/// input. `ignore_hash` still applies an added, deleted, or renamed file when its
+/// recorded hash does not match. A problem is reported on stderr.
 pub(crate) fn apply(
     fs: &dyn FileSystem,
     semdif: &str,
     source: &str,
     ignore_hash: bool,
 ) -> ExitCode {
-    let document = match fs.read_text(Path::new(semdif)) {
+    let document = match read_semdif(fs, semdif) {
         Ok(document) => document,
-        Err(error) => {
-            eprintln!("cannot read {semdif}: {error}");
+        Err(message) => {
+            eprintln!("{message}");
             return ExitCode::from(1);
         }
     };
@@ -31,6 +32,19 @@ pub(crate) fn apply(
             ExitCode::from(1)
         }
     }
+}
+
+/// The semdif text from a file, or from standard input when `semdif` is `-`.
+fn read_semdif(fs: &dyn FileSystem, semdif: &str) -> Result<String, String> {
+    if semdif == crate::args::STANDARD_STREAM {
+        let mut document = String::new();
+        std::io::stdin()
+            .read_to_string(&mut document)
+            .map_err(|error| format!("cannot read {semdif}: {error}"))?;
+        return Ok(document);
+    }
+    fs.read_text(Path::new(semdif))
+        .map_err(|error| format!("cannot read {semdif}: {error}"))
 }
 
 pub(crate) fn apply_document(
