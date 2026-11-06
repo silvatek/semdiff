@@ -89,7 +89,9 @@ fn find_differences(fs: &dyn FileSystem, sources: &Sources) -> Result<Difference
     ));
     let changes = directory_changes::place_replacement_files(changes);
     let changes = change::merge_adjacent(changes);
-    let changes = change::promote_named_blocks(changes);
+    let right_root = fs.source_base(Path::new(&sources.right));
+    let right_texts = source_texts(fs, right_root, &paired_files)?;
+    let changes = change::promote_named_blocks(&right_texts, changes);
     let left_root = fs.source_base(Path::new(&sources.left));
     let texts = source_texts(fs, left_root, &left_files)?;
     let changes = change::merge_identifier_files(&texts, changes);

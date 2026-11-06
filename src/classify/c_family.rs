@@ -42,6 +42,7 @@ pub(super) fn named_block(dialect: &Dialect, text: &str) -> Option<NamedBlock> {
     Some(NamedBlock {
         category: opened.category,
         name: opened.name.to_string(),
+        enclosing: None,
     })
 }
 
@@ -110,6 +111,137 @@ fn one_block(dialect: &Dialect, text: &str) -> bool {
 
 fn is_block_whitespace(character: char) -> bool {
     character == ' ' || character == '\t' || character == '\n' || character == '\r'
+}
+
+/// The method scope that `before` leaves open, when one is still open.
+///
+/// Braces are counted from the top of `before`, skipping the dialect's
+/// comments. A `{` belongs to the header at the start of the line that has
+/// not yet opened its block: `impl` and `trait` open a method scope, and
+/// `fn` opens a callable. The name is the identifier after that keyword, so
+/// `impl Count` names `Count` and `impl Foo for Bar` names `Foo`. An `if`,
+/// a `struct`, or a brace in `-> impl Bar` does not. The innermost callable
+/// or method scope decides. A quote is not special, so a brace written
+/// inside a string is counted.
+pub(super) fn enclosing_block(dialect: &Dialect, before: &str) -> Option<super::EnclosingBlock> {
+    let (BlockEdge::Token(start), BlockEdge::Token(end)) = (dialect.block_start, dialect.block_end)
+    else {
+        return None;
+    };
+    if start.is_empty() || end.is_empty() {
+        return None;
+    }
+    let mut rest = before;
+    let mut stack: Vec<Option<super::BlockRole>> = Vec::new();
+    let mut in_header = true;
+    let mut header_seen = false;
+    let mut header_role: Option<super::BlockRole> = None;
+    while !rest.is_empty() {
+        if rest.starts_with('\n') || rest.starts_with('\r') {
+            rest = &rest[1..];
+            in_header = true;
+            header_seen = false;
+            continue;
+        }
+        if rest.starts_with(' ') || rest.starts_with('\t') {
+            rest = &rest[1..];
+            continue;
+        }
+        if !dialect.line_comment.is_empty() && rest.starts_with(dialect.line_comment) {
+            rest = match rest.find('\n') {
+                Some(index) => &rest[index + 1..],
+                None => "",
+            };
+            in_header = true;
+            header_seen = false;
+            continue;
+        }
+        if let Some(comment) = dialect.block_comment {
+            if !comment.start.is_empty()
+                && !comment.end.is_empty()
+                && rest.starts_with(comment.start)
+            {
+                let after = &rest[comment.start.len()..];
+                let Some(end_at) = after.find(comment.end) else {
+                    break;
+                };
+                rest = &after[end_at + comment.end.len()..];
+                continue;
+            }
+        }
+        if rest.starts_with(start) {
+            stack.push(header_role.take());
+            header_seen = false;
+            in_header = false;
+            rest = &rest[start.len()..];
+            continue;
+        }
+        if rest.starts_with(end) {
+            stack.pop();
+            header_role = None;
+            header_seen = false;
+            in_header = true;
+            rest = &rest[end.len()..];
+            continue;
+        }
+        if in_header && !header_seen {
+            if let Some(qualifier) = super::matching_qualifier(
+                &dialect.identifier_characters,
+                dialect.block_prefixes,
+                rest,
+            ) {
+                rest = &rest[qualifier.len()..];
+                continue;
+            }
+        }
+        if let Some((word, after)) = next_word(&dialect.identifier_characters, rest) {
+            if in_header && !header_seen {
+                header_role = header_role_of(dialect, word, after);
+                header_seen = true;
+            }
+            in_header = false;
+            rest = after;
+            continue;
+        }
+        let Some(character) = rest.chars().next() else {
+            break;
+        };
+        if character == ';' {
+            header_role = None;
+            header_seen = false;
+            in_header = true;
+        } else {
+            in_header = false;
+        }
+        rest = &rest[character.len_utf8()..];
+    }
+    enclosing_of(&stack)
+}
+
+/// The role of a header word, including the type name when it is a method scope.
+fn header_role_of(dialect: &Dialect, word: &str, after: &str) -> Option<super::BlockRole> {
+    if super::keyword_is_method_scope(dialect, word) {
+        let name = super::identifier_after(&dialect.identifier_characters, after);
+        Some(super::BlockRole::Method(name.map(str::to_string)))
+    } else if super::keyword_is_callable(dialect, word) {
+        Some(super::BlockRole::Callable)
+    } else {
+        None
+    }
+}
+
+/// The innermost callable or method scope still open on `stack`.
+fn enclosing_of(stack: &[Option<super::BlockRole>]) -> Option<super::EnclosingBlock> {
+    for role in stack.iter().rev() {
+        match role {
+            None => continue,
+            Some(super::BlockRole::Callable) => return None,
+            Some(super::BlockRole::Method(name)) => {
+                return Some(super::EnclosingBlock { name: name.clone() });
+            }
+        }
+    }
+    None
 }
 
 /// The category and name of the block opened by `line`.

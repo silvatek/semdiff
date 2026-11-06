@@ -51,6 +51,7 @@ pub(super) fn named_block(dialect: &Dialect, text: &str) -> Option<NamedBlock> {
     Some(NamedBlock {
         category: opened.category,
         name: opened.name.to_string(),
+        enclosing: None,
     })
 }
 
@@ -99,6 +100,121 @@ fn one_block(dialect: &Dialect, text: &str) -> bool {
         saw_body = true;
     }
     saw_body
+}
+
+/// The method scope that `before` leaves open around `addition`.
+///
+/// Indentation is the block edge. A header that ends with `:` opens a block
+/// at its indent. `class` is a method scope and `def` is a callable. The
+/// name is the identifier after `class`, so `class Count` and
+/// `class Count(Bar)` both name `Count`. An `if` is neither, so it does not
+/// hide the class around it. A line that returns to an earlier indent closes
+/// the blocks it leaves. The innermost callable or method scope that is still
+/// open around `addition` decides.
+pub(super) fn enclosing_block(
+    dialect: &Dialect,
+    before: &str,
+    addition: &str,
+) -> Option<super::EnclosingBlock> {
+    if dialect.block_start != BlockEdge::Indentation || dialect.block_end != BlockEdge::Indentation
+    {
+        return None;
+    }
+    let mut stack: Vec<ScopeFrame> = Vec::new();
+    for line in before.split('\n') {
+        if only_ascii_blank(line) || is_line_comment(dialect, line) {
+            continue;
+        }
+        let indent = leading_ascii_blank(line).len();
+        while stack.last().is_some_and(|frame| frame.indent >= indent) {
+            stack.pop();
+        }
+        if opens_block(dialect, line) {
+            stack.push(ScopeFrame {
+                indent,
+                role: frame_role(dialect, line),
+            });
+        }
+    }
+    let addition_indent = addition
+        .split('\n')
+        .next()
+        .map(|line| leading_ascii_blank(line).len())
+        .unwrap_or(0);
+    while stack
+        .last()
+        .is_some_and(|frame| frame.indent >= addition_indent)
+    {
+        stack.pop();
+    }
+    for frame in stack.iter().rev() {
+        match &frame.role {
+            None => continue,
+            Some(super::BlockRole::Callable) => return None,
+            Some(super::BlockRole::Method(name)) => {
+                return Some(super::EnclosingBlock { name: name.clone() });
+            }
+        }
+    }
+    None
+}
+
+/// One indented block, and whether it makes an inner callable a method.
+///
+/// `None` is a block that does not decide, such as `if`.
+struct ScopeFrame {
+    indent: usize,
+    role: Option<super::BlockRole>,
+}
+
+/// Whether `line` opens a block, ignoring a trailing line comment.
+fn opens_block(dialect: &Dialect, line: &str) -> bool {
+    code_of(dialect, line).trim_end().ends_with(':')
+}
+
+/// The header on `line`: a method scope, a callable, or neither.
+fn frame_role(dialect: &Dialect, line: &str) -> Option<super::BlockRole> {
+    let Some((word, after)) = opening_word(dialect, code_of(dialect, line)) else {
+        return None;
+    };
+    if super::keyword_is_method_scope(dialect, word) {
+        let name = super::identifier_after(&dialect.identifier_characters, after);
+        Some(super::BlockRole::Method(name.map(str::to_string)))
+    } else if super::keyword_is_callable(dialect, word) {
+        Some(super::BlockRole::Callable)
+    } else {
+        None
+    }
+}
+
+/// `line` with its line comment removed.
+fn code_of<'a>(dialect: &Dialect, line: &'a str) -> &'a str {
+    if dialect.line_comment.is_empty() {
+        return line;
+    }
+    match line.find(dialect.line_comment) {
+        Some(index) => &line[..index],
+        None => line,
+    }
+}
+
+/// The first word of `line` after any listed qualifiers, and the text after it.
+fn opening_word<'a>(dialect: &Dialect, line: &'a str) -> Option<(&'a str, &'a str)> {
+    let mut rest = trim_ascii_blank_start(line);
+    loop {
+        if let Some(qualifier) =
+            super::matching_qualifier(&dialect.identifier_characters, dialect.block_prefixes, rest)
+        {
+            let after = &rest[qualifier.len()..];
+            let next = trim_ascii_blank_start(after);
+            if next.len() == after.len() {
+                return None;
+            }
+            rest = next;
+            continue;
+        }
+        return next_word(&dialect.identifier_characters, rest);
+    }
 }
 
 /// The category and name of the block opened by `line`.

@@ -43,6 +43,13 @@ pub(crate) struct Dialect {
     /// means this dialect does not record named blocks. A category that is
     /// absent here is one this dialect does not support.
     pub named_block_keywords: &'static [NamedBlockKeyword],
+    /// Keywords whose block makes an inner callable a method.
+    ///
+    /// Rust lists `impl` and `trait`. Python lists `class`. The innermost
+    /// such block wins over an `if` or a bare brace, and loses to a callable
+    /// wrapped around the new one. A `fn` or `def` inside another `fn` or
+    /// `def` stays a function.
+    pub method_scopes: &'static [&'static str],
 }
 
 /// ASCII characters that can appear in an identifier.
@@ -184,9 +191,8 @@ pub(crate) enum BlockEdge {
 /// `trait`, or `impl`, optionally after a listed qualifier: `pub`,
 /// `pub(crate)`, `pub(super)`, `pub(self)`, `async`, `unsafe`, or `const`.
 /// Those keywords are function, structure, enumeration, union, interface, and
-/// implementation.
-/// A method uses `fn` as well, and needs the enclosing type, so a `fn` read
-/// from the added lines alone is a function.
+/// implementation. A `fn` inside `impl` or `trait` is a method. A `fn` inside
+/// another `fn` is a function.
 pub(crate) static RUST: Dialect = Dialect {
     family: Family::CFamily,
     extensions: &[".rs"],
@@ -236,6 +242,7 @@ pub(crate) static RUST: Dialect = Dialect {
             category: BlockCategory::Implementation,
         },
     ],
+    method_scopes: &["impl", "trait"],
 };
 
 /// The Python dialect.
@@ -245,7 +252,8 @@ pub(crate) static RUST: Dialect = Dialect {
 /// comment: a triple-quoted string is a string. A block starts by indenting
 /// and ends when the indentation returns. An identifier starts with a letter
 /// or `_` and continues with letters, digits, or `_`. A named block is opened
-/// by `def` or `class`, which are a function and a class.
+/// by `def` or `class`, which are a function and a class. A `def` inside
+/// `class` is a method. A `def` inside another `def` is a function.
 pub(crate) static PYTHON: Dialect = Dialect {
     family: Family::Python,
     extensions: &[".py"],
@@ -268,6 +276,7 @@ pub(crate) static PYTHON: Dialect = Dialect {
             category: BlockCategory::Class,
         },
     ],
+    method_scopes: &["class"],
 };
 
 /// Every dialect semdiff knows.
@@ -352,6 +361,7 @@ mod tests {
                 },
             ]
         );
+        assert_eq!(RUST.method_scopes, ["impl", "trait"]);
     }
 
     #[test]
@@ -377,6 +387,7 @@ mod tests {
                 },
             ]
         );
+        assert_eq!(PYTHON.method_scopes, ["class"]);
     }
 
     #[test]
