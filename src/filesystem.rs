@@ -205,14 +205,15 @@ const HASH_BUFFER_SIZE: usize = 8 * 1024;
 
 /// The operating system's files.
 ///
-/// A new filesystem ignores `target`. [`StdFileSystem::with_ignores`] sets another list.
+/// A new filesystem ignores nothing. [`StdFileSystem::with_ignores`] sets the paths a
+/// source walk leaves out.
 pub struct StdFileSystem {
     ignores: Vec<String>,
 }
 
 impl StdFileSystem {
     pub fn new() -> Self {
-        Self::with_ignores(["target"])
+        Self::with_ignores(std::iter::empty::<String>())
     }
 
     pub fn with_ignores(ignores: impl IntoIterator<Item = impl Into<String>>) -> Self {
@@ -288,9 +289,9 @@ enum Node {
 }
 
 impl MemoryFileSystem {
-    /// A tree that ignores `target`.
+    /// A tree that ignores nothing.
     pub fn new() -> Self {
-        Self::with_ignores(["target"])
+        Self::with_ignores(std::iter::empty::<String>())
     }
 
     pub fn with_ignores(ignores: impl IntoIterator<Item = impl Into<String>>) -> Self {
@@ -434,6 +435,18 @@ impl Node {
             Node::Dir(_) => NodeKind::Directory,
         }
     }
+}
+
+/// The paths listed in an ignore file.
+///
+/// Each line is one relative path. A blank line is skipped. The caller passes
+/// the result to [`StdFileSystem::with_ignores`] or [`MemoryFileSystem::with_ignores`].
+pub(crate) fn ignore_entries(text: &str) -> Vec<String> {
+    text.lines()
+        .map(str::trim)
+        .filter(|line| !line.is_empty())
+        .map(str::to_string)
+        .collect()
 }
 
 fn ignore_list(ignores: impl IntoIterator<Item = impl Into<String>>) -> Vec<String> {
@@ -652,14 +665,25 @@ mod tests {
 
     #[test]
     fn an_ignore_path_covers_that_path_and_its_children() {
-        let fs = MemoryFileSystem::new();
+        let fs = MemoryFileSystem::with_ignores(["target"]);
         assert!(fs.is_ignored("target"));
         assert!(fs.is_ignored("target/skip.txt"));
         assert!(!fs.is_ignored("src/target"));
         assert!(!fs.is_ignored("src/target/lib.rs"));
         assert!(!fs.is_ignored("targeting"));
-        let open = MemoryFileSystem::with_ignores(Vec::<String>::new());
+        let open = MemoryFileSystem::new();
+        assert!(open.ignores().is_empty());
         assert!(!open.is_ignored("target"));
         assert!(!open.is_ignored("target/skip.txt"));
+    }
+
+    #[test]
+    fn ignore_entries_keep_each_path_and_skip_blank_lines() {
+        let entries = ignore_entries("target\n\n  build.txt \n");
+        assert_eq!(entries, vec!["target".to_string(), "build.txt".to_string()]);
+        let fs = MemoryFileSystem::with_ignores(entries);
+        assert!(fs.is_ignored("target/skip.txt"));
+        assert!(fs.is_ignored("build.txt"));
+        assert!(!fs.is_ignored("src/main.rs"));
     }
 }

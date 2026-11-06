@@ -4,8 +4,8 @@ use std::path::Path;
 use crate::filesystem::{FileSystem, StdFileSystem};
 
 const USAGE: &str = "\
-Usage: semdiff <left> <right> <output>
-       semdiff --apply [--ignore-hash] <semdif> <directory>
+Usage: semdiff [--ignore=<file>] <left> <right> <output>
+       semdiff --apply [--ignore=<file>] [--ignore-hash] <semdif> <directory>
 ";
 
 /// The path that means the standard stream.
@@ -22,12 +22,16 @@ pub(crate) enum Command {
         source: String,
         /// Apply an added, deleted, or renamed file even when its hash does not match.
         ignore_hash: bool,
+        /// Paths to leave out of the filesystem walk, read from this file.
+        ignore: Option<String>,
     },
 }
 
 pub(crate) struct Args {
     pub(crate) sources: Sources,
     pub(crate) output: String,
+    /// Paths to leave out of the filesystem walk, read from this file.
+    pub(crate) ignore: Option<String>,
 }
 
 /// The two paths being compared.
@@ -85,6 +89,7 @@ enum CliError {
 /// Otherwise the three paths are a comparison. A missing source is rejected,
 /// and a file is not compared with a directory, so the command is not attempted.
 /// An output or semdif path of [`STANDARD_STREAM`] is the standard stream, not a file.
+/// `--ignore=<file>` lists paths the filesystem walk leaves out.
 fn parsed_args<I>(args: I) -> Result<Command, CliError>
 where
     I: IntoIterator<Item = String>,
@@ -96,19 +101,52 @@ where
     {
         return parse_apply(args);
     }
-    if args.len() != 3 {
+    let ignore = ignore_file(&args)?;
+    let mut paths = Vec::new();
+    for arg in args {
+        if arg.starts_with("--ignore=") {
+            continue;
+        }
+        if arg.starts_with('-') && arg != STANDARD_STREAM {
+            return Err(CliError::Usage);
+        }
+        paths.push(arg);
+    }
+    if paths.len() != 3 {
         return Err(CliError::Usage);
     }
-    let left = args[0].clone();
-    let right = args[1].clone();
-    let output = args[2].clone();
+    let left = paths[0].clone();
+    let right = paths[1].clone();
+    let output = paths[2].clone();
     require_source(&left)?;
     require_source(&right)?;
     require_same_kind(&left, &right)?;
     Ok(Command::Compare(Args {
         sources: Sources { left, right },
         output,
+        ignore,
     }))
+}
+
+/// The path from one `--ignore=<file>`, when the command has one.
+///
+/// The file lists relative paths to leave out, one per line. A missing file is
+/// rejected. An empty name, or a second ignore file, is rejected.
+fn ignore_file(args: &[String]) -> Result<Option<String>, CliError> {
+    let mut found = None;
+    for arg in args {
+        let Some(path) = arg.strip_prefix("--ignore=") else {
+            continue;
+        };
+        if path.is_empty() || found.is_some() {
+            return Err(CliError::Usage);
+        }
+        if !StdFileSystem::new().is_file(Path::new(path)) {
+            return Err(CliError::NotFile(path.to_string()));
+        }
+        found = Some(path.to_string());
+    }
+    Ok(found)
 }
 
 /// `--apply`, with an optional `--ignore-hash`, and the semdif and directory.
@@ -116,7 +154,9 @@ where
 /// The flag may sit anywhere among those arguments. It does not apply a
 /// comparison, and a second copy of either flag is rejected. A semdif path of
 /// [`STANDARD_STREAM`] is read from standard input, so that path need not exist.
+/// `--ignore=<file>` is the same list a comparison uses.
 fn parse_apply(args: Vec<String>) -> Result<Command, CliError> {
+    let ignore = ignore_file(&args)?;
     let mut ignore_hash = false;
     let mut saw_apply = false;
     let mut paths = Vec::new();
@@ -134,6 +174,7 @@ fn parse_apply(args: Vec<String>) -> Result<Command, CliError> {
                 }
                 ignore_hash = true;
             }
+            other if other.starts_with("--ignore=") => {}
             STANDARD_STREAM => paths.push(STANDARD_STREAM.to_string()),
             other if other.starts_with('-') => return Err(CliError::Usage),
             other => paths.push(other.to_string()),
@@ -155,6 +196,7 @@ fn parse_apply(args: Vec<String>) -> Result<Command, CliError> {
         semdif,
         source,
         ignore_hash,
+        ignore,
     })
 }
 

@@ -55,7 +55,7 @@ fn prints_paths_present_in_both_directories() {
     assert_eq!(
         stdout,
         format!(
-            "Semdiff {}\nComparing {left} and {right}\nsrc/main.rs\n",
+            "Semdiff {}\nComparing {left} and {right}\nsrc/main.rs\ntarget/skip.txt\n",
             env!("CARGO_PKG_VERSION")
         )
     );
