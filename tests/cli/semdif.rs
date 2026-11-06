@@ -39,6 +39,9 @@ fn prints_name_and_version_when_comparing_directories() {
     assert_eq!(&timestamp[4..5], "-");
     assert_eq!(&timestamp[10..11], "T");
     assert!(timestamp.ends_with('Z'), "{timestamp}");
+    assert_eq!(lines.next(), Some("  hash: \"sha256\""));
+    assert_eq!(lines.next(), Some("  text-encoding: \"utf-8\""));
+    assert_eq!(lines.next(), Some("  binary-encoding: \"base64\""));
     assert!(lines.next().is_none());
 
     let _ = fs::remove_dir_all(root);

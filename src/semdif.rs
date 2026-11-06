@@ -69,6 +69,24 @@ pub(crate) fn write_plain(document: &mut String, key: &str, value: &str) {
     document.push_str(&format!("      {key}: {value}\n"));
 }
 
+/// The hash named in a semdif header.
+///
+/// File digests are SHA-256, written as lowercase hex. The header records that
+/// choice with the comparison.
+const HASH_ALGORITHM: &str = "sha256";
+
+/// The text encoding named in a semdif header.
+///
+/// Quoted text in the file is UTF-8. A reader uses this to turn those values
+/// back into text.
+const TEXT_ENCODING: &str = "utf-8";
+
+/// The binary encoding named in a semdif header.
+///
+/// Bytes that are not text cannot sit in a YAML string, so a change stores them
+/// with this encoding. The same name is written on that change.
+const BINARY_ENCODING: &str = "base64";
+
 /// Stores one file's bytes inside the semdif.
 ///
 /// Text stays in the record as a quoted value, with quotes and line breaks escaped so
@@ -80,7 +98,7 @@ pub(crate) fn write_file_contents(document: &mut String, contents: &[u8]) {
             document.push_str(&format!("      contents: {}\n", yaml_string(text)));
         }
         Err(_) => {
-            document.push_str("      encoding: \"base64\"\n");
+            document.push_str(&format!("      encoding: \"{BINARY_ENCODING}\"\n"));
             document.push_str(&format!(
                 "      contents: {}\n",
                 yaml_string(&STANDARD.encode(contents))
@@ -91,9 +109,20 @@ pub(crate) fn write_file_contents(document: &mut String, contents: &[u8]) {
 
 /// The header that identifies a semdif file.
 ///
-/// It records which tool version produced the file and the UTC time it was produced.
+/// It records which tool version produced the file, the UTC time it was produced,
+/// the hash used for file contents, the encoding of text, and the encoding of
+/// bytes that are not text.
 fn header_document(version: &str, timestamp: &str) -> String {
-    format!("header:\n  semdiff: \"{version}\"\n  timestamp: \"{timestamp}\"\n")
+    format!(
+        "\
+header:
+  semdiff: \"{version}\"
+  timestamp: \"{timestamp}\"
+  hash: \"{HASH_ALGORITHM}\"
+  text-encoding: \"{TEXT_ENCODING}\"
+  binary-encoding: \"{BINARY_ENCODING}\"
+"
+    )
 }
 
 /// A YAML-safe form of a text value.
@@ -435,9 +464,9 @@ fn stored_bytes(fields: &BTreeMap<String, String>, kind: &str) -> Result<Vec<u8>
     let contents = required(fields, "contents", kind)?;
     match fields.get("encoding").map(String::as_str) {
         None => Ok(contents.into_bytes()),
-        Some("base64") => STANDARD
+        Some(BINARY_ENCODING) => STANDARD
             .decode(contents)
-            .map_err(|_| format!("{kind} contents are not valid base64")),
+            .map_err(|_| format!("{kind} contents are not valid {BINARY_ENCODING}")),
         Some(other) => Err(format!("{kind} has unsupported encoding {other}")),
     }
 }
@@ -625,7 +654,23 @@ fn decode_hex_char(chars: &mut std::str::Chars<'_>, value: &str) -> Result<char,
 
 #[cfg(test)]
 mod tests {
-    use super::parse_changes;
+    use super::{header_document, parse_changes};
+
+    #[test]
+    fn the_header_names_the_hash_and_both_encodings() {
+        let header = header_document("0.1.0", "2020-01-01T00:00:00Z");
+        assert_eq!(
+            header,
+            "\
+header:
+  semdiff: \"0.1.0\"
+  timestamp: \"2020-01-01T00:00:00Z\"
+  hash: \"sha256\"
+  text-encoding: \"utf-8\"
+  binary-encoding: \"base64\"
+"
+        );
+    }
 
     fn line_change(kind: &str, lines: &str, comment: &str, whitespace: &str) -> String {
         let mut flags = String::new();
