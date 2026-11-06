@@ -5,7 +5,7 @@
 //! A leading indent change is a block boundary. Trailing space is formatting.
 
 use crate::classify::NamedBlock;
-use crate::dialect::{BlockCategory, Dialect, IdentifierCharacters, NamedBlockKeyword};
+use crate::dialect::{BlockCategory, BlockEdge, Dialect, IdentifierCharacters, NamedBlockKeyword};
 
 /// Whether the edit is only an insignificant margin.
 ///
@@ -28,13 +28,14 @@ pub(super) fn margin_whitespace(dialect: &Dialect, old_line: &str, new_line: &st
 
 /// The named block added by `text`, when this dialect's keywords say so.
 ///
-/// Only the first line is read. Leading spaces and tabs are skipped, then any
-/// listed qualifiers, then a keyword, then the identifier that names the
-/// block. A qualifier is matched as written. The keyword selects the
-/// category. A comment, a dialect with no such keywords, and a line that does
-/// not open in that shape have no block. The remainder of the line, and any
-/// following lines, stay the block's text. A decorator above the keyword is
-/// not skipped.
+/// The first line is read for the keyword and the name. Leading spaces and
+/// tabs are skipped, then any listed qualifiers, then a keyword, then the
+/// identifier that names the block. A qualifier is matched as written. The
+/// keyword selects the category. The whole text then has to be that one
+/// indented block: a later line is blank or indented further than the header,
+/// and at least one line is indented further. A comment, a dialect with no
+/// such keywords, a header without its body, and a run of two blocks have no
+/// block. A decorator above the keyword is not skipped.
 pub(super) fn named_block(dialect: &Dialect, text: &str) -> Option<NamedBlock> {
     if dialect.named_block_keywords.is_empty() {
         return None;
@@ -44,10 +45,60 @@ pub(super) fn named_block(dialect: &Dialect, text: &str) -> Option<NamedBlock> {
         return None;
     }
     let opened = block_name(dialect, line)?;
+    if !one_block(dialect, text) {
+        return None;
+    }
     Some(NamedBlock {
         category: opened.category,
         name: opened.name.to_string(),
     })
+}
+
+/// Whether `following` is still inside the indented block opened by `addition`.
+///
+/// A blank line does not answer the question. A line indented further than
+/// the header is still in the block. A line at the header's indent or less
+/// is the next block, or code after it.
+pub(super) fn block_resumes(addition: &str, following: &str) -> bool {
+    let Some(header) = addition.split('\n').next() else {
+        return false;
+    };
+    let Some(line) = following.split('\n').next() else {
+        return false;
+    };
+    if only_ascii_blank(line) {
+        return false;
+    }
+    leading_ascii_blank(line).len() > leading_ascii_blank(header).len()
+}
+
+/// Whether `text` is one complete indented block.
+///
+/// The first line is the header. A later line that is not blank has to be
+/// indented further, and at least one such line has to be present. A blank
+/// line stays inside the block. A line that returns to the header's indent,
+/// or less, means the text continues past the block.
+fn one_block(dialect: &Dialect, text: &str) -> bool {
+    if dialect.block_start != BlockEdge::Indentation || dialect.block_end != BlockEdge::Indentation
+    {
+        return false;
+    }
+    let mut lines = text.split('\n');
+    let Some(header) = lines.next() else {
+        return false;
+    };
+    let header_indent = leading_ascii_blank(header).len();
+    let mut saw_body = false;
+    for line in lines {
+        if only_ascii_blank(line) {
+            continue;
+        }
+        if leading_ascii_blank(line).len() <= header_indent {
+            return false;
+        }
+        saw_body = true;
+    }
+    saw_body
 }
 
 /// The category and name of the block opened by `line`.

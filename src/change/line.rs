@@ -158,24 +158,80 @@ pub(crate) fn merge_adjacent(changes: Vec<Box<dyn super::Change>>) -> Vec<Box<dy
     merged
 }
 
-/// Records a line addition as a named block when the dialect says it opens one.
+/// Records a line addition as a named block when it is one complete block.
 ///
-/// Merging has already joined adjacent added lines into one record. This pass
-/// reads that record and, when its first line opens a function, method, or
-/// structure, replaces it with [`NamedBlockAdded`]. The line text is unchanged,
-/// so apply inserts the same lines. A comment, whitespace, or an addition the
-/// dialect does not treat as a named block stays a line addition.
+/// Merging has already joined adjacent added lines into one record. A blank
+/// line stays its own record, and so does a comment. This pass reads one
+/// addition and, when its first line opens a function, method, or structure
+/// and the text is that one block, replaces it with [`NamedBlockAdded`]. The
+/// line text is unchanged, so apply inserts the same lines. A header without
+/// its body, a run of two blocks, and an addition whose block continues on a
+/// following record stay line additions.
 pub(crate) fn promote_named_blocks(
-    changes: Vec<Box<dyn super::Change>>,
+    mut changes: Vec<Box<dyn super::Change>>,
 ) -> Vec<Box<dyn super::Change>> {
-    changes.into_iter().map(promote_named_block).collect()
+    for index in 0..changes.len() {
+        if followed_by_more_of_the_block(&changes, index) {
+            continue;
+        }
+        if let Some(promoted) = named_block_from_addition(changes[index].as_ref()) {
+            changes[index] = Box::new(promoted);
+        }
+    }
+    changes
 }
 
-fn promote_named_block(change: Box<dyn super::Change>) -> Box<dyn super::Change> {
-    match named_block_from_addition(change.as_ref()) {
-        Some(promoted) => Box::new(promoted),
-        None => change,
+/// Whether a later addition is still inside the block opened by `changes[index]`.
+///
+/// Blank lines between the two are skipped, because a blank line does not end
+/// an indented block and does not join the addition. The next line that is
+/// not blank answers. Braces do not use this: an unclosed brace block is
+/// already left as a line addition.
+fn followed_by_more_of_the_block(changes: &[Box<dyn super::Change>], index: usize) -> bool {
+    let current = changes[index].as_ref();
+    if current.kind() != "line-added" {
+        return false;
     }
+    let Some(line) = current.line_edit() else {
+        return false;
+    };
+    if line.is_whitespace() || line.is_comment() {
+        return false;
+    }
+    let Some(text) = line.text() else {
+        return false;
+    };
+    let (old, new) = line.position();
+    let Some(mut new_at) = new.checked_add(line_count(text)) else {
+        return false;
+    };
+    let mut cursor = index + 1;
+    while cursor < changes.len() {
+        let next = changes[cursor].as_ref();
+        if next.kind() != "line-added" || next.scope() != current.scope() {
+            return false;
+        }
+        let Some(next_line) = next.line_edit() else {
+            return false;
+        };
+        let (next_old, next_new) = next_line.position();
+        if next_old != old || next_new != new_at {
+            return false;
+        }
+        let Some(next_text) = next_line.text() else {
+            return false;
+        };
+        if next_line.is_whitespace() && !next_line.is_comment() {
+            let Some(advanced) = new_at.checked_add(line_count(next_text)) else {
+                return false;
+            };
+            new_at = advanced;
+            cursor += 1;
+            continue;
+        }
+        return crate::classify::block_resumes(current.scope(), text, next_text);
+    }
+    false
 }
 
 fn named_block_from_addition(change: &dyn super::Change) -> Option<NamedBlockAdded> {
@@ -696,6 +752,113 @@ mod tests {
         merged[0].write_details(&mut details);
         assert!(details.contains("category: \"function\"\n"), "{details}");
         assert!(details.contains("name: \"added\"\n"), "{details}");
+    }
+
+    #[test]
+    fn an_unclosed_or_paired_function_stays_a_line_addition() {
+        let unclosed = promote_named_blocks(vec![Box::new(added(
+            2,
+            "fn added() {\n    let value = 1;",
+            false,
+            false,
+        ))]);
+        assert_eq!(unclosed[0].kind(), "line-added");
+
+        let pair = promote_named_blocks(vec![Box::new(added(
+            2,
+            "fn one() {}\nfn two() {}",
+            false,
+            false,
+        ))]);
+        assert_eq!(pair[0].kind(), "line-added");
+    }
+
+    #[test]
+    fn a_python_block_that_continues_after_the_addition_stays_a_line_addition() {
+        let continued = promote_named_blocks(vec![
+            Box::new(LineAdded::new(
+                "calc.py".to_string(),
+                1,
+                1,
+                "def added():\n    return 1".to_string(),
+                false,
+                false,
+            )),
+            Box::new(LineAdded::new(
+                "calc.py".to_string(),
+                1,
+                3,
+                "".to_string(),
+                false,
+                true,
+            )),
+            Box::new(LineAdded::new(
+                "calc.py".to_string(),
+                1,
+                4,
+                "    return 2".to_string(),
+                false,
+                false,
+            )),
+        ]);
+        assert_eq!(continued[0].kind(), "line-added");
+        assert!(continued[1].line_edit().expect("blank").is_whitespace());
+        assert_eq!(continued[2].kind(), "line-added");
+
+        let commented = promote_named_blocks(vec![
+            Box::new(LineAdded::new(
+                "calc.py".to_string(),
+                1,
+                1,
+                "def added():\n    return 1".to_string(),
+                false,
+                false,
+            )),
+            Box::new(LineAdded::new(
+                "calc.py".to_string(),
+                1,
+                3,
+                "    # note".to_string(),
+                true,
+                false,
+            )),
+        ]);
+        assert_eq!(commented[0].kind(), "line-added");
+        assert_eq!(commented[1].kind(), "line-added");
+    }
+
+    #[test]
+    fn a_blank_line_between_python_functions_leaves_each_one() {
+        let merged = promote_named_blocks(vec![
+            Box::new(LineAdded::new(
+                "calc.py".to_string(),
+                1,
+                1,
+                "def one():\n    return 1".to_string(),
+                false,
+                false,
+            )),
+            Box::new(LineAdded::new(
+                "calc.py".to_string(),
+                1,
+                3,
+                "".to_string(),
+                false,
+                true,
+            )),
+            Box::new(LineAdded::new(
+                "calc.py".to_string(),
+                1,
+                4,
+                "def two():\n    return 2".to_string(),
+                false,
+                false,
+            )),
+        ]);
+
+        assert_eq!(merged[0].kind(), "named-block-added");
+        assert!(merged[1].line_edit().expect("blank").is_whitespace());
+        assert_eq!(merged[2].kind(), "named-block-added");
     }
 
     #[test]
