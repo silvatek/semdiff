@@ -9,6 +9,7 @@ mod dialect;
 mod directory_changes;
 mod file_change;
 mod filesystem;
+mod help;
 mod identifier;
 mod line_changes;
 mod semdif;
@@ -26,6 +27,10 @@ use std::process::ExitCode;
 /// Argument errors stop the command before a comparison or edit starts.
 pub fn run() -> ExitCode {
     match args::parse_args() {
+        args::Command::Help => {
+            help::print_help();
+            ExitCode::SUCCESS
+        }
         args::Command::Compare(args) => {
             let fs = match filesystem_for(args.ignore.as_deref()) {
                 Ok(fs) => fs,

@@ -3,6 +3,40 @@ use super::run;
 use std::fs;
 
 #[test]
+fn prints_help_when_asked() {
+    let output = run(&["--help"]);
+    let stdout = String::from_utf8(output.stdout).expect("stdout was not utf-8");
+    let stderr = String::from_utf8(output.stderr).expect("stderr was not utf-8");
+
+    assert!(output.status.success());
+    assert!(stderr.is_empty());
+    assert!(stdout.starts_with(
+        "\
+Compare two sources and write a semdif. --apply replays a semdif onto a directory.
+A semdif is a list of differences, with semantic context where available.
+"
+    ));
+    assert!(stdout.contains("\nArguments\n"));
+    assert!(stdout.contains("--ignore=<file>"));
+    assert!(stdout.contains("--ignore-hash"));
+    assert!(stdout.contains("standard input"));
+    assert!(stdout.contains("identifier-renamed"));
+    assert!(stdout.contains("\nWhat a comparison records\n"));
+    assert!(stdout.contains("\nWhat apply checks\n"));
+    assert!(stdout.contains("\nLimitations\n"));
+    assert!(stdout.contains("os error 39"));
+}
+
+#[test]
+fn help_takes_precedence_over_the_other_arguments() {
+    let output = run(&["--apply", "--help", "missing"]);
+    let stdout = String::from_utf8(output.stdout).expect("stdout was not utf-8");
+
+    assert!(output.status.success());
+    assert!(stdout.contains("\nArguments\n"));
+}
+
+#[test]
 fn requires_an_output_path() {
     let output = run(&[]);
     let stderr = String::from_utf8(output.stderr).expect("stderr was not utf-8");
@@ -16,9 +50,11 @@ A semdif is a list of differences, with semantic context where available.
 
 Usage: semdiff [--ignore=<file>] <left> <right> <output>
        semdiff --apply [--ignore=<file>] [--ignore-hash] <semdif> <directory>
+       semdiff --help
 
 An output path of - writes the semdif to standard output, and the listing to standard error.
 A semdif path of - reads the semdif from standard input.
+--help writes a full description to standard output.
 "
     );
 }
