@@ -12,6 +12,7 @@ fn requires_an_output_path() {
         stderr,
         "\
 Compare two sources and write a semdif. --apply replays a semdif onto a directory.
+A semdif is a list of differences, with semantic context where available.
 
 Usage: semdiff [--ignore=<file>] <left> <right> <output>
        semdiff --apply [--ignore=<file>] [--ignore-hash] <semdif> <directory>
