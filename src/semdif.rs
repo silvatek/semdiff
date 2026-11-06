@@ -265,6 +265,7 @@ impl PartialChange {
             ("line-removed", parse_line_removed),
             ("line-modified", parse_line_modified),
             ("identifier-renamed", parse_identifier_renamed),
+            ("constant-changed", parse_constant_changed),
             ("directory-added", parse_directory_added),
             ("directory-deleted", parse_directory_deleted),
         ];
@@ -428,6 +429,31 @@ fn parse_identifier_renamed(
             crate::change::IdentifierRenamed::directory(scope, oldname, newname),
         )),
     }
+}
+
+fn parse_constant_changed(
+    scope: String,
+    fields: BTreeMap<String, String>,
+) -> Result<Box<dyn Change>, String> {
+    let span = crate::change::parse_span_scope(&scope)?;
+    if !span.is_single() {
+        return Err(format!("constant-changed covers one line, not {scope}"));
+    }
+    let old_value = required(&fields, "oldvalue", "constant-changed")?;
+    let new_value = required(&fields, "newvalue", "constant-changed")?;
+    if !crate::constant::is_digit_sequence(&old_value) {
+        return Err(format!("constant-changed has invalid oldvalue {old_value}"));
+    }
+    if !crate::constant::is_digit_sequence(&new_value) {
+        return Err(format!("constant-changed has invalid newvalue {new_value}"));
+    }
+    Ok(Box::new(crate::change::ConstantChanged::new(
+        span,
+        required_line(&fields, "new", "constant-changed")?,
+        old_value,
+        new_value,
+        required_line(&fields, "occurrence", "constant-changed")?,
+    )))
 }
 
 fn parse_directory_added(
@@ -795,6 +821,43 @@ changes:
             true,
             true,
         );
+    }
+
+    #[test]
+    fn a_constant_change_records_the_digits() {
+        let document = "\
+changes:
+  - scope: \"src/main.rs:2\"
+    type: constant-changed
+    details:
+      new: 2
+      oldvalue: \"1\"
+      newvalue: \"42\"
+      occurrence: 1
+";
+        let changes = parse_changes(document).expect("constant");
+        assert_eq!(changes[0].kind(), "constant-changed");
+        let mut details = String::new();
+        changes[0].write_details(&mut details);
+        assert!(details.contains("oldvalue: \"1\"\n"), "{details}");
+        assert!(details.contains("newvalue: \"42\"\n"), "{details}");
+        assert!(details.contains("occurrence: 1\n"), "{details}");
+
+        let invalid = "\
+changes:
+  - scope: \"src/main.rs:2\"
+    type: constant-changed
+    details:
+      new: 2
+      oldvalue: \"1a\"
+      newvalue: \"42\"
+      occurrence: 1
+";
+        let message = match parse_changes(invalid) {
+            Err(message) => message,
+            Ok(_) => panic!("invalid oldvalue was accepted"),
+        };
+        assert!(message.contains("invalid oldvalue 1a"), "{message}");
     }
 
     #[test]

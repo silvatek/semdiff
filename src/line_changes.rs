@@ -6,8 +6,10 @@ use crate::change::Change;
 /// lines that stayed. A walk along those matches turns each gap into a hunk.
 /// Lines in a hunk pair from the top into modifications. A modification whose
 /// only change is one identifier, occurring once on the old line, is an
-/// identifier rename. An added or removed line is a full-line comment when
-/// that line opens with the dialect's line comment. A modification is one when
+/// identifier rename. A modification whose only change is one digit sequence,
+/// on a line that is not a comment and outside a string, is a constant change.
+/// An added or removed line is a full-line comment when that line opens with
+/// the dialect's line comment. A modification is one when
 /// both the old line and the new line do. A file with no dialect is never a
 /// comment. Leftover old lines were removed, and leftover new lines were added.
 ///
@@ -16,7 +18,8 @@ use crate::change::Change;
 /// last old line when the text is appended. `new` is a line in the new file.
 /// For a removed line it is the new line that follows the removal, or one past
 /// the last new line when the removal is at the end. An identifier rename
-/// records its old line in the scope, as `path:line`. Renames of one name in
+/// records its old line in the scope, as `path:line`. A constant change does
+/// the same. Renames of one name in
 /// that file become `path:start-end` when every occurrence of the old name
 /// between them is one of those renames, and that run does not record `new`.
 /// The records are ordered by
@@ -266,6 +269,15 @@ fn modified_line(
             new,
             rename.oldname,
             rename.newname,
+        ));
+    }
+    if let Some(constant) = crate::constant::integer_constant(path, old_text, new_text) {
+        return Box::new(crate::change::ConstantChanged::new(
+            crate::change::SpanScope::new(path, old),
+            new,
+            constant.old_value,
+            constant.new_value,
+            constant.occurrence,
         ));
     }
     Box::new(crate::change::LineModified::new(

@@ -75,7 +75,6 @@ pub(crate) fn full_line_comment(path: &str, text: &str) -> bool {
 /// ordinary text, so `\"` does not close a `"` string. A line comment, and a
 /// block comment on this line, hide the quotes inside them. A string or a
 /// comment that began on an earlier line is outside this function's view.
-#[cfg_attr(not(test), allow(dead_code))]
 pub(crate) fn span_in_string(dialect: &Dialect, line: &str, start: usize, end: usize) -> bool {
     if start >= end
         || end > line.len()

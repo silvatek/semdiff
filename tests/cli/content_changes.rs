@@ -1208,13 +1208,9 @@ fn flags_leading_and_trailing_space_from_the_dialect() {
     assert!(document.contains(
         "  - scope: \"src/mixed.rs\"\n    type: line-modified\n    details:\n      old: 2\n      lines: +0\n      new: 2\n      text: \"    let a = 1;\"\n      isWhitespace: true\n"
     ), "{document}");
-    assert!(
-        !follows_with_whitespace(
-            &document,
-            "  - scope: \"src/mixed.rs\"\n    type: line-modified\n    details:\n      old: 3\n      lines: +0\n      new: 3\n      text: \"let b = 2;\"\n"
-        ),
-        "{document}"
-    );
+    assert!(document.contains(
+        "  - scope: \"src/mixed.rs:3\"\n    type: constant-changed\n    details:\n      new: 3\n      oldvalue: \"1\"\n      newvalue: \"2\"\n      occurrence: 1\n"
+    ), "{document}");
     assert!(document.contains(
         "  - scope: \"src/trail.rs\"\n    type: line-modified\n    details:\n      old: 2\n      lines: +0\n      new: 2\n      text: \"let value = 1; \"\n      isWhitespace: true\n"
     ), "{document}");
@@ -1324,6 +1320,31 @@ fn flags_a_line_that_opens_with_the_dialect_line_comment() {
     assert_eq!(tree.read("edited/src/attr.rs"), attr_after.as_bytes());
     assert_eq!(tree.read("edited/calc.py"), python_after.as_bytes());
     assert_eq!(tree.read("edited/notes.txt"), note_after.as_bytes());
+}
+
+#[test]
+fn records_an_integer_constant_change() {
+    let tree = Tree::new();
+    let before = "fn main() {\n    let n = 1;\n    let s = \"1\";\n    // 1\n}\n";
+    let after = "fn main() {\n    let n = 42;\n    let s = \"2\";\n    // 2\n}\n";
+    tree.write("left/src/main.rs", before);
+    tree.write("right/src/main.rs", after);
+    tree.write("edited/src/main.rs", before);
+
+    let document = tree.compare("left", "right");
+
+    assert!(document.contains(
+        "  - scope: \"src/main.rs:2\"\n    type: constant-changed\n    details:\n      new: 2\n      oldvalue: \"1\"\n      newvalue: \"42\"\n      occurrence: 1\n"
+    ));
+    assert!(document.contains(
+        "  - scope: \"src/main.rs\"\n    type: line-modified\n    details:\n      old: 3\n      lines: +0\n      new: 3\n      text: \"    let s = \\\"2\\\";\"\n"
+    ));
+    assert!(document.contains(
+        "  - scope: \"src/main.rs\"\n    type: line-modified\n    details:\n      old: 4\n      lines: +0\n      new: 4\n      text: \"    // 2\"\n      isComment: true\n"
+    ));
+
+    tree.apply("edited", &document).unwrap();
+    assert_eq!(tree.read("edited/src/main.rs"), after.as_bytes());
 }
 
 #[test]

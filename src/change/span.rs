@@ -420,6 +420,118 @@ impl IdentifierRenamed {
     }
 }
 
+/// An integer constant changed on one old line.
+///
+/// The scope is that line. Apply replaces one digit sequence there. `new` is
+/// that line in the new file. `occurrence` is the 1-based index of the
+/// sequence among the digit sequences on the old line.
+pub(crate) struct ConstantChanged {
+    span: SpanScope,
+    new_line: usize,
+    old_value: String,
+    new_value: String,
+    occurrence: usize,
+}
+
+impl ConstantChanged {
+    /// A change of one integer on the old line named by `span`.
+    ///
+    /// `new_line` is that line's number in the new file. `occurrence` selects
+    /// the digit sequence when the line has several.
+    pub(crate) fn new(
+        span: SpanScope,
+        new_line: usize,
+        old_value: String,
+        new_value: String,
+        occurrence: usize,
+    ) -> Self {
+        Self {
+            span,
+            new_line,
+            old_value,
+            new_value,
+            occurrence,
+        }
+    }
+}
+
+impl Change for ConstantChanged {
+    fn kind(&self) -> &'static str {
+        "constant-changed"
+    }
+
+    fn scope(&self) -> &str {
+        self.span.scope()
+    }
+
+    fn line_edit(&self) -> Option<&dyn LineEdit> {
+        Some(self)
+    }
+
+    fn content(&self) -> Option<&dyn Content> {
+        Some(self)
+    }
+
+    fn write_details(&self, document: &mut String) {
+        crate::semdif::write_plain(document, "new", &self.new_line.to_string());
+        crate::semdif::write_detail(document, "oldvalue", &self.old_value);
+        crate::semdif::write_detail(document, "newvalue", &self.new_value);
+        crate::semdif::write_plain(document, "occurrence", &self.occurrence.to_string());
+    }
+
+    fn apply(&self, _fs: &dyn FileSystem, _source: &Path) -> Result<(), String> {
+        applied_with_its_file(self.kind())
+    }
+
+    fn edits_file(&self, path: &str) -> bool {
+        self.span.file() == path
+    }
+}
+
+impl Content for ConstantChanged {
+    fn file(&self) -> &str {
+        self.span.file()
+    }
+}
+
+impl LineEdit for ConstantChanged {
+    fn position(&self) -> (usize, usize) {
+        (self.span.start(), self.new_line)
+    }
+
+    fn rebuild(
+        &self,
+        file: &Path,
+        source_lines: &[String],
+        plan: &mut LinePlan,
+    ) -> Result<(), String> {
+        let line_no = self.span.start();
+        if line_no == 0 || line_no != self.span.end() || line_no > source_lines.len() {
+            return Err(format!(
+                "line {line_no} is outside {} which has {} lines",
+                file.display(),
+                source_lines.len()
+            ));
+        }
+        let replaced = match crate::constant::replace_integer(
+            &source_lines[line_no - 1],
+            &self.old_value,
+            &self.new_value,
+            self.occurrence,
+        ) {
+            Ok(text) => text,
+            Err(message) => {
+                return Err(format!(
+                    "cannot change integer {} on line {line_no} in {}: {message}",
+                    self.old_value,
+                    file.display()
+                ));
+            }
+        };
+        plan.replace(file, line_no, replaced)
+    }
+}
+
 /// Merges identifier renames of one name in one file.
 ///
 /// Every rename with the same old name and new name is a candidate. Finding
