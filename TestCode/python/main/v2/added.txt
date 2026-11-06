@@ -1,2 +1,0 @@
-He said "hello" and wrote C:\temp.
-Next: line

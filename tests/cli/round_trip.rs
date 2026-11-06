@@ -26,6 +26,11 @@ fn applying_the_c_sample_makes_a_copy_of_v1_match_v2() {
     assert_sample_round_trip("TestCode/c/main", "semdiff-apply-c");
 }
 
+#[test]
+fn applying_the_text_sample_makes_a_copy_of_v1_match_v2() {
+    assert_sample_round_trip("TestCode/text", "semdiff-apply-text");
+}
+
 /// Compares a sample's v1 with v2, applies that semdif to a copy of v1, and
 /// checks the copy matches v2.
 fn assert_sample_round_trip(relative_sample: &str, tmp_prefix: &str) {
