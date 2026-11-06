@@ -258,6 +258,7 @@ fn parse_file_renamed(
         scope,
         from: required(&fields, "from", "file-renamed")?,
         to: required(&fields, "to", "file-renamed")?,
+        hash: required_hash(&fields, "hash", "file-renamed")?,
     }))
 }
 
@@ -268,6 +269,7 @@ fn parse_file_deleted(
     Ok(Box::new(crate::change::FileDeleted {
         scope,
         path: required(&fields, "path", "file-deleted")?,
+        hash: required_hash(&fields, "hash", "file-deleted")?,
     }))
 }
 
@@ -278,6 +280,7 @@ fn parse_file_added(
     Ok(Box::new(crate::change::FileAdded {
         scope,
         path: required(&fields, "path", "file-added")?,
+        hash: required_hash(&fields, "hash", "file-added")?,
         contents: stored_bytes(&fields, "file-added")?,
     }))
 }
@@ -441,7 +444,7 @@ fn file_changed(
     )))
 }
 
-/// A SHA-256 hex digest recorded for a changed file.
+/// A SHA-256 hex digest recorded on a change.
 fn required_hash(
     fields: &BTreeMap<String, String>,
     key: &str,
