@@ -44,6 +44,12 @@ The reason is the rest of the line, and it is required. A `semdiff-check: skip` 
 
 A new type or function carries a comment that says what it is for.
 
+## Tests
+
+A test should fail when the behavior changes. An assertion that repeats a constant, a static, or a list already written next to it does not. Delete it.
+
+A test of behavior stays. That includes parsing, classification, applying a semdif, and the text a command prints.
+
 ## When to stop
 
 If you are having to guess at the user's intentions, or thinking things like "Maybe the user...", stop and ask for clarification.
