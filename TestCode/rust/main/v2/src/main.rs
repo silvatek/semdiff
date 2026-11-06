@@ -90,3 +90,15 @@ impl Count {
         self.by
     }
 }
+
+// A function is removed in v2.
+
+// A structure is removed in v2.
+
+// A method is removed in v2.
+struct Total {
+    left: u32,
+}
+
+impl Total {
+}

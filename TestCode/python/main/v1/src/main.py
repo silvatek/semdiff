@@ -74,3 +74,17 @@ trailing = 1
 # A method is added below in v2.
 class Count:
     by = 1
+
+# A function is removed in v2.
+def dropped(n):
+    return n - 1
+
+# A class is removed in v2.
+class Gone:
+    gone = 2
+
+# A method is removed in v2.
+class Total:
+    left = 0
+    def undo(self):
+        return self.left

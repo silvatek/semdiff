@@ -248,7 +248,7 @@ fn flags_whitespace_in_the_samples() {
 }
 
 #[test]
-fn records_named_blocks_added_in_the_samples() {
+fn records_named_blocks_in_the_samples() {
     let manifest = Path::new(env!("CARGO_MANIFEST_DIR"));
     let rust = semdiff::compare_sources(
         &semdiff::StdFileSystem::new(),
@@ -280,6 +280,24 @@ fn records_named_blocks_added_in_the_samples() {
     ), "{python}");
     assert!(python.contains(
         "  - scope: \"src/main.py[Count]\"\n    type: named-block-added\n    details:\n      old: 77\n      lines: +2\n      new: 82\n      text: \"    def step(self):\\n        return self.by\"\n      category: \"method\"\n      name: \"step\"\n"
+    ), "{python}");
+    assert!(rust.contains(
+        "  - scope: \"src/main.rs\"\n    type: named-block-removed\n    details:\n      old: 85\n      lines: -3\n      new: 95\n      text: \"fn dropped(n: u32) -> u64 {\\n    n - 1\\n}\"\n      category: \"function\"\n      name: \"dropped\"\n"
+    ), "{rust}");
+    assert!(rust.contains(
+        "  - scope: \"src/main.rs\"\n    type: named-block-removed\n    details:\n      old: 90\n      lines: -3\n      new: 97\n      text: \"struct Gone {\\n    gone: u32,\\n}\"\n      category: \"structure\"\n      name: \"Gone\"\n"
+    ), "{rust}");
+    assert!(rust.contains(
+        "  - scope: \"src/main.rs[Total]\"\n    type: named-block-removed\n    details:\n      old: 100\n      lines: -3\n      new: 104\n      text: \"    fn undo(&self) -> u32 {\\n        self.left\\n    }\"\n      category: \"method\"\n      name: \"undo\"\n"
+    ), "{rust}");
+    assert!(python.contains(
+        "  - scope: \"src/main.py\"\n    type: named-block-removed\n    details:\n      old: 79\n      lines: -2\n      new: 86\n      text: \"def dropped(n):\\n    return n - 1\"\n      category: \"function\"\n      name: \"dropped\"\n"
+    ), "{python}");
+    assert!(python.contains(
+        "  - scope: \"src/main.py\"\n    type: named-block-removed\n    details:\n      old: 83\n      lines: -2\n      new: 88\n      text: \"class Gone:\\n    gone = 2\"\n      category: \"class\"\n      name: \"Gone\"\n"
+    ), "{python}");
+    assert!(python.contains(
+        "  - scope: \"src/main.py[Total]\"\n    type: named-block-removed\n    details:\n      old: 89\n      lines: -2\n      new: 92\n      text: \"    def undo(self):\\n        return self.left\"\n      category: \"method\"\n      name: \"undo\"\n"
     ), "{python}");
 }
 
