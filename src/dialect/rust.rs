@@ -6,6 +6,7 @@ use super::{BlockCategory, Dialect, NamedBlockKeyword};
 ///
 /// Rust files use `.rs`. A line comment starts with `//`, which also covers
 /// the doc forms `///` and `//!`. A block comment runs from `/*` to `*/`.
+/// A string runs from `"` to `"`, and `\` escapes the next character.
 /// Rust is a C-family language. A block of code starts with `{` and ends with
 /// `}`. An identifier starts with a letter or `_` and continues with letters,
 /// digits, or `_`. A named block is opened by `fn`, `struct`, `enum`, `union`,

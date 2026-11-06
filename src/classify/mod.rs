@@ -1,13 +1,16 @@
 //! How a line is read once a dialect has been selected.
 //!
-//! A line comment and a blank line use the dialect's configuration directly.
-//! A margin and a named block go to the dialect's reader. Brace-delimited
+//! A line comment, a blank line, and a string span use the dialect's
+//! configuration directly. A margin and a named block go to the dialect's
+//! reader. Brace-delimited
 //! languages share the C-family reader. Python has its own.
 
 mod c_family;
 mod python;
 
-use crate::dialect::{for_path, BlockCategory, Dialect, Family, IdentifierCharacters};
+use crate::dialect::{
+    for_path, BlockCategory, Dialect, Family, IdentifierCharacters, StringDelimiter,
+};
 
 /// The name and category of one named block.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -61,6 +64,117 @@ pub(crate) fn full_line_comment(path: &str, text: &str) -> bool {
     }
     text.split('\n')
         .all(|line| introduces_line_comment(dialect, line))
+}
+
+/// Whether `line[start..end]` lies inside a string.
+///
+/// `start` and `end` are byte offsets. The span has to be non-empty and lie
+/// entirely between one pair of the dialect's string delimiters. Those
+/// delimiters are not inside the string. The longest opening delimiter wins,
+/// so `"""` is one string. `string_escape`, when set, makes the next character
+/// ordinary text, so `\"` does not close a `"` string. A line comment, and a
+/// block comment on this line, hide the quotes inside them. A string or a
+/// comment that began on an earlier line is outside this function's view.
+#[cfg_attr(not(test), allow(dead_code))]
+pub(crate) fn span_in_string(dialect: &Dialect, line: &str, start: usize, end: usize) -> bool {
+    if start >= end
+        || end > line.len()
+        || !line.is_char_boundary(start)
+        || !line.is_char_boundary(end)
+    {
+        return false;
+    }
+    string_interiors(dialect, line)
+        .into_iter()
+        .any(|(from, to)| start >= from && end <= to)
+}
+
+/// The interiors of the strings on `line`, as byte offsets.
+///
+/// Each range excludes its delimiters. An unclosed string runs to the end of
+/// the line. A comment on this line contributes nothing.
+fn string_interiors(dialect: &Dialect, line: &str) -> Vec<(usize, usize)> {
+    let mut interiors = Vec::new();
+    let mut index = 0;
+    while index < line.len() {
+        let rest = &line[index..];
+        if !dialect.line_comment.is_empty() && rest.starts_with(dialect.line_comment) {
+            break;
+        }
+        if let Some(comment) = dialect.block_comment {
+            if !comment.start.is_empty()
+                && !comment.end.is_empty()
+                && rest.starts_with(comment.start)
+            {
+                let after = index + comment.start.len();
+                let Some(end_at) = line[after..].find(comment.end) else {
+                    break;
+                };
+                index = after + end_at + comment.end.len();
+                continue;
+            }
+        }
+        let Some(delimiter) = opening_string(dialect, rest) else {
+            let Some(character) = rest.chars().next() else {
+                break;
+            };
+            index += character.len_utf8();
+            continue;
+        };
+        let content_at = index + delimiter.start.len();
+        match closing_string(dialect, line, content_at, delimiter.end) {
+            Some(close_at) => {
+                interiors.push((content_at, close_at));
+                index = close_at + delimiter.end.len();
+            }
+            None => {
+                interiors.push((content_at, line.len()));
+                break;
+            }
+        }
+    }
+    interiors
+}
+
+/// The longest string delimiter that `rest` starts with.
+fn opening_string<'a>(dialect: &'a Dialect, rest: &str) -> Option<&'a StringDelimiter> {
+    dialect
+        .string_delimiters
+        .iter()
+        .filter(|delimiter| !delimiter.start.is_empty() && rest.starts_with(delimiter.start))
+        .max_by_key(|delimiter| delimiter.start.len())
+}
+
+/// The byte offset where `end` closes the string that contains `line[from..]`.
+///
+/// An escape consumes itself and the next character, so that character cannot
+/// start the closing delimiter. No closing delimiter leaves the string open.
+fn closing_string(dialect: &Dialect, line: &str, from: usize, end: &str) -> Option<usize> {
+    if end.is_empty() {
+        return None;
+    }
+    let mut index = from;
+    while index < line.len() {
+        let rest = &line[index..];
+        if let Some(escape) = dialect.string_escape {
+            if rest.starts_with(escape) {
+                let after_escape = index + escape.len_utf8();
+                let Some(character) = line[after_escape..].chars().next() else {
+                    return None;
+                };
+                index = after_escape + character.len_utf8();
+                continue;
+            }
+        }
+        if rest.starts_with(end) {
+            return Some(index);
+        }
+        let Some(character) = rest.chars().next() else {
+            break;
+        };
+        index += character.len_utf8();
+    }
+    None
 }
 
 /// Whether `text` is a blank line for the file at `path`.
@@ -237,7 +351,7 @@ fn enclosing_block(dialect: &Dialect, before: &str, addition: &str) -> Option<En
 mod tests {
     use super::{
         blank_line, full_line_comment, introduces_line_comment, margin_whitespace, named_block,
-        named_block_in,
+        named_block_in, span_in_string,
     };
     use crate::dialect::{BlockCategory, ANSI_C, JAVASCRIPT, PYTHON, RUST};
 
@@ -266,6 +380,93 @@ mod tests {
         assert!(introduces_line_comment(&ANSI_C, "    // note"));
         assert!(!introduces_line_comment(&ANSI_C, "int n; // note"));
         assert!(!introduces_line_comment(&ANSI_C, "/* note */"));
+    }
+
+    #[test]
+    fn a_span_inside_a_string_follows_the_dialect() {
+        let quoted = "let name = \"héllo\";";
+        let (start, end) = at(quoted, "héllo");
+        assert!(span_in_string(&RUST, quoted, start, end));
+        assert!(span_in_string(&ANSI_C, quoted, start, end));
+        let (start, end) = at(quoted, "let");
+        assert!(!span_in_string(&RUST, quoted, start, end));
+        let (start, end) = at(quoted, "\"héllo\"");
+        assert!(!span_in_string(&RUST, quoted, start, end));
+        let open_quote = quoted.find('"').unwrap();
+        assert!(!span_in_string(&RUST, quoted, open_quote, open_quote + 1));
+        let close_quote = quoted.rfind('"').unwrap();
+        assert!(!span_in_string(&RUST, quoted, close_quote, close_quote + 1));
+        let accent = quoted.find('é').unwrap();
+        assert!(!span_in_string(&RUST, quoted, accent + 1, accent + 2));
+        assert!(!span_in_string(&RUST, quoted, start, start));
+        assert!(!span_in_string(&RUST, quoted, end, start));
+        assert!(!span_in_string(&RUST, quoted, 0, quoted.len() + 1));
+
+        let escaped = "let name = \"say \\\"hi\\\"\";";
+        let (start, end) = at(escaped, "hi");
+        assert!(span_in_string(&RUST, escaped, start, end));
+        let across = escaped.find("say").unwrap();
+        assert!(span_in_string(&RUST, escaped, across, end));
+
+        let unclosed = "let name = \"hello";
+        let (start, end) = at(unclosed, "hello");
+        assert!(span_in_string(&RUST, unclosed, start, end));
+
+        let commented = "// \"hello\"";
+        let (start, end) = at(commented, "hello");
+        assert!(!span_in_string(&RUST, commented, start, end));
+        let blocked = "/* \"hello\" */";
+        let (start, end) = at(blocked, "hello");
+        assert!(!span_in_string(&RUST, blocked, start, end));
+        let after = "let name = \"yes\"; // \"no\"";
+        let (start, end) = at(after, "yes");
+        assert!(span_in_string(&RUST, after, start, end));
+        let (start, end) = at(after, "no");
+        assert!(!span_in_string(&RUST, after, start, end));
+        let hidden = "let name = /* \"no\" */ \"yes\";";
+        let (start, end) = at(hidden, "no");
+        assert!(!span_in_string(&RUST, hidden, start, end));
+        let (start, end) = at(hidden, "yes");
+        assert!(span_in_string(&RUST, hidden, start, end));
+        let marked = "let name = \"hello // there\";";
+        let (start, end) = at(marked, "there");
+        assert!(span_in_string(&RUST, marked, start, end));
+
+        let pair = "\"ab\" \"cd\"";
+        let (start, end) = at(pair, "ab");
+        assert!(span_in_string(&RUST, pair, start, end));
+        let (start, end) = at(pair, "cd");
+        assert!(span_in_string(&RUST, pair, start, end));
+        let across = pair.find('b').unwrap();
+        let after_c = pair.find('c').unwrap() + 1;
+        assert!(!span_in_string(&RUST, pair, across, after_c));
+
+        let singles = "const name = 'hello';";
+        let (start, end) = at(singles, "hello");
+        assert!(span_in_string(&JAVASCRIPT, singles, start, end));
+        assert!(!span_in_string(&RUST, singles, start, end));
+        let ticks = "const name = `hello`;";
+        let (start, end) = at(ticks, "hello");
+        assert!(span_in_string(&JAVASCRIPT, ticks, start, end));
+        assert!(!span_in_string(&RUST, ticks, start, end));
+
+        let triple = "text = \"\"\"hello \"there\"\"\"";
+        let (start, end) = at(triple, "there");
+        assert!(span_in_string(&PYTHON, triple, start, end));
+        assert!(!span_in_string(&RUST, triple, start, end));
+        let (start, end) = at(triple, "hello \"there");
+        assert!(span_in_string(&PYTHON, triple, start, end));
+        let hashed = "# \"hello\"";
+        let (start, end) = at(hashed, "hello");
+        assert!(!span_in_string(&PYTHON, hashed, start, end));
+        let inside_hash = "text = \"hello # there\"";
+        let (start, end) = at(inside_hash, "there");
+        assert!(span_in_string(&PYTHON, inside_hash, start, end));
+    }
+
+    fn at(line: &str, text: &str) -> (usize, usize) {
+        let start = line.find(text).unwrap();
+        (start, start + text.len())
     }
 
     #[test]
