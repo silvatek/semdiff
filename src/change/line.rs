@@ -1,12 +1,13 @@
 //! Line additions, removals, and modifications.
 //!
-//! A line change's scope is the file. A span change names one old line instead,
-//! and lives in its own module. The same line record can say that the edit is
-//! a full-line comment, and that it is insignificant whitespace. Those are
-//! `isComment: true` and `isWhitespace: true` in the semdif. False is the
-//! default and is left out. A record may carry both. An addition the dialect
-//! reads as a new function, method, or structure is `named-block-added` and
-//! carries that block's name.
+//! A line change's scope is the file. A method's scope also names the enclosing
+//! block, as `src/main.rs[Count]`. Apply still edits the file. A span change
+//! names one old line instead, and lives in its own module. The same line
+//! record can say that the edit is a full-line comment, and that it is
+//! insignificant whitespace. Those are `isComment: true` and
+//! `isWhitespace: true` in the semdif. False is the default and is left out.
+//! A record may carry both. An addition the dialect reads as a new function,
+//! method, or structure is `named-block-added` and carries that block's name.
 
 use std::path::Path;
 
@@ -252,13 +253,41 @@ fn named_block_from_addition(
     let before = lines_before(sources, change.scope(), new);
     let block = crate::classify::named_block_in(change.scope(), text, &before)?;
     Some(NamedBlockAdded::new(
-        change.scope().to_string(),
+        block_scope(change.scope(), block.enclosing.as_deref()),
         old,
         new,
         text.to_string(),
         block.category,
         block.name,
     ))
+}
+
+/// The scope written for a named block.
+///
+/// A method names the enclosing block in brackets, as `src/main.rs[Count]`.
+/// Any other block names only the file.
+fn block_scope(path: &str, enclosing: Option<&str>) -> String {
+    match enclosing {
+        Some(name) => format!("{path}[{name}]"),
+        None => path.to_string(),
+    }
+}
+
+/// The file a scope names.
+///
+/// A method's scope is `path[Block]`. Apply edits `path`. Any other scope is
+/// already the file.
+fn scope_file(scope: &str) -> &str {
+    let Some(open) = scope.rfind('[') else {
+        return scope;
+    };
+    let Some(inside) = scope[open + 1..].strip_suffix(']') else {
+        return scope;
+    };
+    if open == 0 || inside.is_empty() || inside.contains('[') {
+        return scope;
+    }
+    &scope[..open]
 }
 
 /// The new file above line `new_line`, joined the way the addition is joined.
@@ -380,9 +409,10 @@ impl LineEdit for LineAdded {
 /// A line addition that opens a named block.
 ///
 /// `category` is the shared kind of block, and `name` is the identifier that
-/// follows the dialect's keyword. The record keeps the added lines, and apply
-/// inserts them the way a line addition does. It does not join a neighboring
-/// edit: the name belongs to this one block.
+/// follows the dialect's keyword. A method's scope is the file and the
+/// enclosing block, as `src/main.rs[Count]`. The record keeps the added
+/// lines, and apply inserts them into the file. It does not join a
+/// neighboring edit: the name belongs to this one block.
 pub(crate) struct NamedBlockAdded {
     scope: String,
     body: LineBody,
@@ -448,7 +478,7 @@ impl Change for NamedBlockAdded {
 
 impl Content for NamedBlockAdded {
     fn file(&self) -> &str {
-        &self.scope
+        scope_file(&self.scope)
     }
 }
 
@@ -791,6 +821,8 @@ mod tests {
         );
 
         assert_eq!(merged[0].kind(), "named-block-added");
+        assert_eq!(merged[0].scope(), "src/main.rs[Foo]");
+        assert_eq!(merged[0].content().expect("content").file(), "src/main.rs");
         let mut details = String::new();
         merged[0].write_details(&mut details);
         assert!(details.contains("category: \"method\"\n"), "{details}");

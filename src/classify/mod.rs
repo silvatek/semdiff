@@ -16,6 +16,28 @@ pub(crate) struct NamedBlock {
     pub category: BlockCategory,
     /// The identifier that names this block.
     pub name: String,
+    /// The enclosing type, when this block is a method and that type has a name.
+    ///
+    /// `Count` in `impl Count` is written on the method's scope as
+    /// `src/main.rs[Count]`.
+    pub enclosing: Option<String>,
+}
+
+/// How an open block affects a callable inside it.
+pub(super) enum BlockRole {
+    /// A function or procedure. An inner callable stays a function.
+    Callable,
+    /// A type block. The name is the identifier after its keyword, when it has one.
+    Method(Option<String>),
+}
+
+/// The type block around a method.
+///
+/// `name` is the enclosing block's identifier. A method's scope is the file
+/// and that name, as `src/main.rs[Count]`. The name is absent when the header
+/// has no identifier.
+pub(super) struct EnclosingBlock {
+    pub name: Option<String>,
 }
 
 /// Whether `line` introduces this dialect's line comment before any other text.
@@ -136,6 +158,34 @@ pub(super) fn keyword_is_method_scope(dialect: &Dialect, word: &str) -> bool {
     dialect.method_scopes.iter().any(|scope| *scope == word)
 }
 
+/// The identifier that follows a keyword, when whitespace separates them.
+///
+/// `impl Count` yields `Count`. `implCount` and `impl {` yield nothing. The
+/// name stops at the first character that cannot continue an identifier, so
+/// `class Count(Bar)` yields `Count`.
+pub(super) fn identifier_after<'a>(
+    characters: &IdentifierCharacters,
+    after: &'a str,
+) -> Option<&'a str> {
+    let name_at = after.trim_start_matches(|character: char| character == ' ' || character == '\t');
+    if name_at.len() == after.len() {
+        return None;
+    }
+    let mut chars = name_at.char_indices();
+    let (_, first) = chars.next()?;
+    if !characters.starts(first) {
+        return None;
+    }
+    let mut end = first.len_utf8();
+    for (index, character) in chars {
+        if !characters.continues(character) {
+            break;
+        }
+        end = index + character.len_utf8();
+    }
+    Some(&name_at[..end])
+}
+
 /// The named block added by `text`, when the dialect's reader sees one.
 ///
 /// `text` is one `line-added` record and may hold several lines. Each reader
@@ -150,16 +200,20 @@ pub(crate) fn named_block(path: &str, text: &str) -> Option<NamedBlock> {
 ///
 /// `before` is the new file above the addition, without the addition itself.
 /// A function or procedure becomes a method when the innermost open block that
-/// is a callable or a method scope is one of the dialect's method scopes. An
-/// empty `before` means the addition is at the top of the file.
+/// is a callable or a method scope is one of the dialect's method scopes. The
+/// method records that block's name. An empty `before` means the addition is
+/// at the top of the file.
 pub(crate) fn named_block_in(path: &str, text: &str, before: &str) -> Option<NamedBlock> {
     let dialect = for_path(path)?;
     let mut block = match dialect.family {
         Family::CFamily => c_family::named_block(dialect, text)?,
         Family::Python => python::named_block(dialect, text)?,
     };
-    if can_be_a_method(block.category) && inside_method_scope(dialect, before, text) {
-        block.category = BlockCategory::Method;
+    if can_be_a_method(block.category) {
+        if let Some(enclosing) = enclosing_block(dialect, before, text) {
+            block.category = BlockCategory::Method;
+            block.enclosing = enclosing.name;
+        }
     }
     Some(block)
 }
@@ -169,11 +223,11 @@ fn can_be_a_method(category: BlockCategory) -> bool {
     matches!(category, BlockCategory::Function | BlockCategory::Procedure)
 }
 
-/// Whether `before` leaves the addition inside one of the dialect's method scopes.
-fn inside_method_scope(dialect: &Dialect, before: &str, addition: &str) -> bool {
+/// The method scope around the addition, when `before` leaves it inside one.
+fn enclosing_block(dialect: &Dialect, before: &str, addition: &str) -> Option<EnclosingBlock> {
     match dialect.family {
-        Family::CFamily => c_family::inside_method_scope(dialect, before),
-        Family::Python => python::inside_method_scope(dialect, before, addition),
+        Family::CFamily => c_family::enclosing_block(dialect, before),
+        Family::Python => python::enclosing_block(dialect, before, addition),
     }
 }
 
@@ -423,11 +477,27 @@ mod tests {
     fn a_callable_inside_a_type_is_a_method() {
         assert_eq!(
             opened_in("src/main.rs", "    fn added() {}", "impl Foo {"),
-            Some((BlockCategory::Method, "added".to_string()))
+            Some((
+                BlockCategory::Method,
+                "added".to_string(),
+                Some("Foo".to_string())
+            ))
+        );
+        assert_eq!(
+            opened_in("src/main.rs", "    fn added() {}", "impl Foo for Bar {"),
+            Some((
+                BlockCategory::Method,
+                "added".to_string(),
+                Some("Foo".to_string())
+            ))
         );
         assert_eq!(
             opened_in("src/main.rs", "    fn draw() {}", "pub unsafe trait Draw {"),
-            Some((BlockCategory::Method, "draw".to_string()))
+            Some((
+                BlockCategory::Method,
+                "draw".to_string(),
+                Some("Draw".to_string())
+            ))
         );
         assert_eq!(
             opened_in(
@@ -435,7 +505,7 @@ mod tests {
                 "    fn added() {}",
                 "impl Foo {\n    fn method() {\n        if ready {"
             ),
-            Some((BlockCategory::Function, "added".to_string()))
+            Some((BlockCategory::Function, "added".to_string(), None))
         );
         assert_eq!(
             opened_in(
@@ -443,7 +513,7 @@ mod tests {
                 "    fn added() {}",
                 "fn outer() -> impl Bar {"
             ),
-            Some((BlockCategory::Function, "added".to_string()))
+            Some((BlockCategory::Function, "added".to_string(), None))
         );
         assert_eq!(
             opened_in(
@@ -451,11 +521,19 @@ mod tests {
                 "    struct Point {\n        x: i32,\n    }",
                 "impl Foo {"
             ),
-            Some((BlockCategory::Structure, "Point".to_string()))
+            Some((BlockCategory::Structure, "Point".to_string(), None))
         );
         assert_eq!(
             opened_in("src/main.rs", "    fn added() {}", "impl Foo { /* } */"),
-            Some((BlockCategory::Method, "added".to_string()))
+            Some((
+                BlockCategory::Method,
+                "added".to_string(),
+                Some("Foo".to_string())
+            ))
+        );
+        assert_eq!(
+            opened_in("src/main.rs", "    fn added() {}", "impl {"),
+            Some((BlockCategory::Method, "added".to_string(), None))
         );
         assert_eq!(
             opened_in(
@@ -463,7 +541,23 @@ mod tests {
                 "    def added(self):\n        return 1",
                 "class Foo:"
             ),
-            Some((BlockCategory::Method, "added".to_string()))
+            Some((
+                BlockCategory::Method,
+                "added".to_string(),
+                Some("Foo".to_string())
+            ))
+        );
+        assert_eq!(
+            opened_in(
+                "calc.py",
+                "    def added(self):\n        return 1",
+                "class Count(Bar):"
+            ),
+            Some((
+                BlockCategory::Method,
+                "added".to_string(),
+                Some("Count".to_string())
+            ))
         );
         assert_eq!(
             opened_in(
@@ -471,7 +565,11 @@ mod tests {
                 "        def added(self):\n            return 1",
                 "class Foo:\n    if True:"
             ),
-            Some((BlockCategory::Method, "added".to_string()))
+            Some((
+                BlockCategory::Method,
+                "added".to_string(),
+                Some("Foo".to_string())
+            ))
         );
         assert_eq!(
             opened_in(
@@ -479,7 +577,7 @@ mod tests {
                 "        def added():\n            return 1",
                 "class Foo:\n    def method(self):"
             ),
-            Some((BlockCategory::Function, "added".to_string()))
+            Some((BlockCategory::Function, "added".to_string(), None))
         );
         assert_eq!(
             opened_in(
@@ -487,11 +585,20 @@ mod tests {
                 "        def added(self):\n            return 1",
                 "def outer():\n    class Foo:"
             ),
-            Some((BlockCategory::Method, "added".to_string()))
+            Some((
+                BlockCategory::Method,
+                "added".to_string(),
+                Some("Foo".to_string())
+            ))
         );
     }
 
-    fn opened_in(path: &str, text: &str, before: &str) -> Option<(BlockCategory, String)> {
-        named_block_in(path, text, before).map(|block| (block.category, block.name))
+    fn opened_in(
+        path: &str,
+        text: &str,
+        before: &str,
+    ) -> Option<(BlockCategory, String, Option<String>)> {
+        named_block_in(path, text, before)
+            .map(|block| (block.category, block.name, block.enclosing))
     }
 }
