@@ -117,15 +117,63 @@ pub(crate) fn block_resumes(path: &str, addition: &str, following: &str) -> bool
     }
 }
 
+/// Whether `word` is a callable keyword, such as `fn` or `def`.
+///
+/// A function or a procedure can become a method when it sits in a type's
+/// block. The keyword's own category stays what the dialect configured.
+pub(super) fn keyword_is_callable(dialect: &Dialect, word: &str) -> bool {
+    dialect.named_block_keywords.iter().any(|item| {
+        item.keyword == word
+            && matches!(
+                item.category,
+                BlockCategory::Function | BlockCategory::Procedure
+            )
+    })
+}
+
+/// Whether `word` opens a block in which a callable is a method.
+pub(super) fn keyword_is_method_scope(dialect: &Dialect, word: &str) -> bool {
+    dialect.method_scopes.iter().any(|scope| *scope == word)
+}
+
 /// The named block added by `text`, when the dialect's reader sees one.
 ///
 /// `text` is one `line-added` record and may hold several lines. Each reader
 /// uses its dialect's keywords, and the text has to be that one complete block.
+/// The addition is read as if it stood at the top of the file.
+#[cfg_attr(not(test), allow(dead_code))]
 pub(crate) fn named_block(path: &str, text: &str) -> Option<NamedBlock> {
+    named_block_in(path, text, "")
+}
+
+/// The named block added by `text`, read with the file above it.
+///
+/// `before` is the new file above the addition, without the addition itself.
+/// A function or procedure becomes a method when the innermost open block that
+/// is a callable or a method scope is one of the dialect's method scopes. An
+/// empty `before` means the addition is at the top of the file.
+pub(crate) fn named_block_in(path: &str, text: &str, before: &str) -> Option<NamedBlock> {
     let dialect = for_path(path)?;
+    let mut block = match dialect.family {
+        Family::CFamily => c_family::named_block(dialect, text)?,
+        Family::Python => python::named_block(dialect, text)?,
+    };
+    if can_be_a_method(block.category) && inside_method_scope(dialect, before, text) {
+        block.category = BlockCategory::Method;
+    }
+    Some(block)
+}
+
+/// Whether a function or procedure inside a type's block is recorded as a method.
+fn can_be_a_method(category: BlockCategory) -> bool {
+    matches!(category, BlockCategory::Function | BlockCategory::Procedure)
+}
+
+/// Whether `before` leaves the addition inside one of the dialect's method scopes.
+fn inside_method_scope(dialect: &Dialect, before: &str, addition: &str) -> bool {
     match dialect.family {
-        Family::CFamily => c_family::named_block(dialect, text),
-        Family::Python => python::named_block(dialect, text),
+        Family::CFamily => c_family::inside_method_scope(dialect, before),
+        Family::Python => python::inside_method_scope(dialect, before, addition),
     }
 }
 
@@ -133,6 +181,7 @@ pub(crate) fn named_block(path: &str, text: &str) -> Option<NamedBlock> {
 mod tests {
     use super::{
         blank_line, full_line_comment, introduces_line_comment, margin_whitespace, named_block,
+        named_block_in,
     };
     use crate::dialect::{BlockCategory, PYTHON, RUST};
 
@@ -368,5 +417,81 @@ mod tests {
         assert_eq!(named_block("src/main.rs", "\nfn fib() {}"), None);
         assert_eq!(named_block("calc.py", "@decorator\ndef fib():"), None);
         assert_eq!(named_block("notes.txt", "fn fib() {}"), None);
+    }
+
+    #[test]
+    fn a_callable_inside_a_type_is_a_method() {
+        assert_eq!(
+            opened_in("src/main.rs", "    fn added() {}", "impl Foo {"),
+            Some((BlockCategory::Method, "added".to_string()))
+        );
+        assert_eq!(
+            opened_in("src/main.rs", "    fn draw() {}", "pub unsafe trait Draw {"),
+            Some((BlockCategory::Method, "draw".to_string()))
+        );
+        assert_eq!(
+            opened_in(
+                "src/main.rs",
+                "    fn added() {}",
+                "impl Foo {\n    fn method() {\n        if ready {"
+            ),
+            Some((BlockCategory::Function, "added".to_string()))
+        );
+        assert_eq!(
+            opened_in(
+                "src/main.rs",
+                "    fn added() {}",
+                "fn outer() -> impl Bar {"
+            ),
+            Some((BlockCategory::Function, "added".to_string()))
+        );
+        assert_eq!(
+            opened_in(
+                "src/main.rs",
+                "    struct Point {\n        x: i32,\n    }",
+                "impl Foo {"
+            ),
+            Some((BlockCategory::Structure, "Point".to_string()))
+        );
+        assert_eq!(
+            opened_in("src/main.rs", "    fn added() {}", "impl Foo { /* } */"),
+            Some((BlockCategory::Method, "added".to_string()))
+        );
+        assert_eq!(
+            opened_in(
+                "calc.py",
+                "    def added(self):\n        return 1",
+                "class Foo:"
+            ),
+            Some((BlockCategory::Method, "added".to_string()))
+        );
+        assert_eq!(
+            opened_in(
+                "calc.py",
+                "        def added(self):\n            return 1",
+                "class Foo:\n    if True:"
+            ),
+            Some((BlockCategory::Method, "added".to_string()))
+        );
+        assert_eq!(
+            opened_in(
+                "calc.py",
+                "        def added():\n            return 1",
+                "class Foo:\n    def method(self):"
+            ),
+            Some((BlockCategory::Function, "added".to_string()))
+        );
+        assert_eq!(
+            opened_in(
+                "calc.py",
+                "        def added(self):\n            return 1",
+                "def outer():\n    class Foo:"
+            ),
+            Some((BlockCategory::Method, "added".to_string()))
+        );
+    }
+
+    fn opened_in(path: &str, text: &str, before: &str) -> Option<(BlockCategory, String)> {
+        named_block_in(path, text, before).map(|block| (block.category, block.name))
     }
 }

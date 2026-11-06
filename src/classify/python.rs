@@ -101,6 +101,110 @@ fn one_block(dialect: &Dialect, text: &str) -> bool {
     saw_body
 }
 
+/// Whether `before` leaves `addition` inside a method scope.
+///
+/// Indentation is the block edge. A header that ends with `:` opens a block
+/// at its indent. `class` is a method scope and `def` is a callable. An `if`
+/// is neither, so it does not hide the class around it. A line that returns
+/// to an earlier indent closes the blocks it leaves. The innermost callable
+/// or method scope that is still open around `addition` decides.
+pub(super) fn inside_method_scope(dialect: &Dialect, before: &str, addition: &str) -> bool {
+    if dialect.block_start != BlockEdge::Indentation || dialect.block_end != BlockEdge::Indentation
+    {
+        return false;
+    }
+    let mut stack: Vec<ScopeFrame> = Vec::new();
+    for line in before.split('\n') {
+        if only_ascii_blank(line) || is_line_comment(dialect, line) {
+            continue;
+        }
+        let indent = leading_ascii_blank(line).len();
+        while stack.last().is_some_and(|frame| frame.indent >= indent) {
+            stack.pop();
+        }
+        if opens_block(dialect, line) {
+            stack.push(ScopeFrame {
+                indent,
+                method_scope: frame_kind(dialect, line),
+            });
+        }
+    }
+    let addition_indent = addition
+        .split('\n')
+        .next()
+        .map(|line| leading_ascii_blank(line).len())
+        .unwrap_or(0);
+    while stack
+        .last()
+        .is_some_and(|frame| frame.indent >= addition_indent)
+    {
+        stack.pop();
+    }
+    stack
+        .iter()
+        .rev()
+        .find_map(|frame| frame.method_scope)
+        .unwrap_or(false)
+}
+
+/// One indented block, and whether it makes an inner callable a method.
+///
+/// `None` is a block that does not decide, such as `if`.
+struct ScopeFrame {
+    indent: usize,
+    method_scope: Option<bool>,
+}
+
+/// Whether `line` opens a block, ignoring a trailing line comment.
+fn opens_block(dialect: &Dialect, line: &str) -> bool {
+    code_of(dialect, line).trim_end().ends_with(':')
+}
+
+/// The header on `line`: a method scope, a callable, or neither.
+fn frame_kind(dialect: &Dialect, line: &str) -> Option<bool> {
+    let Some(word) = opening_word(dialect, code_of(dialect, line)) else {
+        return None;
+    };
+    if super::keyword_is_method_scope(dialect, word) {
+        Some(true)
+    } else if super::keyword_is_callable(dialect, word) {
+        Some(false)
+    } else {
+        None
+    }
+}
+
+/// `line` with its line comment removed.
+fn code_of<'a>(dialect: &Dialect, line: &'a str) -> &'a str {
+    if dialect.line_comment.is_empty() {
+        return line;
+    }
+    match line.find(dialect.line_comment) {
+        Some(index) => &line[..index],
+        None => line,
+    }
+}
+
+/// The first word of `line` after any listed qualifiers.
+fn opening_word<'a>(dialect: &Dialect, line: &'a str) -> Option<&'a str> {
+    let mut rest = trim_ascii_blank_start(line);
+    loop {
+        if let Some(qualifier) =
+            super::matching_qualifier(&dialect.identifier_characters, dialect.block_prefixes, rest)
+        {
+            let after = &rest[qualifier.len()..];
+            let next = trim_ascii_blank_start(after);
+            if next.len() == after.len() {
+                return None;
+            }
+            rest = next;
+            continue;
+        }
+        let (word, _) = next_word(&dialect.identifier_characters, rest)?;
+        return Some(word);
+    }
+}
+
 /// The category and name of the block opened by `line`.
 fn block_name<'a>(dialect: &Dialect, line: &'a str) -> Option<OpenedBlock<'a>> {
     let mut rest = trim_ascii_blank_start(line);
