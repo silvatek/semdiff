@@ -1,6 +1,6 @@
 //! The JavaScript dialect.
 
-use super::{BlockCategory, Dialect, IdentifierCharacters, NamedBlockKeyword};
+use super::{BlockCategory, Dialect, IdentifierCharacters, NamedBlockKeyword, StringDelimiter};
 
 const IDENTIFIER_START: &str = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz_$";
 const IDENTIFIER_CONTINUE: &str =
@@ -9,7 +9,8 @@ const IDENTIFIER_CONTINUE: &str =
 /// The JavaScript dialect.
 ///
 /// JavaScript files use `.js`. A line comment starts with `//`. A block
-/// comment runs from `/*` to `*/`. JavaScript is a C-family language. A block
+/// comment runs from `/*` to `*/`. A string runs between `"`, `'`, or `` ` ``,
+/// and `\` escapes the next character. JavaScript is a C-family language. A block
 /// of code starts with `{` and ends with `}`. An identifier starts with a
 /// letter, `_`, or `$` and continues with letters, digits, `_`, or `$`. A
 /// named block is opened by `function` or `class`, which are a function and a
@@ -40,5 +41,19 @@ pub(crate) static JAVASCRIPT: Dialect = Dialect {
     method_scopes: &["class"],
     c_style_functions: true,
     statement_keywords: &["if", "while", "for", "switch", "catch"],
+    string_delimiters: &[
+        StringDelimiter {
+            start: "\"",
+            end: "\"",
+        },
+        StringDelimiter {
+            start: "'",
+            end: "'",
+        },
+        StringDelimiter {
+            start: "`",
+            end: "`",
+        },
+    ],
     ..Dialect::baseline()
 };

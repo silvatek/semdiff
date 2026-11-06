@@ -42,7 +42,8 @@ pub(crate) fn for_path(path: &str) -> Option<&'static Dialect> {
 /// static leaves out. Extensions select its files. The
 /// identifier characters say which runs of text are names. The line comment
 /// marks a full-line comment. Block comments and block edges describe the
-/// rest of a block. The named-block keywords say which added runs are a new
+/// rest of a block. String delimiters say which spans sit inside a string.
+/// The named-block keywords say which added runs are a new
 /// function, method, or structure, and which shared category each keyword is.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) struct Dialect {
@@ -54,6 +55,17 @@ pub(crate) struct Dialect {
     pub line_comment: &'static str,
     /// A comment that can span lines, when this language denotes one.
     pub block_comment: Option<BlockComment>,
+    /// Delimiters that open and close a string.
+    ///
+    /// The longest opening delimiter wins, so `"""` is one Python string and
+    /// not three `"` strings. `baseline` lists `"`. Python and JavaScript
+    /// replace that list. Rust and ANSI C leave it.
+    pub string_delimiters: &'static [StringDelimiter],
+    /// The character that escapes the next character inside a string.
+    ///
+    /// `baseline` uses `\`, so `\"` does not close a `"` string. `None` means
+    /// a delimiter ends the string even when a backslash precedes it.
+    pub string_escape: Option<char>,
     /// How a block of code begins.
     pub block_start: BlockEdge,
     /// How a block of code ends.
@@ -104,9 +116,10 @@ impl Dialect {
     /// The values a language leaves unwritten.
     ///
     /// The shape is the C family: `//` and `/* */` comments, `{` `}` blocks,
-    /// and the shared identifier characters. Extensions are empty. Prefixes,
-    /// named-block keywords, method scopes, and c-style functions are off.
-    /// A language static replaces the fields that differ.
+    /// a `"` string escaped by `\`, and the shared identifier characters.
+    /// Extensions are empty. Prefixes, named-block keywords, method scopes,
+    /// and c-style functions are off. A language static replaces the fields
+    /// that differ.
     pub(crate) const fn baseline() -> Self {
         Self {
             family: Family::CFamily,
@@ -116,6 +129,11 @@ impl Dialect {
                 start: "/*",
                 end: "*/",
             }),
+            string_delimiters: &[StringDelimiter {
+                start: "\"",
+                end: "\"",
+            }],
+            string_escape: Some('\\'),
             block_start: BlockEdge::Token("{"),
             block_end: BlockEdge::Token("}"),
             identifier_characters: IdentifierCharacters {
@@ -161,6 +179,18 @@ pub(crate) enum Family {
 pub(super) const IDENTIFIER_START: &str = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz_";
 pub(super) const IDENTIFIER_CONTINUE: &str =
     "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz_0123456789";
+
+/// The opening and closing text of a string.
+///
+/// `start` and `end` are matched as written. A `"` string uses the same text
+/// for both. A language can list several, and the longest opening text wins.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct StringDelimiter {
+    /// Characters that open the string.
+    pub start: &'static str,
+    /// Characters that close the string.
+    pub end: &'static str,
+}
 
 /// The opening and closing text of a comment that can span lines.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
