@@ -4,8 +4,14 @@ use std::path::Path;
 use crate::filesystem::{FileSystem, StdFileSystem};
 
 const USAGE: &str = "\
+Compare two sources and write a semdif. --apply replays a semdif onto a directory.
+A semdif is a list of differences, with semantic context where available.
+
 Usage: semdiff [--ignore=<file>] <left> <right> <output>
        semdiff --apply [--ignore=<file>] [--ignore-hash] <semdif> <directory>
+
+An output path of - writes the semdif to standard output, and the listing to standard error.
+A semdif path of - reads the semdif from standard input.
 ";
 
 /// The path that means the standard stream.
