@@ -139,7 +139,8 @@ Dialects
   Python (.py)
 
   The language documentation describes how a dialect reads comments, blocks,
-  and names. A file with another extension has no dialect.
+  and names. A file with another extension has no dialect. These files are
+  treated as plain text, not ignored.
 
 What apply checks
 
@@ -242,6 +243,7 @@ mod tests {
         assert!(help.contains("\nDialects\n"));
         assert!(help.contains("Rust (.rs)"));
         assert!(help.contains("Python (.py)"));
+        assert!(help.contains("treated as plain text, not ignored"));
         assert!(help.contains("\nWhat apply checks\n"));
         assert!(help.contains("\nLimitations\n"));
         assert!(help.ends_with('\n'));
