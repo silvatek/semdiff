@@ -65,8 +65,8 @@ pub(crate) fn full_line_comment(path: &str, text: &str) -> bool {
 
 /// Whether `text` is a blank line for the file at `path`.
 ///
-/// A blank line is empty or holds only ASCII spaces and tabs. Rust and Python
-/// both ignore that line, so editing one has no functional effect. A file with
+/// A blank line is empty or holds only ASCII spaces and tabs. A known dialect
+/// ignores that line, so editing one has no functional effect. A file with
 /// no dialect is not blank for this purpose. A comment, a carriage return, or
 /// any other character keeps the line unflagged.
 pub(crate) fn blank_line(path: &str, text: &str) -> bool {
@@ -238,7 +238,7 @@ mod tests {
         blank_line, full_line_comment, introduces_line_comment, margin_whitespace, named_block,
         named_block_in,
     };
-    use crate::dialect::{BlockCategory, PYTHON, RUST};
+    use crate::dialect::{BlockCategory, JAVASCRIPT, PYTHON, RUST};
 
     #[test]
     fn a_line_comment_is_the_first_non_whitespace() {
@@ -254,6 +254,13 @@ mod tests {
         assert!(introduces_line_comment(&PYTHON, "  # note"));
         assert!(!introduces_line_comment(&PYTHON, "x = 1  # note"));
         assert!(!introduces_line_comment(&PYTHON, "// not python"));
+        assert!(introduces_line_comment(&JAVASCRIPT, "// note"));
+        assert!(introduces_line_comment(&JAVASCRIPT, "    // note"));
+        assert!(!introduces_line_comment(
+            &JAVASCRIPT,
+            "const x = 1; // note"
+        ));
+        assert!(!introduces_line_comment(&JAVASCRIPT, "/* block */"));
     }
 
     #[test]
@@ -263,6 +270,9 @@ mod tests {
         assert!(!full_line_comment("src/main.rs", "// one\nlet x = 1;"));
         assert!(!full_line_comment("src/main.rs", "/* note */"));
         assert!(full_line_comment("calc.py", "# note"));
+        assert!(full_line_comment("src/main.js", "// note"));
+        assert!(full_line_comment("src/main.js", "// one\n// two"));
+        assert!(!full_line_comment("src/main.js", "/* note */"));
         assert!(!full_line_comment("notes.txt", "// note"));
         assert!(!full_line_comment("main.rs.bak", "// note"));
         assert!(!full_line_comment("src/main.rs", ""));
@@ -276,6 +286,8 @@ mod tests {
         assert!(blank_line("src/main.rs", " \t "));
         assert!(blank_line("calc.py", ""));
         assert!(blank_line("calc.py", "  "));
+        assert!(blank_line("src/main.js", ""));
+        assert!(blank_line("src/main.js", "  "));
         assert!(!blank_line("src/main.rs", "\r"));
         assert!(!blank_line("src/main.rs", " \r"));
         assert!(!blank_line("src/main.rs", "\u{00a0}"));
@@ -308,6 +320,21 @@ mod tests {
             "\tlet value = 1;\t"
         ));
         assert!(margin_whitespace("src/main.rs", "// note", "    // note"));
+        assert!(margin_whitespace(
+            "src/main.js",
+            "let value = 1;",
+            "    let value = 1;"
+        ));
+        assert!(margin_whitespace(
+            "src/main.js",
+            "const trailing = 1;",
+            "const trailing = 1; "
+        ));
+        assert!(margin_whitespace(
+            "src/main.js",
+            "// margin",
+            "    // margin"
+        ));
         assert!(margin_whitespace("calc.py", "x = 1", "x = 1 "));
         assert!(margin_whitespace("calc.py", "x = 1", "x = 1\t"));
         assert!(margin_whitespace("calc.py", "# note", "  # note"));
@@ -472,6 +499,69 @@ mod tests {
         assert_eq!(named_block("src/main.rs", "\nfn fib() {}"), None);
         assert_eq!(named_block("calc.py", "@decorator\ndef fib():"), None);
         assert_eq!(named_block("notes.txt", "fn fib() {}"), None);
+        assert_eq!(
+            named_block("src/main.js", "step() {\n    return 1;\n}"),
+            None
+        );
+        assert_eq!(
+            named_block("src/main.js", "function* fib() {\n    return 1;\n}"),
+            None
+        );
+        assert_eq!(
+            named_block("src/main.js", "// note\nfunction fib() {}"),
+            None
+        );
+    }
+
+    #[test]
+    fn a_javascript_addition_names_the_block_it_opens() {
+        assert_eq!(
+            opened("src/main.js", "function fib() {\n    return 1;\n}"),
+            Some((BlockCategory::Function, "fib".to_string()))
+        );
+        assert_eq!(
+            opened(
+                "src/main.js",
+                "export async function run() {\n    work();\n}"
+            ),
+            Some((BlockCategory::Function, "run".to_string()))
+        );
+        assert_eq!(
+            opened("src/main.js", "export default class Point {\n    x = 1;\n}"),
+            Some((BlockCategory::Class, "Point".to_string()))
+        );
+        assert_eq!(
+            opened("src/main.js", "function $fib() {}"),
+            Some((BlockCategory::Function, "$fib".to_string()))
+        );
+        assert_eq!(
+            opened_in(
+                "src/main.js",
+                "    function added() {\n        return 1;\n    }",
+                "class Count {"
+            ),
+            Some((
+                BlockCategory::Method,
+                "added".to_string(),
+                Some("Count".to_string())
+            ))
+        );
+        assert_eq!(
+            opened_in(
+                "src/main.js",
+                "    step() {\n        return this.by;\n    }",
+                "class Count {"
+            ),
+            None
+        );
+        assert_eq!(
+            opened_in(
+                "src/main.js",
+                "    function added() {\n        return 1;\n    }",
+                "function outer() {"
+            ),
+            Some((BlockCategory::Function, "added".to_string(), None))
+        );
     }
 
     #[test]

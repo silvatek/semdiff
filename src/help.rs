@@ -137,6 +137,7 @@ Dialects
 
   Rust (.rs)
   Python (.py)
+  JavaScript (.js)
 
   The language documentation describes how a dialect reads comments, blocks,
   and names. A file with another extension has no dialect. These files are
@@ -187,7 +188,9 @@ Limitations
 
   A Rust attribute, pub(in path), or impl<T> leaves the run a line edit. A
   Python decorator above def or class, or an async def, leaves the run a
-  line edit.
+  line edit. A JavaScript method written without the function keyword, a
+  generator written function*, or text above function or class, leaves the
+  run a line edit.
 ";
 
 /// The detailed help for each language code.
@@ -243,6 +246,7 @@ mod tests {
         assert!(help.contains("\nDialects\n"));
         assert!(help.contains("Rust (.rs)"));
         assert!(help.contains("Python (.py)"));
+        assert!(help.contains("JavaScript (.js)"));
         assert!(help.contains("treated as plain text, not ignored"));
         assert!(help.contains("\nWhat apply checks\n"));
         assert!(help.contains("\nLimitations\n"));
