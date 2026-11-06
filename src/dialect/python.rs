@@ -48,5 +48,8 @@ pub(crate) static PYTHON: Dialect = Dialect {
             end: "'",
         },
     ],
+    unary_minus_keywords: &[
+        "return", "yield", "await", "not", "and", "or", "assert", "if", "elif", "while", "in",
+    ],
     ..Dialect::baseline()
 };

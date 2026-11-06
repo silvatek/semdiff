@@ -55,5 +55,9 @@ pub(crate) static JAVASCRIPT: Dialect = Dialect {
             end: "`",
         },
     ],
+    unary_minus_keywords: &[
+        "return", "throw", "case", "void", "typeof", "delete", "await", "yield", "if", "while",
+        "in",
+    ],
     ..Dialect::baseline()
 };

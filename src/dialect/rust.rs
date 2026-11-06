@@ -53,5 +53,6 @@ pub(crate) static RUST: Dialect = Dialect {
         },
     ],
     method_scopes: &["impl", "trait"],
+    unary_minus_keywords: &["return", "break", "if", "while", "match", "in"],
     ..Dialect::baseline()
 };

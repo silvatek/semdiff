@@ -19,5 +19,6 @@ pub(crate) static ANSI_C: Dialect = Dialect {
     c_style_functions: true,
     c_fun_type_prefix: true,
     statement_keywords: &["if", "while", "for", "switch"],
+    unary_minus_keywords: &["return", "case", "sizeof", "if", "while"],
     ..Dialect::baseline()
 };

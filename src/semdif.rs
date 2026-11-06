@@ -441,10 +441,10 @@ fn parse_constant_changed(
     }
     let old_value = required(&fields, "oldvalue", "constant-changed")?;
     let new_value = required(&fields, "newvalue", "constant-changed")?;
-    if !crate::constant::is_digit_sequence(&old_value) {
+    if !crate::constant::is_integer(&old_value) {
         return Err(format!("constant-changed has invalid oldvalue {old_value}"));
     }
-    if !crate::constant::is_digit_sequence(&new_value) {
+    if !crate::constant::is_integer(&new_value) {
         return Err(format!("constant-changed has invalid newvalue {new_value}"));
     }
     Ok(Box::new(crate::change::ConstantChanged::new(
@@ -858,6 +858,37 @@ changes:
             Ok(_) => panic!("invalid oldvalue was accepted"),
         };
         assert!(message.contains("invalid oldvalue 1a"), "{message}");
+
+        let negative = "\
+changes:
+  - scope: \"src/main.rs:2\"
+    type: constant-changed
+    details:
+      new: 2
+      oldvalue: \"-1\"
+      newvalue: \"-2\"
+      occurrence: 1
+";
+        let changes = parse_changes(negative).expect("negative integer");
+        let mut details = String::new();
+        changes[0].write_details(&mut details);
+        assert!(details.contains("oldvalue: \"-1\"\n"), "{details}");
+
+        let operator = "\
+changes:
+  - scope: \"src/main.rs:2\"
+    type: constant-changed
+    details:
+      new: 2
+      oldvalue: \"--1\"
+      newvalue: \"2\"
+      occurrence: 1
+";
+        let message = match parse_changes(operator) {
+            Err(message) => message,
+            Ok(_) => panic!("--1 was accepted"),
+        };
+        assert!(message.contains("invalid oldvalue --1"), "{message}");
     }
 
     #[test]

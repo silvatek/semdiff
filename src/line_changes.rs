@@ -6,8 +6,9 @@ use crate::change::Change;
 /// lines that stayed. A walk along those matches turns each gap into a hunk.
 /// Lines in a hunk pair from the top into modifications. A modification whose
 /// only change is one identifier, occurring once on the old line, is an
-/// identifier rename. A modification whose only change is one digit sequence,
-/// on a line that is not a comment and outside a string, is a constant change.
+/// identifier rename. A modification whose only change is one integer, on a
+/// line that is not a comment and outside a string, is a constant change.
+/// A leading `-` is part of the integer when it starts the number.
 /// An added or removed line is a full-line comment when that line opens with
 /// the dialect's line comment. A modification is one when
 /// both the old line and the new line do. A file with no dialect is never a
