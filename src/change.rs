@@ -24,8 +24,8 @@ pub(crate) use line::{
     NamedBlockRemoved,
 };
 pub(crate) use span::{
-    merge_identifier_files, merge_identifier_spans, parse_rename_scope, IdentifierRenamed,
-    RenameScope, SourceText, SpanScope,
+    merge_identifier_files, merge_identifier_spans, parse_rename_scope, parse_span_scope,
+    ConstantChanged, IdentifierRenamed, RenameScope, SourceText, SpanScope,
 };
 
 use std::collections::{BTreeMap, BTreeSet};

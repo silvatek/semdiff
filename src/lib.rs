@@ -4,6 +4,7 @@ mod apply;
 mod args;
 mod change;
 mod classify;
+mod constant;
 mod content_changes;
 mod dialect;
 mod directory_changes;

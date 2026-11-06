@@ -86,3 +86,6 @@ int dropped(int n) {
 struct Gone {
     int gone;
 };
+
+// An integer changes in v2.
+int limit = 10;

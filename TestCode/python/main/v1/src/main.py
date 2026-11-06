@@ -88,3 +88,6 @@ class Total:
     left = 0
     def undo(self):
         return self.left
+
+# An integer changes in v2.
+LIMIT = 10

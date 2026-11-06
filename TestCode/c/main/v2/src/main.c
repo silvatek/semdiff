@@ -87,3 +87,6 @@ struct Step {
 // A function is removed in v2.
 
 // A structure is removed in v2.
+
+// An integer changes in v2.
+int limit = 20;

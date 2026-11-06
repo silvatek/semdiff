@@ -90,3 +90,6 @@ class Total {
         return this.left;
     }
 }
+
+// An integer changes in v2.
+const LIMIT = 10;

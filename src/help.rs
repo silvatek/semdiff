@@ -118,6 +118,12 @@ What a comparison records
   when the directory that covers them has no other occurrence of that name.
   A file with no dialect stays a line modification.
 
+  A line edit whose only change is one sequence of digits is constant-changed.
+  The line is not a comment, and the digits are not inside a string. The
+  record names the old digits, the new digits, and which sequence on the line
+  changed. A sequence that continues an identifier stays an identifier rename.
+  A file with no dialect stays a line modification.
+
   A file only on the left is file-deleted. A file only on the right is
   file-added, and the semdif keeps its bytes. One unpaired file on each side
   with the same SHA-256 is file-renamed. Each of those records includes the

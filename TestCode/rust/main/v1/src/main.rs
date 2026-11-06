@@ -101,3 +101,6 @@ impl Total {
         self.left
     }
 }
+
+// An integer changes in v2.
+const LIMIT: usize = 10;

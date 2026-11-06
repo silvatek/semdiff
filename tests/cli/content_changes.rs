@@ -264,6 +264,9 @@ fn records_named_blocks_in_the_samples() {
     .unwrap();
 
     assert!(rust.contains(
+        "  - scope: \"src/main.rs:106\"\n    type: constant-changed\n    details:\n      new: 107\n      oldvalue: \"10\"\n      newvalue: \"20\"\n      occurrence: 1\n"
+    ), "{rust}");
+    assert!(rust.contains(
         "  - scope: \"src/main.rs\"\n    type: named-block-added\n    details:\n      old: 73\n      lines: +3\n      new: 74\n      text: \"fn shifted(n: u32) -> u64 {\\n    n + 1\\n}\"\n      category: \"function\"\n      name: \"shifted\"\n"
     ), "{rust}");
     assert!(rust.contains(
@@ -272,6 +275,9 @@ fn records_named_blocks_in_the_samples() {
     assert!(rust.contains(
         "  - scope: \"src/main.rs[Count]\"\n    type: named-block-added\n    details:\n      old: 82\n      lines: +3\n      new: 89\n      text: \"    fn step(&self) -> u32 {\\n        self.by\\n    }\"\n      category: \"method\"\n      name: \"step\"\n"
     ), "{rust}");
+    assert!(python.contains(
+        "  - scope: \"src/main.py:93\"\n    type: constant-changed\n    details:\n      new: 94\n      oldvalue: \"10\"\n      newvalue: \"20\"\n      occurrence: 1\n"
+    ), "{python}");
     assert!(python.contains(
         "  - scope: \"src/main.py\"\n    type: named-block-added\n    details:\n      old: 71\n      lines: +2\n      new: 72\n      text: \"def shifted(n):\\n    return n + 1\"\n      category: \"function\"\n      name: \"shifted\"\n"
     ), "{python}");
@@ -342,6 +348,9 @@ fn classifies_the_javascript_sample() {
         "  - scope: \"src/main.js\"\n    type: line-added\n    details:\n      old: 67\n      lines: +1\n      new: 67\n      text: \"\"\n      isWhitespace: true\n"
     ), "{javascript}");
     assert!(javascript.contains(
+        "  - scope: \"src/main.js:95\"\n    type: constant-changed\n    details:\n      new: 96\n      oldvalue: \"10\"\n      newvalue: \"20\"\n      occurrence: 1\n"
+    ), "{javascript}");
+    assert!(javascript.contains(
         "  - scope: \"src/main.js\"\n    type: named-block-added\n    details:\n      old: 68\n      lines: +3\n      new: 69\n      text: \"function shifted(n) {\\n    return n + 1;\\n}\"\n      category: \"function\"\n      name: \"shifted\"\n"
     ), "{javascript}");
     assert!(javascript.contains(
@@ -394,6 +403,9 @@ fn classifies_the_c_sample() {
     ), "{c}");
     assert!(c.contains(
         "  - scope: \"src/main.c\"\n    type: line-added\n    details:\n      old: 76\n      lines: +1\n      new: 76\n      text: \"\"\n      isWhitespace: true\n"
+    ), "{c}");
+    assert!(c.contains(
+        "  - scope: \"src/main.c:91\"\n    type: constant-changed\n    details:\n      new: 92\n      oldvalue: \"10\"\n      newvalue: \"20\"\n      occurrence: 1\n"
     ), "{c}");
     assert!(c.contains(
         "  - scope: \"src/main.c\"\n    type: named-block-added\n    details:\n      old: 77\n      lines: +3\n      new: 78\n      text: \"int shifted(int n) {\\n    return n + 1;\\n}\"\n      category: \"function\"\n      name: \"shifted\"\n"
@@ -1208,13 +1220,9 @@ fn flags_leading_and_trailing_space_from_the_dialect() {
     assert!(document.contains(
         "  - scope: \"src/mixed.rs\"\n    type: line-modified\n    details:\n      old: 2\n      lines: +0\n      new: 2\n      text: \"    let a = 1;\"\n      isWhitespace: true\n"
     ), "{document}");
-    assert!(
-        !follows_with_whitespace(
-            &document,
-            "  - scope: \"src/mixed.rs\"\n    type: line-modified\n    details:\n      old: 3\n      lines: +0\n      new: 3\n      text: \"let b = 2;\"\n"
-        ),
-        "{document}"
-    );
+    assert!(document.contains(
+        "  - scope: \"src/mixed.rs:3\"\n    type: constant-changed\n    details:\n      new: 3\n      oldvalue: \"1\"\n      newvalue: \"2\"\n      occurrence: 1\n"
+    ), "{document}");
     assert!(document.contains(
         "  - scope: \"src/trail.rs\"\n    type: line-modified\n    details:\n      old: 2\n      lines: +0\n      new: 2\n      text: \"let value = 1; \"\n      isWhitespace: true\n"
     ), "{document}");
@@ -1324,6 +1332,31 @@ fn flags_a_line_that_opens_with_the_dialect_line_comment() {
     assert_eq!(tree.read("edited/src/attr.rs"), attr_after.as_bytes());
     assert_eq!(tree.read("edited/calc.py"), python_after.as_bytes());
     assert_eq!(tree.read("edited/notes.txt"), note_after.as_bytes());
+}
+
+#[test]
+fn records_an_integer_constant_change() {
+    let tree = Tree::new();
+    let before = "fn main() {\n    let n = 1;\n    let s = \"1\";\n    // 1\n}\n";
+    let after = "fn main() {\n    let n = 42;\n    let s = \"2\";\n    // 2\n}\n";
+    tree.write("left/src/main.rs", before);
+    tree.write("right/src/main.rs", after);
+    tree.write("edited/src/main.rs", before);
+
+    let document = tree.compare("left", "right");
+
+    assert!(document.contains(
+        "  - scope: \"src/main.rs:2\"\n    type: constant-changed\n    details:\n      new: 2\n      oldvalue: \"1\"\n      newvalue: \"42\"\n      occurrence: 1\n"
+    ));
+    assert!(document.contains(
+        "  - scope: \"src/main.rs\"\n    type: line-modified\n    details:\n      old: 3\n      lines: +0\n      new: 3\n      text: \"    let s = \\\"2\\\";\"\n"
+    ));
+    assert!(document.contains(
+        "  - scope: \"src/main.rs\"\n    type: line-modified\n    details:\n      old: 4\n      lines: +0\n      new: 4\n      text: \"    // 2\"\n      isComment: true\n"
+    ));
+
+    tree.apply("edited", &document).unwrap();
+    assert_eq!(tree.read("edited/src/main.rs"), after.as_bytes());
 }
 
 #[test]
