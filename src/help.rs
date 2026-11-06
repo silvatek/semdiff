@@ -109,30 +109,14 @@ What a comparison records
   Bytes that are not UTF-8 stay one whole-file replacement. The record stores
   them as base64 and names that encoding.
 
-  Rust files (.rs) and Python files (.py) supply the semantic context. Other
-  files are compared as text or as bytes, with no dialect. A Rust comment
-  starts with //, including /// and //!, or runs from /* to */. A Rust block
-  starts with { and ends with }. An edit that only changes indentation is
-  whitespace. A Python comment starts with # and ends at the end of the line.
-  A triple-quoted string is a string. A Python block starts by indenting and
-  ends when the indentation returns, so an indent change is a block boundary.
-
   An added or removed run that is one complete named block is recorded as
-  named-block-added or named-block-removed, with a category and a name. Rust
-  maps fn, struct, enum, union, trait, and impl to function, structure,
-  enumeration, union, interface, and implementation. A fn inside impl or
-  trait is a method, and its scope names the enclosing block as file[Name].
-  A fn inside another fn stays a function. The qualifiers pub, pub(crate),
-  pub(super), pub(self), async, unsafe, and const may precede the keyword.
-  Python maps def and class to function and class. A def inside class is a
-  method. A def inside another def stays a function.
+  named-block-added or named-block-removed, with a category and a name.
+  A method's scope names the file and the enclosing block, as file[Name].
 
   A line edit that changes exactly one identifier, when that old name occurs
   once on the line, is identifier-renamed. The same rename joins across files
   when the directory that covers them has no other occurrence of that name.
-  A file with no dialect stays a line modification. Comments and strings are
-  read as ordinary text for this check, so a one-name edit inside a full-line
-  comment is still a rename.
+  A file with no dialect stays a line modification.
 
   A file only on the left is file-deleted. A file only on the right is
   file-added, and the semdif keeps its bytes. One unpaired file on each side
@@ -148,6 +132,14 @@ What a comparison records
   The header records the tool version, the UTC time as YYYY-MM-DDTHH:MM:SSZ,
   hash sha256, text-encoding utf-8, and binary-encoding base64. Apply replays
   the changes.
+
+Dialects
+
+  Rust (.rs)
+  Python (.py)
+
+  The language documentation describes how a dialect reads comments, blocks,
+  and names. A file with another extension has no dialect.
 
 What apply checks
 
@@ -187,6 +179,14 @@ Limitations
   the tree unchanged.
 
   The ignore file is one list of paths. It has no globs and no comment syntax.
+
+  A brace written inside a string counts as a block boundary. An identifier
+  rename reads comments and strings as ordinary text, so a one-name edit
+  there is still a rename.
+
+  A Rust attribute, pub(in path), or impl<T> leaves the run a line edit. A
+  Python decorator above def or class, or an async def, leaves the run a
+  line edit.
 ";
 
 /// The detailed help for each language code.
@@ -239,6 +239,9 @@ mod tests {
         assert!(help.contains("--help writes a full description"));
         assert!(help.contains("\nArguments\n"));
         assert!(help.contains("\nWhat a comparison records\n"));
+        assert!(help.contains("\nDialects\n"));
+        assert!(help.contains("Rust (.rs)"));
+        assert!(help.contains("Python (.py)"));
         assert!(help.contains("\nWhat apply checks\n"));
         assert!(help.contains("\nLimitations\n"));
         assert!(help.ends_with('\n'));
