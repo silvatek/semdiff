@@ -268,28 +268,31 @@ fn modified_line(
     old_text: &str,
     new_text: &str,
 ) -> Box<dyn Change> {
-    if let Some(edit) = crate::line_span::classify_line(path, old_text, new_text) {
-        return match edit {
-            crate::line_span::ClassifiedEdit::Constant {
-                old_value,
-                new_value,
-                occurrence,
-            } => Box::new(crate::change::ConstantChanged::new(
-                crate::change::SpanScope::new(path, old),
-                new,
-                old_value,
-                new_value,
-                occurrence,
-            )),
-            crate::line_span::ClassifiedEdit::Rename { oldname, newname } => {
-                Box::new(crate::change::IdentifierRenamed::new(
+    let found = crate::span::find_spans(path, old_text, new_text);
+    if let [span] = found.as_slice() {
+        if let Some(edit) = crate::span::classify(path, old_text, span) {
+            return match edit {
+                crate::span::Classification::Constant {
+                    old_value,
+                    new_value,
+                    occurrence,
+                } => Box::new(crate::change::ConstantChanged::new(
                     crate::change::SpanScope::new(path, old),
                     new,
-                    oldname,
-                    newname,
-                ))
-            }
-        };
+                    old_value,
+                    new_value,
+                    occurrence,
+                )),
+                crate::span::Classification::Rename { oldname, newname } => {
+                    Box::new(crate::change::IdentifierRenamed::new(
+                        crate::change::SpanScope::new(path, old),
+                        new,
+                        oldname,
+                        newname,
+                    ))
+                }
+            };
+        }
     }
     Box::new(crate::change::LineModified::new(
         path.to_string(),

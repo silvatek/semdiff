@@ -13,8 +13,8 @@
 //! A boolean constant is a spelling the dialect lists. The edit is a constant
 //! change when the lines differ only by one such spelling changing to another,
 //! and that spelling is a whole name. A spelling inside a string or a comment
-//! stays an identifier rename. ANSI C lists none. The decision itself is made
-//! by the changed-span walk.
+//! stays an identifier rename. ANSI C lists none. `span::classify` makes that
+//! decision from the one changed span.
 
 use crate::dialect::Dialect;
 
@@ -33,10 +33,8 @@ pub(crate) struct IntegerConstant {
 /// One integer on a line.
 ///
 /// `start` includes a unary minus when that minus belongs to the number.
-/// `digits` is the first digit, which is what `occurrence` counts.
 pub(crate) struct IntegerToken {
     pub(crate) start: usize,
-    pub(crate) digits: usize,
     pub(crate) end: usize,
 }
 
@@ -51,11 +49,15 @@ pub(crate) fn integer_constant(
     old_line: &str,
     new_line: &str,
 ) -> Option<IntegerConstant> {
-    let crate::line_span::ClassifiedEdit::Constant {
+    let found = crate::span::find_spans(path, old_line, new_line);
+    let [span] = found.as_slice() else {
+        return None;
+    };
+    let crate::span::Classification::Constant {
         old_value,
         new_value,
         occurrence,
-    } = crate::line_span::classify_line(path, old_line, new_line)?
+    } = crate::span::classify(path, old_line, span)?
     else {
         return None;
     };
@@ -140,11 +142,15 @@ pub(crate) fn boolean_constant(
     old_line: &str,
     new_line: &str,
 ) -> Option<BooleanConstant> {
-    let crate::line_span::ClassifiedEdit::Constant {
+    let found = crate::span::find_spans(path, old_line, new_line);
+    let [span] = found.as_slice() else {
+        return None;
+    };
+    let crate::span::Classification::Constant {
         old_value,
         new_value,
         occurrence,
-    } = crate::line_span::classify_line(path, old_line, new_line)?
+    } = crate::span::classify(path, old_line, span)?
     else {
         return None;
     };
@@ -272,7 +278,6 @@ pub(crate) fn integer_tokens(dialect: &Dialect, line: &str) -> Vec<IntegerToken>
         .filter(|(digits, _)| !continues_identifier(dialect, line, *digits))
         .map(|(digits, end)| IntegerToken {
             start: signed_start(dialect, line, digits),
-            digits,
             end,
         })
         .collect()

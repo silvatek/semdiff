@@ -13,8 +13,8 @@ mod filesystem;
 mod help;
 mod identifier;
 mod line_changes;
-mod line_span;
 mod semdif;
+mod span;
 
 pub use filesystem::{FileSystem, MemoryFileSystem, NodeKind, StdFileSystem};
 
