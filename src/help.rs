@@ -1,6 +1,10 @@
 //! The text printed for `--help`, and the short usage printed for bad arguments.
 //!
 //! The full help begins with [`USAGE`], so the two messages stay the same text.
+//! The rest of the help is chosen from [`details_by_language`] by language code.
+//! English (`en`) is the default. Another language is another entry in that map.
+
+use std::collections::BTreeMap;
 
 /// The short message printed when the arguments are wrong.
 pub(crate) const USAGE: &str = "\
@@ -9,16 +13,23 @@ A semdif is a list of differences, with semantic context where available.
 
 Usage: semdiff [--ignore=<file>] <left> <right> <output>
        semdiff --apply [--ignore=<file>] [--ignore-hash] <semdif> <directory>
+       semdiff --help
 
 An output path of - writes the semdif to standard output, and the listing to standard error.
 A semdif path of - reads the semdif from standard input.
+--help writes a full description to standard output.
 ";
 
-/// The rest of the help, after [`USAGE`].
+/// The language code used when none is selected.
+///
+/// English is the only language so far.
+const DEFAULT_LANGUAGE: &str = "en";
+
+/// The rest of the English help, after [`USAGE`].
 ///
 /// It describes each argument, what a comparison records, what apply checks,
 /// and the limitations that stay.
-const DETAILS: &str = "\
+const DETAILS_EN: &str = "\
 Arguments
 
   --help
@@ -178,11 +189,35 @@ Limitations
   The ignore file is one list of paths. It has no globs and no comment syntax.
 ";
 
+/// The detailed help for each language code.
+///
+/// English is the only entry. Another language is another code and another text.
+fn details_by_language() -> BTreeMap<&'static str, &'static str> {
+    let mut texts = BTreeMap::new();
+    texts.insert("en", DETAILS_EN);
+    texts
+}
+
+/// The detailed help for `language`.
+///
+/// An unknown code uses [`DEFAULT_LANGUAGE`].
+fn details_for(language: &str) -> &'static str {
+    let texts = details_by_language();
+    texts
+        .get(language)
+        .or_else(|| texts.get(DEFAULT_LANGUAGE))
+        .copied()
+        .expect("English help is present")
+}
+
 /// The full help, beginning with [`USAGE`].
+///
+/// The description after the usage is the [`DEFAULT_LANGUAGE`] entry.
 pub(crate) fn help_text() -> String {
-    let mut text = String::with_capacity(USAGE.len() + DETAILS.len());
+    let details = details_for(DEFAULT_LANGUAGE);
+    let mut text = String::with_capacity(USAGE.len() + details.len());
     text.push_str(USAGE);
-    text.push_str(DETAILS);
+    text.push_str(details);
     text
 }
 
@@ -194,17 +229,26 @@ pub(crate) fn print_help() {
 
 #[cfg(test)]
 mod tests {
-    use super::{help_text, DETAILS, USAGE};
+    use super::{details_by_language, details_for, help_text, DEFAULT_LANGUAGE, DETAILS_EN, USAGE};
 
     #[test]
     fn help_starts_with_the_usage_text() {
         let help = help_text();
         assert!(help.starts_with(USAGE));
-        assert!(help.contains(DETAILS));
+        assert!(help.contains(DETAILS_EN));
+        assert!(help.contains("--help writes a full description"));
         assert!(help.contains("\nArguments\n"));
         assert!(help.contains("\nWhat a comparison records\n"));
         assert!(help.contains("\nWhat apply checks\n"));
         assert!(help.contains("\nLimitations\n"));
         assert!(help.ends_with('\n'));
+    }
+
+    #[test]
+    fn english_is_the_default_language() {
+        let texts = details_by_language();
+        assert_eq!(texts.get(DEFAULT_LANGUAGE), Some(&DETAILS_EN));
+        assert_eq!(details_for("en"), DETAILS_EN);
+        assert_eq!(details_for("missing"), DETAILS_EN);
     }
 }

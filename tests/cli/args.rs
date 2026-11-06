@@ -50,9 +50,11 @@ A semdif is a list of differences, with semantic context where available.
 
 Usage: semdiff [--ignore=<file>] <left> <right> <output>
        semdiff --apply [--ignore=<file>] [--ignore-hash] <semdif> <directory>
+       semdiff --help
 
 An output path of - writes the semdif to standard output, and the listing to standard error.
 A semdif path of - reads the semdif from standard input.
+--help writes a full description to standard output.
 "
     );
 }
