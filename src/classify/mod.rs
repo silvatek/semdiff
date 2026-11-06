@@ -43,11 +43,9 @@ pub(super) struct EnclosingBlock {
 /// Whether `line` introduces this dialect's line comment before any other text.
 ///
 /// Leading whitespace is skipped. The line-comment marker then has to be the
-/// next characters. An empty marker is not a line comment, so a language
-/// without one leaves every line unflagged. A block comment is not recognized
-/// here.
+/// next characters. A block comment is not recognized here.
 pub(crate) fn introduces_line_comment(dialect: &Dialect, line: &str) -> bool {
-    !dialect.line_comment.is_empty() && line.trim_start().starts_with(dialect.line_comment)
+    line.trim_start().starts_with(dialect.line_comment)
 }
 
 /// Whether `text` is a full-line comment for the file at `path`.
@@ -263,9 +261,10 @@ mod tests {
             "const x = 1; // note"
         ));
         assert!(!introduces_line_comment(&JAVASCRIPT, "/* block */"));
+        assert!(introduces_line_comment(&ANSI_C, "// note"));
+        assert!(introduces_line_comment(&ANSI_C, "    // note"));
+        assert!(!introduces_line_comment(&ANSI_C, "int n; // note"));
         assert!(!introduces_line_comment(&ANSI_C, "/* note */"));
-        assert!(!introduces_line_comment(&ANSI_C, "int n;"));
-        assert!(!introduces_line_comment(&ANSI_C, ""));
     }
 
     #[test]
@@ -278,6 +277,7 @@ mod tests {
         assert!(full_line_comment("src/main.js", "// note"));
         assert!(full_line_comment("src/main.js", "// one\n// two"));
         assert!(!full_line_comment("src/main.js", "/* note */"));
+        assert!(full_line_comment("src/main.c", "// note"));
         assert!(!full_line_comment("src/main.c", "/* note */"));
         assert!(!full_line_comment("src/main.c", "int n;"));
         assert!(!full_line_comment("notes.txt", "// note"));

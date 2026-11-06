@@ -50,8 +50,6 @@ pub(crate) struct Dialect {
     /// Extensions that identify this dialect, including the leading dot.
     pub extensions: &'static [&'static str],
     /// Characters that open a comment running to the end of the line.
-    ///
-    /// An empty string means the language has no line comment.
     pub line_comment: &'static str,
     /// A comment that can span lines, when this language denotes one.
     pub block_comment: Option<BlockComment>,

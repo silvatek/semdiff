@@ -25,15 +25,14 @@ pub(super) fn margin_whitespace(old_line: &str, new_line: &str) -> bool {
 /// block: the dialect's start token opens it, the end token closes it, and
 /// only whitespace follows the close. Comments are skipped while the tokens
 /// are counted. A quote is not special, so a brace written inside a string
-/// is counted. A line comment, a dialect with no such keywords, a header
-/// without its body, and a run of two blocks have no block. An empty
-/// line-comment marker does not make the line a comment.
+/// is counted. A comment, a dialect with no such keywords, a header without
+/// its body, and a run of two blocks have no block.
 pub(super) fn named_block(dialect: &Dialect, text: &str) -> Option<NamedBlock> {
     if dialect.named_block_keywords.is_empty() {
         return None;
     }
     let line = text.split('\n').next().unwrap_or("");
-    if !dialect.line_comment.is_empty() && line.trim_start().starts_with(dialect.line_comment) {
+    if line.trim_start().starts_with(dialect.line_comment) {
         return None;
     }
     let opened = block_name(dialect, line)?;

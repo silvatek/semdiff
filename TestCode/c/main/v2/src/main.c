@@ -25,7 +25,7 @@ int fib(int n) {
     return current;
 }
 
-/* Print Fibonacci numbers. */
+// Print Fibonacci numbers.
 int main(int argc, char **argv) {
     int parsed;
     int count;
@@ -44,46 +44,46 @@ int main(int argc, char **argv) {
     return 0;
 }
 
-/* One line below is removed in v2. */
+// One line below is removed in v2.
 
-/* One line below is changed in v2. */
-/* Count from one. */
+// One line below is changed in v2.
+// Count from one.
 
-/* Two lines below are removed in v2. */
+// Two lines below are removed in v2.
 
-/* Two lines are added below in v2. */
-/* This added line is first. */
-/* This added line is second. */
+// Two lines are added below in v2.
+// This added line is first.
+// This added line is second.
 
-/* Two lines below are changed in v2. */
-/* New first line. */
-/* New second line. */
+// Two lines below are changed in v2.
+// New first line.
+// New second line.
 
-/* report.c also calls the function above. */
+// report.c also calls the function above.
 
-/* The next line is indented in v2. */
+// The next line is indented in v2.
 void kept(void) {
     int value = 1;
 }
 
-/* The next line gains trailing space in v2. */
+// The next line gains trailing space in v2.
 int trailing = 1; 
 
-/* The next comment is indented in v2. */
-    /* margin */
+// The next comment is indented in v2.
+    // margin
 
-/* A blank line is added below in v2. */
+// A blank line is added below in v2.
 
-/* A function is added below in v2. */
+// A function is added below in v2.
 int shifted(int n) {
     return n + 1;
 }
 
-/* A structure is added below in v2. */
+// A structure is added below in v2.
 struct Step {
     int by;
 };
 
-/* A function is removed in v2. */
+// A function is removed in v2.
 
-/* A structure is removed in v2. */
+// A structure is removed in v2.

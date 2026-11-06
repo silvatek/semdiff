@@ -377,9 +377,8 @@ fn classifies_the_c_sample() {
         "  - scope: \"src\"\n    type: identifier-renamed\n    details:\n      oldname: \"fibonacci\"\n      newname: \"fib\"\n"
     ), "{c}");
     assert!(c.contains(
-        "  - scope: \"src/main.c\"\n    type: line-added\n    details:\n      old: 28\n      lines: +1\n      new: 28\n      text: \"/* Print Fibonacci numbers. */\"\n"
+        "  - scope: \"src/main.c\"\n    type: line-added\n    details:\n      old: 28\n      lines: +1\n      new: 28\n      text: \"// Print Fibonacci numbers.\"\n      isComment: true\n"
     ), "{c}");
-    assert!(!c.contains("isComment"), "{c}");
     assert!(c.contains(
         "  - scope: \"src/main.c:50\"\n    type: identifier-renamed\n    details:\n      new: 50\n      oldname: \"zero\"\n      newname: \"one\"\n"
     ), "{c}");
@@ -393,7 +392,7 @@ fn classifies_the_c_sample() {
         "  - scope: \"src/main.c\"\n    type: line-modified\n    details:\n      old: 70\n      lines: +0\n      new: 70\n      text: \"int trailing = 1; \"\n      isWhitespace: true\n"
     ), "{c}");
     assert!(c.contains(
-        "  - scope: \"src/main.c\"\n    type: line-modified\n    details:\n      old: 73\n      lines: +0\n      new: 73\n      text: \"    /* margin */\"\n      isWhitespace: true\n"
+        "  - scope: \"src/main.c\"\n    type: line-modified\n    details:\n      old: 73\n      lines: +0\n      new: 73\n      text: \"    // margin\"\n      isComment: true\n      isWhitespace: true\n"
     ), "{c}");
     assert!(c.contains(
         "  - scope: \"src/main.c\"\n    type: line-added\n    details:\n      old: 76\n      lines: +1\n      new: 76\n      text: \"\"\n      isWhitespace: true\n"

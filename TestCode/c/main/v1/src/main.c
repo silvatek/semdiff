@@ -43,46 +43,46 @@ int main(int argc, char **argv) {
     return 0;
 }
 
-/* One line below is removed in v2. */
-/* This single line is deleted. */
+// One line below is removed in v2.
+// This single line is deleted.
 
-/* One line below is changed in v2. */
-/* Count from zero. */
+// One line below is changed in v2.
+// Count from zero.
 
-/* Two lines below are removed in v2. */
-/* This deleted line is first. */
-/* This deleted line is second. */
+// Two lines below are removed in v2.
+// This deleted line is first.
+// This deleted line is second.
 
-/* Two lines are added below in v2. */
+// Two lines are added below in v2.
 
-/* Two lines below are changed in v2. */
-/* Old first line. */
-/* Old second line. */
+// Two lines below are changed in v2.
+// Old first line.
+// Old second line.
 
-/* report.c also calls the function above. */
+// report.c also calls the function above.
 
-/* The next line is indented in v2. */
+// The next line is indented in v2.
 void kept(void) {
 int value = 1;
 }
 
-/* The next line gains trailing space in v2. */
+// The next line gains trailing space in v2.
 int trailing = 1;
 
-/* The next comment is indented in v2. */
-/* margin */
+// The next comment is indented in v2.
+// margin
 
-/* A blank line is added below in v2. */
-/* A function is added below in v2. */
+// A blank line is added below in v2.
+// A function is added below in v2.
 
-/* A structure is added below in v2. */
+// A structure is added below in v2.
 
-/* A function is removed in v2. */
+// A function is removed in v2.
 int dropped(int n) {
     return n - 1;
 }
 
-/* A structure is removed in v2. */
+// A structure is removed in v2.
 struct Gone {
     int gone;
 };
