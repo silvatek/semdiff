@@ -101,10 +101,26 @@ pub(super) fn matching_qualifier<'a>(
         .map(|qualifier| &rest[..qualifier.len()])
 }
 
+/// Whether `following` is still inside the block opened by `addition`.
+///
+/// Blank lines are not an answer: the caller skips them and asks about the
+/// next line. The C-family reader has nothing to add here, because an unclosed
+/// brace block is already not a named block. Python uses indentation, so a
+/// further-indented line is still in the block.
+pub(crate) fn block_resumes(path: &str, addition: &str, following: &str) -> bool {
+    let Some(dialect) = for_path(path) else {
+        return false;
+    };
+    match dialect.family {
+        Family::CFamily => false,
+        Family::Python => python::block_resumes(addition, following),
+    }
+}
+
 /// The named block added by `text`, when the dialect's reader sees one.
 ///
 /// `text` is one `line-added` record and may hold several lines. Each reader
-/// uses its dialect's keywords.
+/// uses its dialect's keywords, and the text has to be that one complete block.
 pub(crate) fn named_block(path: &str, text: &str) -> Option<NamedBlock> {
     let dialect = for_path(path)?;
     match dialect.family {
@@ -227,7 +243,10 @@ mod tests {
             Some((BlockCategory::Function, "fib".to_string()))
         );
         assert_eq!(
-            opened("src/main.rs", "    fn fib() {"),
+            opened(
+                "src/main.rs",
+                "    fn fib() {\n        let value = 1;\n    }"
+            ),
             Some((BlockCategory::Function, "fib".to_string()))
         );
         assert_eq!(
@@ -251,36 +270,80 @@ mod tests {
             Some((BlockCategory::Function, "hidden".to_string()))
         );
         assert_eq!(
-            opened("src/main.rs", "struct Point {"),
+            opened("src/main.rs", "struct Point {\n    x: i32,\n}"),
             Some((BlockCategory::Structure, "Point".to_string()))
         );
         assert_eq!(
-            opened("src/main.rs", "struct Unit;"),
-            Some((BlockCategory::Structure, "Unit".to_string()))
-        );
-        assert_eq!(
-            opened("src/main.rs", "unsafe impl Foo {"),
+            opened("src/main.rs", "unsafe impl Foo {\n    fn ready() {}\n}"),
             Some((BlockCategory::Implementation, "Foo".to_string()))
         );
         assert_eq!(
-            opened("src/main.rs", "pub enum Color {"),
+            opened("src/main.rs", "pub enum Color {\n    Red,\n}"),
             Some((BlockCategory::Enumeration, "Color".to_string()))
         );
         assert_eq!(
-            opened("src/main.rs", "union Raw {"),
+            opened("src/main.rs", "union Raw {\n    n: u32,\n}"),
             Some((BlockCategory::Union, "Raw".to_string()))
         );
         assert_eq!(
-            opened("src/main.rs", "trait Draw {"),
+            opened("src/main.rs", "trait Draw {\n    fn draw();\n}"),
             Some((BlockCategory::Interface, "Draw".to_string()))
+        );
+        assert_eq!(
+            opened(
+                "src/main.rs",
+                "fn nested() {\n    if ready {\n        work();\n    }\n}"
+            ),
+            Some((BlockCategory::Function, "nested".to_string()))
+        );
+        assert_eq!(
+            opened("src/main.rs", "fn noted() { // }\n}"),
+            Some((BlockCategory::Function, "noted".to_string()))
+        );
+        assert_eq!(
+            opened("src/main.rs", "fn noted() { /* } */ }"),
+            Some((BlockCategory::Function, "noted".to_string()))
         );
         assert_eq!(
             opened("calc.py", "def fib():\n    return 1"),
             Some((BlockCategory::Function, "fib".to_string()))
         );
         assert_eq!(
-            opened("calc.py", "class Point:"),
+            opened(
+                "calc.py",
+                "def fib():\n    if n:\n        return 1\n    return 0"
+            ),
+            Some((BlockCategory::Function, "fib".to_string()))
+        );
+        assert_eq!(
+            opened("calc.py", "def fib():\n    return 1\n\n    return 2"),
+            Some((BlockCategory::Function, "fib".to_string()))
+        );
+        assert_eq!(
+            opened("calc.py", "class Point:\n    x = 1"),
             Some((BlockCategory::Class, "Point".to_string()))
+        );
+    }
+
+    #[test]
+    fn an_addition_has_to_be_one_complete_block() {
+        assert_eq!(named_block("src/main.rs", "fn fib() {"), None);
+        assert_eq!(
+            named_block("src/main.rs", "fn fib() {\n    let value = 1;"),
+            None
+        );
+        assert_eq!(named_block("src/main.rs", "fn fib() {\n    // }\n"), None);
+        assert_eq!(named_block("src/main.rs", "struct Point {"), None);
+        assert_eq!(named_block("src/main.rs", "struct Unit;"), None);
+        assert_eq!(named_block("src/main.rs", "fn one() {}\nfn two() {}"), None);
+        assert_eq!(named_block("calc.py", "def fib():"), None);
+        assert_eq!(named_block("calc.py", "class Point:"), None);
+        assert_eq!(
+            named_block(
+                "calc.py",
+                "def one():\n    return 1\ndef two():\n    return 2"
+            ),
+            None
         );
     }
 

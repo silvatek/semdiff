@@ -67,7 +67,7 @@ struct Differences {
 /// left empty because its files moved. Adjacent removed, added, or modified
 /// lines in one file become one record before the semdif file is written
 /// when every line in the run is a comment, or none of them is. An added run
-/// that opens a named block is then recorded as that block.
+/// that is one complete named block is then recorded as that block.
 /// Identifier renames of one name then join across files when the directory
 /// that covers them has no other occurrence of that name.
 fn find_differences(fs: &dyn FileSystem, sources: &Sources) -> Result<Differences, String> {

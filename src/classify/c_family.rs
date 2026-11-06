@@ -5,7 +5,7 @@
 //! named block. Braces mark a block, so a change of indentation is formatting.
 
 use crate::classify::NamedBlock;
-use crate::dialect::{BlockCategory, Dialect, IdentifierCharacters, NamedBlockKeyword};
+use crate::dialect::{BlockCategory, BlockEdge, Dialect, IdentifierCharacters, NamedBlockKeyword};
 
 /// Whether the edit is only an insignificant margin.
 ///
@@ -18,12 +18,15 @@ pub(super) fn margin_whitespace(old_line: &str, new_line: &str) -> bool {
 
 /// The named block added by `text`, when this dialect's keywords say so.
 ///
-/// Only the first line is read. Leading spaces and tabs are skipped, then any
-/// listed qualifiers, then a keyword, then the identifier that names the
-/// block. A qualifier is matched as written. The keyword selects the
-/// category. A comment, a dialect with no such keywords, and a line that does
-/// not open in that shape have no block. The remainder of the line, and any
-/// following lines, stay the block's text.
+/// The first line is read for the keyword and the name. Leading spaces and
+/// tabs are skipped, then any listed qualifiers, then a keyword, then the
+/// identifier that names the block. A qualifier is matched as written. The
+/// keyword selects the category. The whole text then has to be that one
+/// block: the dialect's start token opens it, the end token closes it, and
+/// only whitespace follows the close. Comments are skipped while the tokens
+/// are counted. A quote is not special, so a brace written inside a string
+/// is counted. A comment, a dialect with no such keywords, a header without
+/// its body, and a run of two blocks have no block.
 pub(super) fn named_block(dialect: &Dialect, text: &str) -> Option<NamedBlock> {
     if dialect.named_block_keywords.is_empty() {
         return None;
@@ -33,10 +36,80 @@ pub(super) fn named_block(dialect: &Dialect, text: &str) -> Option<NamedBlock> {
         return None;
     }
     let opened = block_name(dialect, line)?;
+    if !one_block(dialect, text) {
+        return None;
+    }
     Some(NamedBlock {
         category: opened.category,
         name: opened.name.to_string(),
     })
+}
+
+/// Whether `text` is one complete block bounded by the dialect's tokens.
+///
+/// The depth starts at zero. The start token opens the block and the end
+/// token closes it. The block has to open, return to zero, and leave only
+/// whitespace after that close. A second block, or a close that was never
+/// opened, is not one block. A line comment runs to the end of its line. A
+/// block comment runs from its start to its end, and an unclosed one is not
+/// one block.
+fn one_block(dialect: &Dialect, text: &str) -> bool {
+    let (BlockEdge::Token(start), BlockEdge::Token(end)) = (dialect.block_start, dialect.block_end)
+    else {
+        return false;
+    };
+    if start.is_empty() || end.is_empty() {
+        return false;
+    }
+    let mut rest = text;
+    let mut depth = 0usize;
+    while !rest.is_empty() {
+        if !dialect.line_comment.is_empty() && rest.starts_with(dialect.line_comment) {
+            rest = match rest.find('\n') {
+                Some(index) => &rest[index + 1..],
+                None => "",
+            };
+            continue;
+        }
+        if let Some(comment) = dialect.block_comment {
+            if !comment.start.is_empty()
+                && !comment.end.is_empty()
+                && rest.starts_with(comment.start)
+            {
+                let after = &rest[comment.start.len()..];
+                let Some(end_at) = after.find(comment.end) else {
+                    return false;
+                };
+                rest = &after[end_at + comment.end.len()..];
+                continue;
+            }
+        }
+        if rest.starts_with(start) {
+            depth = depth.saturating_add(1);
+            rest = &rest[start.len()..];
+            continue;
+        }
+        if rest.starts_with(end) {
+            if depth == 0 {
+                return false;
+            }
+            depth -= 1;
+            rest = &rest[end.len()..];
+            if depth == 0 {
+                return rest.chars().all(is_block_whitespace);
+            }
+            continue;
+        }
+        let Some(character) = rest.chars().next() else {
+            break;
+        };
+        rest = &rest[character.len_utf8()..];
+    }
+    false
+}
+
+fn is_block_whitespace(character: char) -> bool {
+    character == ' ' || character == '\t' || character == '\n' || character == '\r'
 }
 
 /// The category and name of the block opened by `line`.

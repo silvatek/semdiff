@@ -278,6 +278,73 @@ fn records_named_blocks_added_in_the_samples() {
 }
 
 #[test]
+fn an_addition_that_is_not_one_block_stays_a_line_addition() {
+    let tree = Tree::new();
+    tree.write("left/src/pair.rs", "fn kept() {}\n");
+    tree.write(
+        "right/src/pair.rs",
+        "fn kept() {}\nfn one() {}\nfn two() {}\n",
+    );
+    tree.write("left/src/split.rs", "fn kept() {}\n");
+    tree.write(
+        "right/src/split.rs",
+        "fn kept() {}\nfn added() {\n    let value = 1;\n\n    let more = 2;\n}\n",
+    );
+    tree.write("left/calc.py", "x = 0\n");
+    tree.write(
+        "right/calc.py",
+        "x = 0\ndef added():\n    return 1\n\n    return 2\n",
+    );
+    tree.write("left/pair.py", "x = 0\n");
+    tree.write(
+        "right/pair.py",
+        "x = 0\ndef one():\n    return 1\n\ndef two():\n    return 2\n",
+    );
+
+    let document = tree.compare("left", "right");
+
+    assert!(
+        document.contains(
+            "scope: \"src/pair.rs\"\n    type: line-added\n    details:\n      old: 2\n      lines: +2\n      new: 2\n      text: \"fn one() {}\\nfn two() {}\"\n"
+        ),
+        "{document}"
+    );
+    assert!(
+        !document.contains("scope: \"src/pair.rs\"\n    type: named-block-added"),
+        "{document}"
+    );
+    assert!(!document.contains("name: \"added\""), "{document}");
+    assert!(
+        document.contains("scope: \"src/split.rs\"\n    type: line-added"),
+        "{document}"
+    );
+    assert!(
+        !document.contains("scope: \"src/split.rs\"\n    type: named-block-added"),
+        "{document}"
+    );
+    assert!(
+        document.contains("scope: \"calc.py\"\n    type: line-added"),
+        "{document}"
+    );
+    assert!(
+        !document.contains("scope: \"calc.py\"\n    type: named-block-added"),
+        "{document}"
+    );
+    assert!(
+        document.contains(
+            "scope: \"pair.py\"\n    type: named-block-added\n    details:\n      old: 2\n      lines: +2\n      new: 2\n      text: \"def one():\\n    return 1\"\n      category: \"function\"\n      name: \"one\"\n"
+        ),
+        "{document}"
+    );
+    assert!(
+        document.contains(
+            "scope: \"pair.py\"\n    type: named-block-added\n    details:\n      old: 2\n      lines: +2\n      new: 5\n      text: \"def two():\\n    return 2\"\n      category: \"function\"\n      name: \"two\"\n"
+        ),
+        "{document}"
+    );
+}
+
+#[test]
 fn records_an_added_rust_function_as_a_named_block() {
     let tree = Tree::new();
     tree.write("left/src/add.rs", "fn kept() {}\n");
