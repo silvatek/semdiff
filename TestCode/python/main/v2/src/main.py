@@ -75,3 +75,9 @@ def shifted(n):
 # A class is added below in v2.
 class Step:
     by = 1
+
+# A method is added below in v2.
+class Count:
+    by = 1
+    def step(self):
+        return self.by

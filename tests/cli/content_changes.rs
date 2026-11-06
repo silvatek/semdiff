@@ -269,11 +269,17 @@ fn records_named_blocks_added_in_the_samples() {
     assert!(rust.contains(
         "  - scope: \"src/main.rs\"\n    type: named-block-added\n    details:\n      old: 75\n      lines: +3\n      new: 79\n      text: \"struct Step {\\n    by: u32,\\n}\"\n      category: \"structure\"\n      name: \"Step\"\n"
     ), "{rust}");
+    assert!(rust.contains(
+        "  - scope: \"src/main.rs\"\n    type: named-block-added\n    details:\n      old: 82\n      lines: +3\n      new: 89\n      text: \"    fn step(&self) -> u32 {\\n        self.by\\n    }\"\n      category: \"method\"\n      name: \"step\"\n"
+    ), "{rust}");
     assert!(python.contains(
         "  - scope: \"src/main.py\"\n    type: named-block-added\n    details:\n      old: 71\n      lines: +2\n      new: 72\n      text: \"def shifted(n):\\n    return n + 1\"\n      category: \"function\"\n      name: \"shifted\"\n"
     ), "{python}");
     assert!(python.contains(
         "  - scope: \"src/main.py\"\n    type: named-block-added\n    details:\n      old: 73\n      lines: +2\n      new: 76\n      text: \"class Step:\\n    by = 1\"\n      category: \"class\"\n      name: \"Step\"\n"
+    ), "{python}");
+    assert!(python.contains(
+        "  - scope: \"src/main.py\"\n    type: named-block-added\n    details:\n      old: 77\n      lines: +2\n      new: 82\n      text: \"    def step(self):\\n        return self.by\"\n      category: \"method\"\n      name: \"step\"\n"
     ), "{python}");
 }
 

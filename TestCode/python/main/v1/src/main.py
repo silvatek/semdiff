@@ -70,3 +70,7 @@ trailing = 1
 # A function is added below in v2.
 
 # A class is added below in v2.
+
+# A method is added below in v2.
+class Count:
+    by = 1

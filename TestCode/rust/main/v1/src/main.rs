@@ -72,3 +72,11 @@ fn marked() {
 // A function is added below in v2.
 
 // A structure is added below in v2.
+
+// A method is added below in v2.
+struct Count {
+    by: u32,
+}
+
+impl Count {
+}

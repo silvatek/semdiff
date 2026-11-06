@@ -79,3 +79,14 @@ fn shifted(n: u32) -> u64 {
 struct Step {
     by: u32,
 }
+
+// A method is added below in v2.
+struct Count {
+    by: u32,
+}
+
+impl Count {
+    fn step(&self) -> u32 {
+        self.by
+    }
+}
