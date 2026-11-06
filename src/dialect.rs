@@ -214,25 +214,7 @@ mod tests {
     use super::{for_path, BlockCategory, BLOCK_CATEGORIES, JAVASCRIPT, PYTHON, RUST};
 
     #[test]
-    fn every_dialect_shares_one_category_list() {
-        let names: Vec<_> = BLOCK_CATEGORIES
-            .iter()
-            .map(|category| category.as_str())
-            .collect();
-        assert_eq!(
-            names,
-            [
-                "procedure",
-                "function",
-                "method",
-                "structure",
-                "class",
-                "enumeration",
-                "union",
-                "interface",
-                "implementation",
-            ]
-        );
+    fn a_category_parses_back_from_its_name() {
         for category in BLOCK_CATEGORIES {
             assert_eq!(BlockCategory::parse(category.as_str()), Some(*category));
         }

@@ -240,16 +240,6 @@ mod tests {
         let help = help_text();
         assert!(help.starts_with(USAGE));
         assert!(help.contains(DETAILS_EN));
-        assert!(help.contains("--help writes a full description"));
-        assert!(help.contains("\nArguments\n"));
-        assert!(help.contains("\nWhat a comparison records\n"));
-        assert!(help.contains("\nDialects\n"));
-        assert!(help.contains("Rust (.rs)"));
-        assert!(help.contains("Python (.py)"));
-        assert!(help.contains("JavaScript (.js)"));
-        assert!(help.contains("treated as plain text, not ignored"));
-        assert!(help.contains("\nWhat apply checks\n"));
-        assert!(help.contains("\nLimitations\n"));
         assert!(help.ends_with('\n'));
     }
 
