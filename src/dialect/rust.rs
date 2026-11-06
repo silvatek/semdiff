@@ -67,4 +67,6 @@ pub(crate) static RUST: Dialect = Dialect {
         },
     ],
     method_scopes: &["impl", "trait"],
+    c_fun_type_prefix: false,
+    statement_keywords: &[],
 };

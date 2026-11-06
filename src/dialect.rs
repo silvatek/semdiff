@@ -79,6 +79,19 @@ pub(crate) struct Dialect {
     /// callable wrapped around the new one. A `fn`, `def`, or `function`
     /// inside another callable stays a function.
     pub method_scopes: &'static [&'static str],
+    /// Whether a c-style function has a type before its name.
+    ///
+    /// ANSI C sets this. `int step(int n) {` is a function, and `step() {` is
+    /// not. JavaScript clears it. `step() {` is a function, and a type before
+    /// the name is not this form. A method scope around either one records a
+    /// method.
+    pub c_fun_type_prefix: bool,
+    /// Words that take the shape of a c-style function and are not one.
+    ///
+    /// `if (n) {` is a statement. ANSI C and JavaScript each list the words
+    /// they use. An empty list means this dialect does not use the form, so
+    /// Rust and Python leave it empty.
+    pub statement_keywords: &'static [&'static str],
 }
 
 /// ASCII characters that can appear in an identifier.

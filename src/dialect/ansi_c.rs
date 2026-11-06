@@ -12,8 +12,9 @@ use super::{
 /// treats `//` as a comment. A block comment runs from `/*` to `*/`. ANSI C
 /// is a C-family language. A block of code starts with `{` and ends with
 /// `}`. An identifier starts with a letter or `_` and continues with letters,
-/// digits, or `_`. This dialect records no named blocks, so a function
-/// written `int fib(int n) {` stays a line edit.
+/// digits, or `_`. A c-style function has a type before its name, as in
+/// `int fib(int n) {`, optionally after `static` or `extern`. `step() {` stays
+/// a line edit. `if`, `while`, `for`, and `switch` stay line edits.
 pub(crate) static ANSI_C: Dialect = Dialect {
     family: Family::CFamily,
     extensions: &[".c", ".h"],
@@ -28,7 +29,9 @@ pub(crate) static ANSI_C: Dialect = Dialect {
         start: IDENTIFIER_START,
         continue_with: IDENTIFIER_CONTINUE,
     },
-    block_prefixes: &[],
+    block_prefixes: &["static", "extern"],
     named_block_keywords: &[],
     method_scopes: &[],
+    c_fun_type_prefix: true,
+    statement_keywords: &["if", "while", "for", "switch"],
 };

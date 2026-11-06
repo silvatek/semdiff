@@ -18,8 +18,11 @@ const IDENTIFIER_CONTINUE: &str =
 /// named block is opened by `function` or `class`, which are a function and a
 /// class, optionally after a listed qualifier: `export`, `default`, `async`,
 /// or `static`. A `function` inside `class` is a method. A `function` inside
-/// another `function` is a function. A method written as `step() {`, a
-/// generator written `function*`, and text above the keyword stay line edits.
+/// another `function` is a function. A method written as `step() {` is a
+/// c-style function with no type before the name. Inside `class` it is a
+/// method. Outside `class` it is a function. `if`, `while`, `for`, `switch`,
+/// and `catch` stay line edits. A generator written `function*`, and text
+/// above the keyword, stay line edits.
 pub(crate) static JAVASCRIPT: Dialect = Dialect {
     family: Family::CFamily,
     extensions: &[".js"],
@@ -46,4 +49,6 @@ pub(crate) static JAVASCRIPT: Dialect = Dialect {
         },
     ],
     method_scopes: &["class"],
+    c_fun_type_prefix: false,
+    statement_keywords: &["if", "while", "for", "switch", "catch"],
 };

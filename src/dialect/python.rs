@@ -37,4 +37,6 @@ pub(crate) static PYTHON: Dialect = Dialect {
         },
     ],
     method_scopes: &["class"],
+    c_fun_type_prefix: false,
+    statement_keywords: &[],
 };

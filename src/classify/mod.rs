@@ -206,12 +206,13 @@ pub(crate) fn named_block(path: &str, text: &str) -> Option<NamedBlock> {
 /// the top of the file.
 pub(crate) fn named_block_in(path: &str, text: &str, before: &str) -> Option<NamedBlock> {
     let dialect = for_path(path)?;
+    let enclosing = enclosing_block(dialect, before, text);
     let mut block = match dialect.family {
-        Family::CFamily => c_family::named_block(dialect, text)?,
+        Family::CFamily => c_family::named_block(dialect, text, enclosing.as_ref())?,
         Family::Python => python::named_block(dialect, text)?,
     };
     if can_be_a_method(block.category) {
-        if let Some(enclosing) = enclosing_block(dialect, before, text) {
+        if let Some(enclosing) = enclosing {
             block.category = BlockCategory::Method;
             block.enclosing = enclosing.name;
         }
@@ -518,10 +519,7 @@ mod tests {
         assert_eq!(named_block("src/main.rs", "\nfn fib() {}"), None);
         assert_eq!(named_block("calc.py", "@decorator\ndef fib():"), None);
         assert_eq!(named_block("notes.txt", "fn fib() {}"), None);
-        assert_eq!(
-            named_block("src/main.js", "step() {\n    return 1;\n}"),
-            None
-        );
+        assert_eq!(named_block("src/main.rs", "foo() {}"), None);
         assert_eq!(
             named_block("src/main.js", "function* fib() {\n    return 1;\n}"),
             None
@@ -531,8 +529,60 @@ mod tests {
             None
         );
         assert_eq!(
-            named_block("src/main.c", "int shifted(int n) {\n    return n + 1;\n}"),
+            named_block("src/main.c", "step() {\n    return 1;\n}"),
             None
+        );
+        assert_eq!(
+            named_block("src/main.c", "if (n) {\n    return 1;\n}"),
+            None
+        );
+        assert_eq!(
+            named_block("src/main.js", "if (ready) {\n    work();\n}"),
+            None
+        );
+        assert_eq!(
+            named_block("src/main.js", "catch (error) {\n    work();\n}"),
+            None
+        );
+    }
+
+    #[test]
+    fn a_c_style_function_follows_the_dialect() {
+        assert_eq!(
+            opened("src/main.c", "int shifted(int n) {\n    return n + 1;\n}"),
+            Some((BlockCategory::Function, "shifted".to_string()))
+        );
+        assert_eq!(
+            opened("src/main.c", "static int step(int n) {\n    return n;\n}"),
+            Some((BlockCategory::Function, "step".to_string()))
+        );
+        assert_eq!(
+            opened("src/main.c", "int *step(void) {\n    return 1;\n}"),
+            Some((BlockCategory::Function, "step".to_string()))
+        );
+        assert_eq!(
+            opened("src/main.js", "step() {\n    return 1;\n}"),
+            Some((BlockCategory::Function, "step".to_string()))
+        );
+        assert_eq!(
+            opened_in(
+                "src/main.js",
+                "    step() {\n        return this.by;\n    }",
+                "class Count {"
+            ),
+            Some((
+                BlockCategory::Method,
+                "step".to_string(),
+                Some("Count".to_string())
+            ))
+        );
+        assert_eq!(
+            opened_in(
+                "src/main.js",
+                "    step() {\n        return 1;\n    }",
+                "function outer() {"
+            ),
+            Some((BlockCategory::Function, "step".to_string(), None))
         );
     }
 
@@ -575,7 +625,11 @@ mod tests {
                 "    step() {\n        return this.by;\n    }",
                 "class Count {"
             ),
-            None
+            Some((
+                BlockCategory::Method,
+                "step".to_string(),
+                Some("Count".to_string())
+            ))
         );
         assert_eq!(
             opened_in(
