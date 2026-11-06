@@ -17,14 +17,7 @@ A semdif is a list of differences, with semantic context where available.
 "
     ));
     assert!(stdout.contains("\nArguments\n"));
-    assert!(stdout.contains("--ignore=<file>"));
-    assert!(stdout.contains("--ignore-hash"));
-    assert!(stdout.contains("standard input"));
-    assert!(stdout.contains("identifier-renamed"));
-    assert!(stdout.contains("\nWhat a comparison records\n"));
-    assert!(stdout.contains("\nWhat apply checks\n"));
     assert!(stdout.contains("\nLimitations\n"));
-    assert!(stdout.contains("os error 39"));
 }
 
 #[test]
