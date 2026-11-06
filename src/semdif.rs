@@ -441,10 +441,10 @@ fn parse_constant_changed(
     }
     let old_value = required(&fields, "oldvalue", "constant-changed")?;
     let new_value = required(&fields, "newvalue", "constant-changed")?;
-    if !crate::constant::is_integer(&old_value) {
-        return Err(format!("constant-changed has invalid oldvalue {old_value}"));
-    }
-    if !crate::constant::is_integer(&new_value) {
+    if !constant_pair(span.file(), &old_value, &new_value) {
+        if !constant_value(span.file(), &old_value) {
+            return Err(format!("constant-changed has invalid oldvalue {old_value}"));
+        }
         return Err(format!("constant-changed has invalid newvalue {new_value}"));
     }
     Ok(Box::new(crate::change::ConstantChanged::new(
@@ -454,6 +454,19 @@ fn parse_constant_changed(
         new_value,
         required_line(&fields, "occurrence", "constant-changed")?,
     )))
+}
+
+/// Whether both values are integers, or both are boolean spellings for `path`.
+fn constant_pair(path: &str, old_value: &str, new_value: &str) -> bool {
+    if crate::constant::is_integer(old_value) && crate::constant::is_integer(new_value) {
+        return true;
+    }
+    crate::constant::is_boolean(path, old_value) && crate::constant::is_boolean(path, new_value)
+}
+
+/// Whether `text` is an integer or a boolean spelling for `path`.
+fn constant_value(path: &str, text: &str) -> bool {
+    crate::constant::is_integer(text) || crate::constant::is_boolean(path, text)
 }
 
 fn parse_directory_added(
@@ -889,6 +902,66 @@ changes:
             Ok(_) => panic!("--1 was accepted"),
         };
         assert!(message.contains("invalid oldvalue --1"), "{message}");
+
+        let boolean = "\
+changes:
+  - scope: \"src/main.rs:2\"
+    type: constant-changed
+    details:
+      new: 2
+      oldvalue: \"true\"
+      newvalue: \"false\"
+      occurrence: 1
+";
+        let changes = parse_changes(boolean).expect("boolean");
+        let mut details = String::new();
+        changes[0].write_details(&mut details);
+        assert!(details.contains("oldvalue: \"true\"\n"), "{details}");
+        assert!(details.contains("newvalue: \"false\"\n"), "{details}");
+
+        let python = "\
+changes:
+  - scope: \"calc.py:1\"
+    type: constant-changed
+    details:
+      new: 1
+      oldvalue: \"True\"
+      newvalue: \"False\"
+      occurrence: 1
+";
+        parse_changes(python).expect("python boolean");
+
+        let c_name = "\
+changes:
+  - scope: \"src/main.c:2\"
+    type: constant-changed
+    details:
+      new: 2
+      oldvalue: \"true\"
+      newvalue: \"false\"
+      occurrence: 1
+";
+        let message = match parse_changes(c_name) {
+            Err(message) => message,
+            Ok(_) => panic!("a C boolean was accepted"),
+        };
+        assert!(message.contains("invalid oldvalue true"), "{message}");
+
+        let rust_python = "\
+changes:
+  - scope: \"src/main.rs:2\"
+    type: constant-changed
+    details:
+      new: 2
+      oldvalue: \"True\"
+      newvalue: \"False\"
+      occurrence: 1
+";
+        let message = match parse_changes(rust_python) {
+            Err(message) => message,
+            Ok(_) => panic!("True was accepted for Rust"),
+        };
+        assert!(message.contains("invalid oldvalue True"), "{message}");
     }
 
     #[test]

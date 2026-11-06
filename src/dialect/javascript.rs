@@ -20,7 +20,8 @@ const IDENTIFIER_CONTINUE: &str =
 /// c-style function with no type before the name. Inside `class` it is a
 /// method. Outside `class` it is a function. `if`, `while`, `for`, `switch`,
 /// and `catch` stay line edits. A generator written `function*`, and text
-/// above the keyword, stay line edits.
+/// above the keyword, stay line edits. The boolean constants are `true` and
+/// `false`.
 pub(crate) static JAVASCRIPT: Dialect = Dialect {
     extensions: &[".js"],
     identifier_characters: IdentifierCharacters {
@@ -59,5 +60,6 @@ pub(crate) static JAVASCRIPT: Dialect = Dialect {
         "return", "throw", "case", "void", "typeof", "delete", "await", "yield", "if", "while",
         "in",
     ],
+    boolean_constants: &["true", "false"],
     ..Dialect::baseline()
 };

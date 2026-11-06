@@ -53,7 +53,7 @@ impl SpanScope {
         &self.scope
     }
 
-    fn file(&self) -> &str {
+    pub(crate) fn file(&self) -> &str {
         &self.file
     }
 
@@ -420,11 +420,11 @@ impl IdentifierRenamed {
     }
 }
 
-/// An integer constant changed on one old line.
+/// An integer or boolean constant changed on one old line.
 ///
-/// The scope is that line. Apply replaces one digit sequence there. `new` is
-/// that line in the new file. `occurrence` is the 1-based index of the
-/// sequence among the digit sequences on the old line.
+/// The scope is that line. Apply replaces one integer or one boolean spelling
+/// there. `new` is that line in the new file. `occurrence` is the 1-based
+/// index of that constant among the constants of its kind on the old line.
 pub(crate) struct ConstantChanged {
     span: SpanScope,
     new_line: usize,
@@ -434,10 +434,10 @@ pub(crate) struct ConstantChanged {
 }
 
 impl ConstantChanged {
-    /// A change of one integer on the old line named by `span`.
+    /// A change of one integer or boolean constant on the old line named by `span`.
     ///
     /// `new_line` is that line's number in the new file. `occurrence` selects
-    /// the digit sequence when the line has several.
+    /// which constant of that kind changed when the line has several.
     pub(crate) fn new(
         span: SpanScope,
         new_line: usize,
@@ -513,17 +513,33 @@ impl LineEdit for ConstantChanged {
                 source_lines.len()
             ));
         }
-        let replaced = match crate::constant::replace_integer(
-            self.span.file(),
-            &source_lines[line_no - 1],
-            &self.old_value,
-            &self.new_value,
-            self.occurrence,
-        ) {
+        let replaced = if crate::constant::is_integer(&self.old_value) {
+            crate::constant::replace_integer(
+                self.span.file(),
+                &source_lines[line_no - 1],
+                &self.old_value,
+                &self.new_value,
+                self.occurrence,
+            )
+        } else {
+            crate::constant::replace_boolean(
+                self.span.file(),
+                &source_lines[line_no - 1],
+                &self.old_value,
+                &self.new_value,
+                self.occurrence,
+            )
+        };
+        let replaced = match replaced {
             Ok(text) => text,
             Err(message) => {
+                let kind = if crate::constant::is_integer(&self.old_value) {
+                    "integer"
+                } else {
+                    "boolean"
+                };
                 return Err(format!(
-                    "cannot change integer {} on line {line_no} in {}: {message}",
+                    "cannot change {kind} {} on line {line_no} in {}: {message}",
                     self.old_value,
                     file.display()
                 ));
