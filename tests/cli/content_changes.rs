@@ -248,7 +248,7 @@ fn flags_whitespace_in_the_samples() {
 }
 
 #[test]
-fn records_named_blocks_added_in_the_samples() {
+fn records_named_blocks_in_the_samples() {
     let manifest = Path::new(env!("CARGO_MANIFEST_DIR"));
     let rust = semdiff::compare_sources(
         &semdiff::StdFileSystem::new(),
@@ -280,6 +280,24 @@ fn records_named_blocks_added_in_the_samples() {
     ), "{python}");
     assert!(python.contains(
         "  - scope: \"src/main.py[Count]\"\n    type: named-block-added\n    details:\n      old: 77\n      lines: +2\n      new: 82\n      text: \"    def step(self):\\n        return self.by\"\n      category: \"method\"\n      name: \"step\"\n"
+    ), "{python}");
+    assert!(rust.contains(
+        "  - scope: \"src/main.rs\"\n    type: named-block-removed\n    details:\n      old: 85\n      lines: -3\n      new: 95\n      text: \"fn dropped(n: u32) -> u64 {\\n    n - 1\\n}\"\n      category: \"function\"\n      name: \"dropped\"\n"
+    ), "{rust}");
+    assert!(rust.contains(
+        "  - scope: \"src/main.rs\"\n    type: named-block-removed\n    details:\n      old: 90\n      lines: -3\n      new: 97\n      text: \"struct Gone {\\n    gone: u32,\\n}\"\n      category: \"structure\"\n      name: \"Gone\"\n"
+    ), "{rust}");
+    assert!(rust.contains(
+        "  - scope: \"src/main.rs[Total]\"\n    type: named-block-removed\n    details:\n      old: 100\n      lines: -3\n      new: 104\n      text: \"    fn undo(&self) -> u32 {\\n        self.left\\n    }\"\n      category: \"method\"\n      name: \"undo\"\n"
+    ), "{rust}");
+    assert!(python.contains(
+        "  - scope: \"src/main.py\"\n    type: named-block-removed\n    details:\n      old: 79\n      lines: -2\n      new: 86\n      text: \"def dropped(n):\\n    return n - 1\"\n      category: \"function\"\n      name: \"dropped\"\n"
+    ), "{python}");
+    assert!(python.contains(
+        "  - scope: \"src/main.py\"\n    type: named-block-removed\n    details:\n      old: 83\n      lines: -2\n      new: 88\n      text: \"class Gone:\\n    gone = 2\"\n      category: \"class\"\n      name: \"Gone\"\n"
+    ), "{python}");
+    assert!(python.contains(
+        "  - scope: \"src/main.py[Total]\"\n    type: named-block-removed\n    details:\n      old: 89\n      lines: -2\n      new: 92\n      text: \"    def undo(self):\\n        return self.left\"\n      category: \"method\"\n      name: \"undo\"\n"
     ), "{python}");
 }
 
@@ -454,6 +472,76 @@ fn records_an_added_rust_function_as_a_named_block() {
         tree.read("edited/calc.py"),
         b"def kept():\n    return 1\ndef added():\n    return 2\n"
     );
+}
+
+#[test]
+fn records_a_removed_named_block() {
+    let tree = Tree::new();
+    tree.write(
+        "left/src/drop.rs",
+        "fn kept() {}\nfn dropped() {\n    let value = 1;\n}\n",
+    );
+    tree.write("right/src/drop.rs", "fn kept() {}\n");
+    tree.write(
+        "edited/src/drop.rs",
+        "fn kept() {}\nfn dropped() {\n    let value = 1;\n}\n",
+    );
+    tree.write("left/src/note.rs", "fn kept() {}\nlet value = 1;\n");
+    tree.write("right/src/note.rs", "fn kept() {}\n");
+    tree.write("edited/src/note.rs", "fn kept() {}\nlet value = 1;\n");
+    tree.write(
+        "left/calc.py",
+        "def kept():\n    return 1\ndef dropped():\n    return 2\n",
+    );
+    tree.write("right/calc.py", "def kept():\n    return 1\n");
+    tree.write(
+        "edited/calc.py",
+        "def kept():\n    return 1\ndef dropped():\n    return 2\n",
+    );
+    tree.write("left/src/types.rs", "impl Foo {\n    fn dropped() {}\n}\n");
+    tree.write("right/src/types.rs", "impl Foo {\n}\n");
+    tree.write(
+        "edited/src/types.rs",
+        "impl Foo {\n    fn dropped() {}\n}\n",
+    );
+    tree.write(
+        "left/types.py",
+        "class Foo:\n    x = 1\n    def dropped(self):\n        return 1\n",
+    );
+    tree.write("right/types.py", "class Foo:\n    x = 1\n");
+    tree.write(
+        "edited/types.py",
+        "class Foo:\n    x = 1\n    def dropped(self):\n        return 1\n",
+    );
+
+    let document = tree.compare("left", "right");
+
+    assert!(document.contains(
+        "  - scope: \"src/drop.rs\"\n    type: named-block-removed\n    details:\n      old: 2\n      lines: -3\n      new: 2\n      text: \"fn dropped() {\\n    let value = 1;\\n}\"\n      category: \"function\"\n      name: \"dropped\"\n"
+    ), "{document}");
+    assert!(
+        !document.contains("scope: \"src/drop.rs\"\n    type: line-removed"),
+        "{document}"
+    );
+    assert!(document.contains(
+        "  - scope: \"src/note.rs\"\n    type: line-removed\n    details:\n      old: 2\n      lines: -1\n      new: 2\n      text: \"let value = 1;\"\n"
+    ), "{document}");
+    assert!(document.contains(
+        "  - scope: \"calc.py\"\n    type: named-block-removed\n    details:\n      old: 3\n      lines: -2\n      new: 3\n      text: \"def dropped():\\n    return 2\"\n      category: \"function\"\n      name: \"dropped\"\n"
+    ), "{document}");
+    assert!(document.contains(
+        "  - scope: \"src/types.rs[Foo]\"\n    type: named-block-removed\n    details:\n      old: 2\n      lines: -1\n      new: 2\n      text: \"    fn dropped() {}\"\n      category: \"method\"\n      name: \"dropped\"\n"
+    ), "{document}");
+    assert!(document.contains(
+        "  - scope: \"types.py[Foo]\"\n    type: named-block-removed\n    details:\n      old: 3\n      lines: -2\n      new: 3\n      text: \"    def dropped(self):\\n        return 1\"\n      category: \"method\"\n      name: \"dropped\"\n"
+    ), "{document}");
+
+    tree.apply("edited", &document).unwrap();
+    assert_eq!(tree.read("edited/src/drop.rs"), b"fn kept() {}\n");
+    assert_eq!(tree.read("edited/src/note.rs"), b"fn kept() {}\n");
+    assert_eq!(tree.read("edited/calc.py"), b"def kept():\n    return 1\n");
+    assert_eq!(tree.read("edited/src/types.rs"), b"impl Foo {\n}\n");
+    assert_eq!(tree.read("edited/types.py"), b"class Foo:\n    x = 1\n");
 }
 
 #[test]

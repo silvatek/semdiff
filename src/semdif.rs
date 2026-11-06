@@ -205,6 +205,7 @@ impl PartialChange {
             ("file-changed", file_changed),
             ("line-added", parse_line_added),
             ("named-block-added", parse_named_block_added),
+            ("named-block-removed", parse_named_block_removed),
             ("line-removed", parse_line_removed),
             ("line-modified", parse_line_modified),
             ("identifier-renamed", parse_identifier_renamed),
@@ -284,6 +285,23 @@ fn parse_named_block_added(
     )))
 }
 
+fn parse_named_block_removed(
+    scope: String,
+    fields: BTreeMap<String, String>,
+) -> Result<Box<dyn Change>, String> {
+    let old = required_line(&fields, "old", "named-block-removed")?;
+    let text = required(&fields, "text", "named-block-removed")?;
+    expect_removed_lines(&fields, old, &text, "named-block-removed")?;
+    Ok(Box::new(crate::change::NamedBlockRemoved::new(
+        scope,
+        old,
+        required_line(&fields, "new", "named-block-removed")?,
+        text,
+        required_category(&fields, "named-block-removed")?,
+        required_name(&fields, "named-block-removed")?,
+    )))
+}
+
 /// The shared category recorded on a named-block addition.
 ///
 /// The value has to be one of the categories every dialect shares. A missing
@@ -303,7 +321,7 @@ fn parse_line_removed(
 ) -> Result<Box<dyn Change>, String> {
     let old = required_line(&fields, "old", "line-removed")?;
     let text = required(&fields, "text", "line-removed")?;
-    expect_removed_lines(&fields, old, &text)?;
+    expect_removed_lines(&fields, old, &text, "line-removed")?;
     Ok(Box::new(crate::change::LineRemoved::new(
         scope,
         old,
@@ -427,24 +445,25 @@ fn stored_bytes(fields: &BTreeMap<String, String>, kind: &str) -> Result<Vec<u8>
 /// Checks that a removal's `lines` is the negative count of lines in `text`.
 ///
 /// `lines: -1` removes one line. `lines: -2` removes two. The text holds
-/// that many lines.
+/// that many lines. `kind` is `line-removed` or `named-block-removed`.
 fn expect_removed_lines(
     fields: &BTreeMap<String, String>,
     old: usize,
     text: &str,
+    kind: &str,
 ) -> Result<(), String> {
-    let lines = required_lines(fields, "line-removed")?;
+    let lines = required_lines(fields, kind)?;
     if lines >= 0 {
-        return Err(invalid_lines("line-removed", fields));
+        return Err(invalid_lines(kind, fields));
     }
     let count = lines
         .checked_neg()
-        .ok_or_else(|| invalid_lines("line-removed", fields))? as usize;
+        .ok_or_else(|| invalid_lines(kind, fields))? as usize;
     if text.split('\n').count() != count {
-        return Err(invalid_lines("line-removed", fields));
+        return Err(invalid_lines(kind, fields));
     }
     old.checked_add(count - 1)
-        .ok_or_else(|| invalid_lines("line-removed", fields))?;
+        .ok_or_else(|| invalid_lines(kind, fields))?;
     Ok(())
 }
 
@@ -774,5 +793,51 @@ changes:
             Ok(_) => panic!("missing name was accepted"),
         };
         assert!(message.contains("missing name"), "{message}");
+    }
+
+    #[test]
+    fn a_named_block_removal_records_its_category_and_name() {
+        let document = "\
+changes:
+  - scope: \"src/main.rs[Count]\"
+    type: named-block-removed
+    details:
+      old: 2
+      lines: -1
+      new: 2
+      text: \"    fn step(&self) {}\"
+      category: \"method\"
+      name: \"step\"
+";
+        let changes = parse_changes(document).expect("named block");
+        assert_eq!(changes[0].kind(), "named-block-removed");
+        assert_eq!(changes[0].scope(), "src/main.rs[Count]");
+        assert_eq!(changes[0].content().expect("content").file(), "src/main.rs");
+        let mut details = String::new();
+        changes[0].write_details(&mut details);
+        assert!(details.contains("lines: -1\n"), "{details}");
+        assert!(details.contains("category: \"method\"\n"), "{details}");
+        assert!(details.contains("name: \"step\"\n"), "{details}");
+
+        let positive = "\
+changes:
+  - scope: \"src/main.rs\"
+    type: named-block-removed
+    details:
+      old: 1
+      lines: +1
+      new: 1
+      text: \"fn fib() {}\"
+      category: \"function\"
+      name: \"fib\"
+";
+        let message = match parse_changes(positive) {
+            Err(message) => message,
+            Ok(_) => panic!("a positive line count was accepted"),
+        };
+        assert!(
+            message.contains("named-block-removed has invalid lines +1"),
+            "{message}"
+        );
     }
 }

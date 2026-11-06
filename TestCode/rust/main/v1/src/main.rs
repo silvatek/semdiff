@@ -80,3 +80,24 @@ struct Count {
 
 impl Count {
 }
+
+// A function is removed in v2.
+fn dropped(n: u32) -> u64 {
+    n - 1
+}
+
+// A structure is removed in v2.
+struct Gone {
+    gone: u32,
+}
+
+// A method is removed in v2.
+struct Total {
+    left: u32,
+}
+
+impl Total {
+    fn undo(&self) -> u32 {
+        self.left
+    }
+}

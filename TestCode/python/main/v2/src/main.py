@@ -81,3 +81,11 @@ class Count:
     by = 1
     def step(self):
         return self.by
+
+# A function is removed in v2.
+
+# A class is removed in v2.
+
+# A method is removed in v2.
+class Total:
+    left = 0

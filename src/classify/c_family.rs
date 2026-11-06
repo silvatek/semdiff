@@ -16,7 +16,7 @@ pub(super) fn margin_whitespace(old_line: &str, new_line: &str) -> bool {
     strip_ascii_blank(old_line) == strip_ascii_blank(new_line)
 }
 
-/// The named block added by `text`, when this dialect's keywords say so.
+/// The named block in `text`, when this dialect's keywords say so.
 ///
 /// The first line is read for the keyword and the name. Leading spaces and
 /// tabs are skipped, then any listed qualifiers, then a keyword, then the
