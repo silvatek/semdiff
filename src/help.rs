@@ -189,9 +189,8 @@ Limitations
 
   A Rust attribute, pub(in path), or impl<T> leaves the run a line edit. A
   Python decorator above def or class, or an async def, leaves the run a
-  line edit. A JavaScript method written without the function keyword, a
-  generator written function*, or text above function or class, leaves the
-  run a line edit.
+  line edit. A JavaScript generator written function*, or text above function
+  or class, leaves the run a line edit.
 ";
 
 /// The detailed help for each language code.

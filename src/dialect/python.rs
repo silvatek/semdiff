@@ -1,9 +1,6 @@
 //! The Python dialect.
 
-use super::{
-    BlockCategory, BlockEdge, Dialect, Family, IdentifierCharacters, NamedBlockKeyword,
-    IDENTIFIER_CONTINUE, IDENTIFIER_START,
-};
+use super::{BlockCategory, BlockEdge, Dialect, Family, NamedBlockKeyword};
 
 /// The Python dialect.
 ///
@@ -21,11 +18,6 @@ pub(crate) static PYTHON: Dialect = Dialect {
     block_comment: None,
     block_start: BlockEdge::Indentation,
     block_end: BlockEdge::Indentation,
-    identifier_characters: IdentifierCharacters {
-        start: IDENTIFIER_START,
-        continue_with: IDENTIFIER_CONTINUE,
-    },
-    block_prefixes: &[],
     named_block_keywords: &[
         NamedBlockKeyword {
             keyword: "def",
@@ -37,4 +29,5 @@ pub(crate) static PYTHON: Dialect = Dialect {
         },
     ],
     method_scopes: &["class"],
+    ..Dialect::baseline()
 };

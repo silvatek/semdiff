@@ -1,9 +1,6 @@
 //! The Rust dialect.
 
-use super::{
-    BlockCategory, BlockComment, BlockEdge, Dialect, Family, IdentifierCharacters,
-    NamedBlockKeyword, IDENTIFIER_CONTINUE, IDENTIFIER_START,
-};
+use super::{BlockCategory, Dialect, NamedBlockKeyword};
 
 /// The Rust dialect.
 ///
@@ -18,19 +15,7 @@ use super::{
 /// implementation. A `fn` inside `impl` or `trait` is a method. A `fn` inside
 /// another `fn` is a function.
 pub(crate) static RUST: Dialect = Dialect {
-    family: Family::CFamily,
     extensions: &[".rs"],
-    line_comment: "//",
-    block_comment: Some(BlockComment {
-        start: "/*",
-        end: "*/",
-    }),
-    block_start: BlockEdge::Token("{"),
-    block_end: BlockEdge::Token("}"),
-    identifier_characters: IdentifierCharacters {
-        start: IDENTIFIER_START,
-        continue_with: IDENTIFIER_CONTINUE,
-    },
     block_prefixes: &[
         "pub(crate)",
         "pub(super)",
@@ -67,4 +52,5 @@ pub(crate) static RUST: Dialect = Dialect {
         },
     ],
     method_scopes: &["impl", "trait"],
+    ..Dialect::baseline()
 };

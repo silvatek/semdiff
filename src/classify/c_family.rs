@@ -1,8 +1,9 @@
 //! The reader for brace-delimited languages.
 //!
 //! C, C++, Rust, Java, and JavaScript share this reader. A dialect supplies
-//! the comment mark, the identifier characters, and the keywords that open a
-//! named block. Braces mark a block, so a change of indentation is formatting.
+//! the comment mark, the identifier characters, the keywords that open a
+//! named block, and whether a c-style function needs a type before its name.
+//! Braces mark a block, so a change of indentation is formatting.
 
 use crate::classify::NamedBlock;
 use crate::dialect::{BlockCategory, BlockEdge, Dialect, IdentifierCharacters, NamedBlockKeyword};
@@ -16,23 +17,37 @@ pub(super) fn margin_whitespace(old_line: &str, new_line: &str) -> bool {
     strip_ascii_blank(old_line) == strip_ascii_blank(new_line)
 }
 
-/// The named block in `text`, when this dialect's keywords say so.
+/// The named block in `text`, when this dialect's keywords or c-style form say so.
 ///
-/// The first line is read for the keyword and the name. Leading spaces and
-/// tabs are skipped, then any listed qualifiers, then a keyword, then the
-/// identifier that names the block. A qualifier is matched as written. The
-/// keyword selects the category. The whole text then has to be that one
-/// block: the dialect's start token opens it, the end token closes it, and
-/// only whitespace follows the close. Comments are skipped while the tokens
-/// are counted. A quote is not special, so a brace written inside a string
-/// is counted. A comment, a dialect with no such keywords, a header without
-/// its body, and a run of two blocks have no block.
-pub(super) fn named_block(dialect: &Dialect, text: &str) -> Option<NamedBlock> {
+/// The keyword form reads the first line for a listed qualifier, a keyword,
+/// and the name. The c-style form reads an identifier immediately before `(`.
+/// `enclosing` is present when the block sits in one of the dialect's method
+/// scopes. The whole text then has to be that one block: the dialect's start
+/// token opens it, the end token closes it, and only whitespace follows the
+/// close. Comments are skipped while the tokens are counted. A quote is not
+/// special, so a brace written inside a string is counted. A comment, a
+/// header without its body, and a run of two blocks have no block.
+pub(super) fn named_block(
+    dialect: &Dialect,
+    text: &str,
+    enclosing: Option<&super::EnclosingBlock>,
+) -> Option<NamedBlock> {
+    if let Some(opened) = keyword_block(dialect, text) {
+        return Some(opened);
+    }
+    c_style_function(dialect, text, enclosing)
+}
+
+/// The keyword block in `text`.
+///
+/// A dialect with no named-block keywords has none. The first line is read
+/// for the keyword and the name, and the text has to be that one block.
+fn keyword_block(dialect: &Dialect, text: &str) -> Option<NamedBlock> {
     if dialect.named_block_keywords.is_empty() {
         return None;
     }
     let line = text.split('\n').next().unwrap_or("");
-    if line.trim_start().starts_with(dialect.line_comment) {
+    if !dialect.line_comment.is_empty() && line.trim_start().starts_with(dialect.line_comment) {
         return None;
     }
     let opened = block_name(dialect, line)?;
@@ -44,6 +59,131 @@ pub(super) fn named_block(dialect: &Dialect, text: &str) -> Option<NamedBlock> {
         name: opened.name.to_string(),
         enclosing: None,
     })
+}
+
+/// A c-style function in `text`.
+///
+/// The name is the identifier immediately before the first `(`. A statement
+/// keyword in that position is not a function. `c_fun_type_prefix` requires a
+/// type before the name, as in `int step(int n) {`, or rejects one, as in
+/// JavaScript `step() {`. Inside a method scope the function is a method.
+/// A dialect that clears `c_style_functions` does not use this form.
+fn c_style_function(
+    dialect: &Dialect,
+    text: &str,
+    enclosing: Option<&super::EnclosingBlock>,
+) -> Option<NamedBlock> {
+    if !dialect.c_style_functions {
+        return None;
+    }
+    let line = text.split('\n').next().unwrap_or("");
+    if !dialect.line_comment.is_empty() && line.trim_start().starts_with(dialect.line_comment) {
+        return None;
+    }
+    if !one_block(dialect, text) || !line_contains_block_start(dialect, line) {
+        return None;
+    }
+    let header = skip_prefixes(dialect, line);
+    let (name, before) = identifier_before_paren(&dialect.identifier_characters, header)?;
+    if dialect
+        .statement_keywords
+        .iter()
+        .any(|keyword| *keyword == name)
+    {
+        return None;
+    }
+    let has_type = contains_identifier(&dialect.identifier_characters, before);
+    if has_type != dialect.c_fun_type_prefix {
+        return None;
+    }
+    if let Some(enclosing) = enclosing {
+        return Some(NamedBlock {
+            category: BlockCategory::Method,
+            name: name.to_string(),
+            enclosing: enclosing.name.clone(),
+        });
+    }
+    Some(NamedBlock {
+        category: BlockCategory::Function,
+        name: name.to_string(),
+        enclosing: None,
+    })
+}
+
+/// Whether `line` contains the token that opens a block.
+fn line_contains_block_start(dialect: &Dialect, line: &str) -> bool {
+    match dialect.block_start {
+        BlockEdge::Token(start) => !start.is_empty() && line.contains(start),
+        BlockEdge::Indentation => false,
+    }
+}
+
+/// `line` after leading spaces and listed qualifiers have been skipped.
+fn skip_prefixes<'a>(dialect: &Dialect, line: &'a str) -> &'a str {
+    let mut rest = trim_ascii_blank_start(line);
+    loop {
+        let Some(qualifier) =
+            super::matching_qualifier(&dialect.identifier_characters, dialect.block_prefixes, rest)
+        else {
+            return rest;
+        };
+        let after = &rest[qualifier.len()..];
+        let next = trim_ascii_blank_start(after);
+        if next.len() == after.len() {
+            return rest;
+        }
+        rest = next;
+    }
+}
+
+/// The identifier that ends immediately before the first `(`, and the text before it.
+///
+/// Whitespace may sit between the name and the parenthesis. `int *step(void)`
+/// yields `step` and the text `int *`.
+fn identifier_before_paren<'a>(
+    characters: &IdentifierCharacters,
+    header: &'a str,
+) -> Option<(&'a str, &'a str)> {
+    let paren = header.find('(')?;
+    let mut end = paren;
+    while end > 0 {
+        let last = header[..end].chars().next_back()?;
+        if !is_ascii_blank(last) {
+            break;
+        }
+        end -= last.len_utf8();
+    }
+    let mut start = end;
+    for (index, character) in header[..end].char_indices().rev() {
+        if !characters.continues(character) {
+            break;
+        }
+        start = index;
+    }
+    if start == end {
+        return None;
+    }
+    let name = &header[start..end];
+    let first = name.chars().next()?;
+    if !characters.starts(first) {
+        return None;
+    }
+    Some((name, &header[..start]))
+}
+
+/// Whether `text` holds an identifier.
+fn contains_identifier(characters: &IdentifierCharacters, text: &str) -> bool {
+    let mut rest = text;
+    while !rest.is_empty() {
+        if next_word(characters, rest).is_some() {
+            return true;
+        }
+        let Some(character) = rest.chars().next() else {
+            return false;
+        };
+        rest = &rest[character.len_utf8()..];
+    }
+    false
 }
 
 /// Whether `text` is one complete block bounded by the dialect's tokens.

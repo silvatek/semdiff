@@ -348,9 +348,8 @@ fn classifies_the_javascript_sample() {
         "  - scope: \"src/main.js\"\n    type: named-block-added\n    details:\n      old: 70\n      lines: +3\n      new: 74\n      text: \"class Step {\\n    by = 1;\\n}\"\n      category: \"class\"\n      name: \"Step\"\n"
     ), "{javascript}");
     assert!(javascript.contains(
-        "  - scope: \"src/main.js\"\n    type: line-added\n    details:\n      old: 74\n      lines: +3\n      new: 81\n      text: \"    step() {\\n        return this.by;\\n    }\"\n"
+        "  - scope: \"src/main.js[Count]\"\n    type: named-block-added\n    details:\n      old: 74\n      lines: +3\n      new: 81\n      text: \"    step() {\\n        return this.by;\\n    }\"\n      category: \"method\"\n      name: \"step\"\n"
     ), "{javascript}");
-    assert!(!javascript.contains("name: \"step\""), "{javascript}");
     assert!(javascript.contains(
         "  - scope: \"src/main.js\"\n    type: named-block-removed\n    details:\n      old: 77\n      lines: -3\n      new: 87\n      text: \"function dropped(n) {\\n    return n - 1;\\n}\"\n      category: \"function\"\n      name: \"dropped\"\n"
     ), "{javascript}");
@@ -358,9 +357,8 @@ fn classifies_the_javascript_sample() {
         "  - scope: \"src/main.js\"\n    type: named-block-removed\n    details:\n      old: 82\n      lines: -3\n      new: 89\n      text: \"class Gone {\\n    gone = 2;\\n}\"\n      category: \"class\"\n      name: \"Gone\"\n"
     ), "{javascript}");
     assert!(javascript.contains(
-        "  - scope: \"src/main.js\"\n    type: line-removed\n    details:\n      old: 89\n      lines: -3\n      new: 93\n      text: \"    undo() {\\n        return this.left;\\n    }\"\n"
+        "  - scope: \"src/main.js[Total]\"\n    type: named-block-removed\n    details:\n      old: 89\n      lines: -3\n      new: 93\n      text: \"    undo() {\\n        return this.left;\\n    }\"\n      category: \"method\"\n      name: \"undo\"\n"
     ), "{javascript}");
-    assert!(!javascript.contains("name: \"undo\""), "{javascript}");
 }
 
 #[test]
@@ -398,18 +396,19 @@ fn classifies_the_c_sample() {
         "  - scope: \"src/main.c\"\n    type: line-added\n    details:\n      old: 76\n      lines: +1\n      new: 76\n      text: \"\"\n      isWhitespace: true\n"
     ), "{c}");
     assert!(c.contains(
-        "  - scope: \"src/main.c\"\n    type: line-added\n    details:\n      old: 77\n      lines: +3\n      new: 78\n      text: \"int shifted(int n) {\\n    return n + 1;\\n}\"\n"
+        "  - scope: \"src/main.c\"\n    type: named-block-added\n    details:\n      old: 77\n      lines: +3\n      new: 78\n      text: \"int shifted(int n) {\\n    return n + 1;\\n}\"\n      category: \"function\"\n      name: \"shifted\"\n"
     ), "{c}");
     assert!(c.contains(
         "  - scope: \"src/main.c\"\n    type: line-added\n    details:\n      old: 79\n      lines: +3\n      new: 83\n      text: \"struct Step {\\n    int by;\\n};\"\n"
     ), "{c}");
     assert!(c.contains(
-        "  - scope: \"src/main.c\"\n    type: line-removed\n    details:\n      old: 81\n      lines: -3\n      new: 88\n      text: \"int dropped(int n) {\\n    return n - 1;\\n}\"\n"
+        "  - scope: \"src/main.c\"\n    type: named-block-removed\n    details:\n      old: 81\n      lines: -3\n      new: 88\n      text: \"int dropped(int n) {\\n    return n - 1;\\n}\"\n      category: \"function\"\n      name: \"dropped\"\n"
     ), "{c}");
     assert!(c.contains(
         "  - scope: \"src/main.c\"\n    type: line-removed\n    details:\n      old: 86\n      lines: -3\n      new: 90\n      text: \"struct Gone {\\n    int gone;\\n};\"\n"
     ), "{c}");
-    assert!(!c.contains("named-block"), "{c}");
+    assert!(!c.contains("name: \"Step\""), "{c}");
+    assert!(!c.contains("name: \"Gone\""), "{c}");
 }
 
 #[test]
