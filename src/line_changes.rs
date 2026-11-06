@@ -6,12 +6,12 @@ use crate::change::Change;
 /// lines that stayed. A walk along those matches turns each gap into a hunk.
 /// Lines in a hunk pair from the top into modifications. A modification whose
 /// only change is one identifier, occurring once on the old line, is an
-/// identifier rename. A modification whose only change is one integer, on a
-/// line that is not a comment and outside a string, is a constant change.
-/// A leading `-` is part of the integer when it starts the number. A
-/// modification whose only change is one boolean constant listed by the
-/// dialect is a constant change too. The spelling is the whole name. ANSI C
-/// lists none, so those words stay names.
+/// identifier rename. A changed stretch of that line is a span, widened to
+/// the token that contains it. One such span is a constant change when it is
+/// a boolean spelling or an integer outside a string and a comment, and an
+/// identifier rename when it is one name. A leading `-` is part of the integer
+/// when it starts the number. ANSI C lists no boolean spellings, so those
+/// words stay names. Several changed spans stay a line modification.
 /// An added or removed line is a full-line comment when that line opens with
 /// the dialect's line comment. A modification is one when
 /// both the old line and the new line do. A file with no dialect is never a
@@ -268,31 +268,28 @@ fn modified_line(
     old_text: &str,
     new_text: &str,
 ) -> Box<dyn Change> {
-    if let Some(constant) = crate::constant::boolean_constant(path, old_text, new_text) {
-        return Box::new(crate::change::ConstantChanged::new(
-            crate::change::SpanScope::new(path, old),
-            new,
-            constant.old_value,
-            constant.new_value,
-            constant.occurrence,
-        ));
-    }
-    if let Some(rename) = crate::identifier::identifier_rename(path, old_text, new_text) {
-        return Box::new(crate::change::IdentifierRenamed::new(
-            crate::change::SpanScope::new(path, old),
-            new,
-            rename.oldname,
-            rename.newname,
-        ));
-    }
-    if let Some(constant) = crate::constant::integer_constant(path, old_text, new_text) {
-        return Box::new(crate::change::ConstantChanged::new(
-            crate::change::SpanScope::new(path, old),
-            new,
-            constant.old_value,
-            constant.new_value,
-            constant.occurrence,
-        ));
+    if let Some(edit) = crate::line_span::classify_line(path, old_text, new_text) {
+        return match edit {
+            crate::line_span::ClassifiedEdit::Constant {
+                old_value,
+                new_value,
+                occurrence,
+            } => Box::new(crate::change::ConstantChanged::new(
+                crate::change::SpanScope::new(path, old),
+                new,
+                old_value,
+                new_value,
+                occurrence,
+            )),
+            crate::line_span::ClassifiedEdit::Rename { oldname, newname } => {
+                Box::new(crate::change::IdentifierRenamed::new(
+                    crate::change::SpanScope::new(path, old),
+                    new,
+                    oldname,
+                    newname,
+                ))
+            }
+        };
     }
     Box::new(crate::change::LineModified::new(
         path.to_string(),
