@@ -3,25 +3,16 @@ use std::path::Path;
 
 use crate::filesystem::{FileSystem, StdFileSystem};
 
-const USAGE: &str = "\
-Compare two sources and write a semdif. --apply replays a semdif onto a directory.
-A semdif is a list of differences, with semantic context where available.
-
-Usage: semdiff [--ignore=<file>] <left> <right> <output>
-       semdiff --apply [--ignore=<file>] [--ignore-hash] <semdif> <directory>
-
-An output path of - writes the semdif to standard output, and the listing to standard error.
-A semdif path of - reads the semdif from standard input.
-";
-
 /// The path that means the standard stream.
 ///
 /// A comparison writes the semdif to standard output. Apply reads the semdif
 /// from standard input.
 pub(crate) const STANDARD_STREAM: &str = "-";
 
-/// The requested command, either a comparison or an apply.
+/// The requested command.
 pub(crate) enum Command {
+    /// Print the full help.
+    Help,
     Compare(Args),
     Apply {
         semdif: String,
@@ -58,7 +49,7 @@ pub(crate) fn parse_args() -> Command {
     match parsed_args(env::args().skip(1)) {
         Ok(command) => command,
         Err(CliError::Usage) => {
-            eprint!("{USAGE}");
+            eprint!("{}", crate::help::USAGE);
             std::process::exit(2);
         }
         Err(CliError::NotSource(path)) => {
@@ -90,17 +81,21 @@ enum CliError {
 
 /// The command described by the arguments.
 ///
-/// `--apply` edits one directory from a semdif file. `--ignore-hash` still
-/// applies an added, deleted, or renamed file when its hash does not match.
-/// Otherwise the three paths are a comparison. A missing source is rejected,
-/// and a file is not compared with a directory, so the command is not attempted.
-/// An output or semdif path of [`STANDARD_STREAM`] is the standard stream, not a file.
-/// `--ignore=<file>` lists paths the filesystem walk leaves out.
+/// `--help` prints the full help. `--apply` edits one directory from a semdif
+/// file. `--ignore-hash` still applies an added, deleted, or renamed file when
+/// its hash does not match. Otherwise the three paths are a comparison. A
+/// missing source is rejected, and a file is not compared with a directory, so
+/// the command is not attempted. An output or semdif path of [`STANDARD_STREAM`]
+/// is the standard stream, not a file. `--ignore=<file>` lists paths the
+/// filesystem walk leaves out.
 fn parsed_args<I>(args: I) -> Result<Command, CliError>
 where
     I: IntoIterator<Item = String>,
 {
     let args: Vec<String> = args.into_iter().collect();
+    if args.iter().any(|arg| arg == "--help") {
+        return Ok(Command::Help);
+    }
     if args
         .iter()
         .any(|arg| arg == "--apply" || arg == "--ignore-hash")
