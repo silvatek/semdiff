@@ -77,6 +77,16 @@ pub(crate) trait Change {
     /// implementation reports that instead of changing anything.
     fn apply(&self, fs: &dyn FileSystem, source: &Path) -> Result<(), String>;
 
+    /// Confirms a recorded hash before [`Change::apply`].
+    ///
+    /// An added, deleted, or renamed file records the SHA-256 of its bytes.
+    /// A mismatch is an error, so apply leaves the tree unchanged. A change
+    /// with no hash succeeds. `--ignore-hash` skips this check and applies
+    /// the change anyway.
+    fn check_recorded_hash(&self, _fs: &dyn FileSystem, _source: &Path) -> Result<(), String> {
+        Ok(())
+    }
+
     /// This change edits lines of its file, when it does.
     fn line_edit(&self) -> Option<&dyn LineEdit> {
         None

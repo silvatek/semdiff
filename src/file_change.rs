@@ -11,7 +11,8 @@ use crate::filesystem::FileSystem;
 /// A hash identifies the content. One file on the left and one file on the right with
 /// the same hash are a rename, so identical copies are not paired by guesswork. A file
 /// that remains only on the left was removed. A file that remains only on the right
-/// was added, and its contents are kept so the file can be recreated.
+/// was added, and its contents are kept so the file can be recreated. Each record
+/// includes that SHA-256, so apply can check the bytes it moves, removes, or writes.
 pub(crate) fn file_changes(
     fs: &dyn FileSystem,
     sources: &crate::Sources,
@@ -20,19 +21,19 @@ pub(crate) fn file_changes(
 ) -> Result<Vec<Box<dyn Change>>, String> {
     let left_root = fs.source_base(Path::new(&sources.left));
     let right_root = fs.source_base(Path::new(&sources.right));
+    let mut left_by_path = HashMap::<&str, [u8; 32]>::new();
     let mut left_hashes = HashMap::<[u8; 32], Vec<&String>>::new();
     for path in left_only {
-        left_hashes
-            .entry(file_hash(fs, left_root, path)?)
-            .or_default()
-            .push(path);
+        let hash = file_hash(fs, left_root, path)?;
+        left_by_path.insert(path.as_str(), hash);
+        left_hashes.entry(hash).or_default().push(path);
     }
+    let mut right_by_path = HashMap::<&str, [u8; 32]>::new();
     let mut right_hashes = HashMap::<[u8; 32], Vec<&String>>::new();
     for path in right_only {
-        right_hashes
-            .entry(file_hash(fs, right_root, path)?)
-            .or_default()
-            .push(path);
+        let hash = file_hash(fs, right_root, path)?;
+        right_by_path.insert(path.as_str(), hash);
+        right_hashes.entry(hash).or_default().push(path);
     }
 
     let mut changes: Vec<Box<dyn Change>> = Vec::new();
@@ -49,6 +50,7 @@ pub(crate) fn file_changes(
                 scope: crate::change::TREE_SCOPE.to_string(),
                 from: from_paths[0].clone(),
                 to: to_paths[0].clone(),
+                hash: digest_hex(&hash),
             }));
         }
     }
@@ -57,6 +59,7 @@ pub(crate) fn file_changes(
             changes.push(Box::new(crate::change::FileDeleted {
                 scope: crate::change::TREE_SCOPE.to_string(),
                 path: path.clone(),
+                hash: digest_hex(&left_by_path[path.as_str()]),
             }));
         }
     }
@@ -65,6 +68,7 @@ pub(crate) fn file_changes(
             changes.push(Box::new(crate::change::FileAdded {
                 scope: crate::change::TREE_SCOPE.to_string(),
                 path: path.clone(),
+                hash: digest_hex(&right_by_path[path.as_str()]),
                 contents: read_file(fs, right_root, path)?,
             }));
         }
@@ -90,7 +94,11 @@ fn file_hash(fs: &dyn FileSystem, root: &Path, relative: &str) -> Result<[u8; 32
 
 /// The SHA-256 identity of a file's bytes, as lowercase hex.
 pub(crate) fn sha256_hex(bytes: &[u8]) -> String {
-    let digest = Sha256::digest(bytes);
+    digest_hex(&Sha256::digest(bytes))
+}
+
+/// Lowercase hex for a SHA-256 digest.
+fn digest_hex(digest: &[u8]) -> String {
     let mut hex = String::with_capacity(digest.len() * 2);
     for byte in digest {
         hex.push(char::from(b"0123456789abcdef"[(byte >> 4) as usize]));

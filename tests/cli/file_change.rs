@@ -14,7 +14,7 @@ fn writes_a_file_renamed_change() {
     let changes = document.split_once("changes:\n").expect("changes list").1;
     assert_eq!(
         changes,
-        "  - scope: \".\"\n    type: file-deleted\n    details:\n      path: \"notes.txt\"\n  - scope: \".\"\n    type: file-added\n    details:\n      path: \"other.txt\"\n      contents: \"right only\\n\"\n  - scope: \".\"\n    type: file-renamed\n    details:\n      from: \"quote.txt\"\n      to: \"quotation.txt\"\n"
+        "  - scope: \".\"\n    type: file-deleted\n    details:\n      path: \"notes.txt\"\n      hash: \"7895f1404c181ccc997e89e37160d7b0b3861277cb31e918c73938d6dcf9a4fa\"\n  - scope: \".\"\n    type: file-added\n    details:\n      path: \"other.txt\"\n      hash: \"38018bc42d71ecc429f52ac65cefc8447db479ddb67eae66deb8d9fe270a497a\"\n      contents: \"right only\\n\"\n  - scope: \".\"\n    type: file-renamed\n    details:\n      from: \"quote.txt\"\n      to: \"quotation.txt\"\n      hash: \"d38c93c9206417950b787b96ff1d376cdb83fb6df5c46a58fbbeeaa4621c3c54\"\n"
     );
 }
 
@@ -35,10 +35,10 @@ fn hashes_past_the_first_buffer() {
 
     let changes = document.split_once("changes:\n").expect("changes list").1;
     assert!(changes.contains(
-        "  - scope: \".\"\n    type: file-deleted\n    details:\n      path: \"left.bin\"\n"
+        "  - scope: \".\"\n    type: file-deleted\n    details:\n      path: \"left.bin\"\n      hash: \"1b493ec1fbe9d38ea2a56abf0ed423562af579f59c109d552e045caa98336262\"\n"
     ));
     assert!(changes.contains(
-        "  - scope: \".\"\n    type: file-renamed\n    details:\n      from: \"same.bin\"\n      to: \"same-renamed.bin\"\n"
+        "  - scope: \".\"\n    type: file-renamed\n    details:\n      from: \"same.bin\"\n      to: \"same-renamed.bin\"\n      hash: \"b62232a52eb1d7300a109f54fdd5a0e6a3307eac382ce4f48a4503f1cbd2d7f3\"\n"
     ));
     let contents_line = document
         .lines()
@@ -108,6 +108,111 @@ fn detects_a_rename_between_individual_files() {
     let changes = document.split_once("changes:\n").expect("changes list").1;
     assert_eq!(
         changes,
-        "  - scope: \".\"\n    type: file-renamed\n    details:\n      from: \"quote.txt\"\n      to: \"quotation.txt\"\n"
+        "  - scope: \".\"\n    type: file-renamed\n    details:\n      from: \"quote.txt\"\n      to: \"quotation.txt\"\n      hash: \"d38c93c9206417950b787b96ff1d376cdb83fb6df5c46a58fbbeeaa4621c3c54\"\n"
     );
+}
+
+#[test]
+fn rejects_a_deletion_whose_hash_does_not_match() {
+    let tree = Tree::new();
+    tree.write("source/notes.txt", "left only\n");
+    let message = tree
+        .apply(
+            "source",
+            "\
+header:
+  semdiff: \"0.1.0\"
+  timestamp: \"2020-01-01T00:00:00Z\"
+changes:
+  - scope: \".\"
+    type: file-deleted
+    details:
+      path: \"notes.txt\"
+      hash: \"0000000000000000000000000000000000000000000000000000000000000000\"
+",
+        )
+        .unwrap_err();
+
+    assert!(message.contains("do not match the hash"), "{message}");
+    assert_eq!(tree.read("source/notes.txt"), b"left only\n");
+}
+
+#[test]
+fn rejects_an_addition_whose_hash_does_not_match() {
+    let tree = Tree::new();
+    tree.dir("source");
+    let message = tree
+        .apply(
+            "source",
+            "\
+header:
+  semdiff: \"0.1.0\"
+  timestamp: \"2020-01-01T00:00:00Z\"
+changes:
+  - scope: \".\"
+    type: file-added
+    details:
+      path: \"other.txt\"
+      hash: \"0000000000000000000000000000000000000000000000000000000000000000\"
+      contents: \"right only\\n\"
+",
+        )
+        .unwrap_err();
+
+    assert!(message.contains("do not match the hash"), "{message}");
+    assert!(!tree.exists("source/other.txt"));
+}
+
+#[test]
+fn rejects_a_rename_whose_hash_does_not_match() {
+    let tree = Tree::new();
+    tree.write("source/quote.txt", "Brevity is the soul of wit.\n");
+    let message = tree
+        .apply(
+            "source",
+            "\
+header:
+  semdiff: \"0.1.0\"
+  timestamp: \"2020-01-01T00:00:00Z\"
+changes:
+  - scope: \".\"
+    type: file-renamed
+    details:
+      from: \"quote.txt\"
+      to: \"quotation.txt\"
+      hash: \"0000000000000000000000000000000000000000000000000000000000000000\"
+",
+        )
+        .unwrap_err();
+
+    assert!(message.contains("do not match the hash"), "{message}");
+    assert_eq!(
+        tree.read("source/quote.txt"),
+        b"Brevity is the soul of wit.\n"
+    );
+    assert!(!tree.exists("source/quotation.txt"));
+}
+
+#[test]
+fn rejects_a_tree_change_that_omits_its_hash() {
+    let tree = Tree::new();
+    tree.write("source/notes.txt", "left only\n");
+    let message = tree
+        .apply(
+            "source",
+            "\
+header:
+  semdiff: \"0.1.0\"
+  timestamp: \"2020-01-01T00:00:00Z\"
+changes:
+  - scope: \".\"
+    type: file-deleted
+    details:
+      path: \"notes.txt\"
+",
+        )
+        .unwrap_err();
+
+    assert_eq!(message, "file-deleted is missing hash");
+    assert_eq!(tree.read("source/notes.txt"), b"left only\n");
 }

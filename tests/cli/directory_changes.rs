@@ -68,7 +68,7 @@ fn replaces_a_directory_with_a_different_file() {
 
     assert_eq!(
         document.split_once("changes:\n").expect("changes list").1,
-        "  - scope: \".\"\n    type: file-deleted\n    details:\n      path: \"notes/a.txt\"\n  - scope: \".\"\n    type: file-deleted\n    details:\n      path: \"notes/sub/b.txt\"\n  - scope: \".\"\n    type: directory-deleted\n    details:\n      path: \"notes/sub\"\n  - scope: \".\"\n    type: directory-deleted\n    details:\n      path: \"notes\"\n  - scope: \".\"\n    type: file-added\n    details:\n      path: \"notes\"\n      contents: \"replaced\\n\"\n"
+        "  - scope: \".\"\n    type: file-deleted\n    details:\n      path: \"notes/a.txt\"\n      hash: \"7b2441693c861bf6969869d8b6f45f098bc8ef07b78ca043a1cb663159aabb10\"\n  - scope: \".\"\n    type: file-deleted\n    details:\n      path: \"notes/sub/b.txt\"\n      hash: \"7e4fa2eb8c7ac089739d5defc4489fad68a100d92082ca35c6b40a4524821f87\"\n  - scope: \".\"\n    type: directory-deleted\n    details:\n      path: \"notes/sub\"\n  - scope: \".\"\n    type: directory-deleted\n    details:\n      path: \"notes\"\n  - scope: \".\"\n    type: file-added\n    details:\n      path: \"notes\"\n      hash: \"e2208f01e42b2cab0fef975b55dc70d39579dd3d0c5d0758c499baa5109ef187\"\n      contents: \"replaced\\n\"\n"
     );
 
     tree.apply("edited", &document).unwrap();
@@ -91,7 +91,7 @@ fn removes_a_directory_left_empty_by_a_rename() {
     let document = tree.compare("left", "right");
 
     assert!(document.contains(
-        "    type: file-renamed\n    details:\n      from: \"old/note.txt\"\n      to: \"new/note.txt\"\n"
+        "    type: file-renamed\n    details:\n      from: \"old/note.txt\"\n      to: \"new/note.txt\"\n      hash: \"2c85ab0700b597297552509665d1f5a95111d16c5416fdc88d5bb85fcf4d0017\"\n"
     ));
     assert!(document.contains("    type: directory-deleted\n    details:\n      path: \"old\"\n"));
     assert!(!document.contains("directory-added"));

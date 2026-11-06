@@ -34,7 +34,11 @@ pub fn run() -> ExitCode {
                 ExitCode::from(1)
             }
         },
-        args::Command::Apply { semdif, source } => apply::apply(&fs, &semdif, &source),
+        args::Command::Apply {
+            semdif,
+            source,
+            ignore_hash,
+        } => apply::apply(&fs, &semdif, &source, ignore_hash),
     }
 }
 
@@ -50,7 +54,7 @@ pub fn compare_sources(fs: &dyn FileSystem, left: &str, right: &str) -> Result<S
 
 /// Replays a semdif document onto `source`.
 pub fn apply_document(fs: &dyn FileSystem, document: &str, source: &str) -> Result<(), String> {
-    apply::apply_document(fs, document, Path::new(source))
+    apply::apply_document(fs, document, Path::new(source), false)
 }
 
 struct Differences {

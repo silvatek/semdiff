@@ -5,13 +5,18 @@ use crate::filesystem::{FileSystem, StdFileSystem};
 
 const USAGE: &str = "\
 Usage: semdiff <left> <right> <output>
-       semdiff --apply <semdif> <directory>
+       semdiff --apply [--ignore-hash] <semdif> <directory>
 ";
 
 /// The requested command, either a comparison or an apply.
 pub(crate) enum Command {
     Compare(Args),
-    Apply { semdif: String, source: String },
+    Apply {
+        semdif: String,
+        source: String,
+        /// Apply an added, deleted, or renamed file even when its hash does not match.
+        ignore_hash: bool,
+    },
 }
 
 pub(crate) struct Args {
@@ -69,36 +74,27 @@ enum CliError {
 
 /// The command described by the arguments.
 ///
-/// `--apply` edits one directory from a semdif file. Otherwise the three
-/// paths are a comparison. A missing source is rejected, and a file is not compared
-/// with a directory, so the command is not attempted.
+/// `--apply` edits one directory from a semdif file. `--ignore-hash` still
+/// applies an added, deleted, or renamed file when its hash does not match.
+/// Otherwise the three paths are a comparison. A missing source is rejected,
+/// and a file is not compared with a directory, so the command is not attempted.
 fn parsed_args<I>(args: I) -> Result<Command, CliError>
 where
     I: IntoIterator<Item = String>,
 {
-    let mut args = args.into_iter();
-    let first = args.next().ok_or(CliError::Usage)?;
-    if first == "--apply" {
-        let semdif = args.next().ok_or(CliError::Usage)?;
-        let source = args.next().ok_or(CliError::Usage)?;
-        if args.next().is_some() {
-            return Err(CliError::Usage);
-        }
-        let fs = StdFileSystem::new();
-        if !fs.is_file(Path::new(&semdif)) {
-            return Err(CliError::NotFile(semdif));
-        }
-        if !fs.is_dir(Path::new(&source)) {
-            return Err(CliError::NotDirectory(source));
-        }
-        return Ok(Command::Apply { semdif, source });
+    let args: Vec<String> = args.into_iter().collect();
+    if args
+        .iter()
+        .any(|arg| arg == "--apply" || arg == "--ignore-hash")
+    {
+        return parse_apply(args);
     }
-    let left = first;
-    let right = args.next().ok_or(CliError::Usage)?;
-    let output = args.next().ok_or(CliError::Usage)?;
-    if args.next().is_some() {
+    if args.len() != 3 {
         return Err(CliError::Usage);
     }
+    let left = args[0].clone();
+    let right = args[1].clone();
+    let output = args[2].clone();
     require_source(&left)?;
     require_source(&right)?;
     require_same_kind(&left, &right)?;
@@ -106,6 +102,51 @@ where
         sources: Sources { left, right },
         output,
     }))
+}
+
+/// `--apply`, with an optional `--ignore-hash`, and the semdif and directory.
+///
+/// The flag may sit anywhere among those arguments. It does not apply a
+/// comparison, and a second copy of either flag is rejected.
+fn parse_apply(args: Vec<String>) -> Result<Command, CliError> {
+    let mut ignore_hash = false;
+    let mut saw_apply = false;
+    let mut paths = Vec::new();
+    for arg in args {
+        match arg.as_str() {
+            "--apply" => {
+                if saw_apply {
+                    return Err(CliError::Usage);
+                }
+                saw_apply = true;
+            }
+            "--ignore-hash" => {
+                if ignore_hash {
+                    return Err(CliError::Usage);
+                }
+                ignore_hash = true;
+            }
+            other if other.starts_with('-') => return Err(CliError::Usage),
+            other => paths.push(other.to_string()),
+        }
+    }
+    if !saw_apply || paths.len() != 2 {
+        return Err(CliError::Usage);
+    }
+    let semdif = paths.remove(0);
+    let source = paths.remove(0);
+    let fs = StdFileSystem::new();
+    if !fs.is_file(Path::new(&semdif)) {
+        return Err(CliError::NotFile(semdif));
+    }
+    if !fs.is_dir(Path::new(&source)) {
+        return Err(CliError::NotDirectory(source));
+    }
+    Ok(Command::Apply {
+        semdif,
+        source,
+        ignore_hash,
+    })
 }
 
 /// Confirms that a source path is a file or a directory.
