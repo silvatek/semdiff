@@ -10,7 +10,15 @@ fn requires_an_output_path() {
     assert_eq!(output.status.code(), Some(2));
     assert_eq!(
         stderr,
-        "Usage: semdiff [--ignore=<file>] <left> <right> <output>\n       semdiff --apply [--ignore=<file>] [--ignore-hash] <semdif> <directory>\n"
+        "\
+Compare two sources and write a semdif. --apply replays a semdif onto a directory.
+
+Usage: semdiff [--ignore=<file>] <left> <right> <output>
+       semdiff --apply [--ignore=<file>] [--ignore-hash] <semdif> <directory>
+
+An output path of - writes the semdif to standard output, and the listing to standard error.
+A semdif path of - reads the semdif from standard input.
+"
     );
 }
 
