@@ -8,8 +8,15 @@ use crate::filesystem::FileSystem;
 /// Edits `source` so it gains the changes recorded in `semdif`.
 ///
 /// The semdif file is the record of what changed, so the same edits can be replayed
-/// on another copy of that directory. A problem is reported on stderr.
-pub(crate) fn apply(fs: &dyn FileSystem, semdif: &str, source: &str) -> ExitCode {
+/// on another copy of that directory. `ignore_hash` still applies an added,
+/// deleted, or renamed file when its recorded hash does not match. A problem
+/// is reported on stderr.
+pub(crate) fn apply(
+    fs: &dyn FileSystem,
+    semdif: &str,
+    source: &str,
+    ignore_hash: bool,
+) -> ExitCode {
     let document = match fs.read_text(Path::new(semdif)) {
         Ok(document) => document,
         Err(error) => {
@@ -17,7 +24,7 @@ pub(crate) fn apply(fs: &dyn FileSystem, semdif: &str, source: &str) -> ExitCode
             return ExitCode::from(1);
         }
     };
-    match apply_document(fs, &document, Path::new(source)) {
+    match apply_document(fs, &document, Path::new(source), ignore_hash) {
         Ok(()) => ExitCode::SUCCESS,
         Err(message) => {
             eprintln!("{message}");
@@ -30,6 +37,7 @@ pub(crate) fn apply_document(
     fs: &dyn FileSystem,
     document: &str,
     source: &Path,
+    ignore_hash: bool,
 ) -> Result<(), String> {
     let changes = crate::semdif::parse_changes(document)?;
     let mut applied_content = BTreeSet::new();
@@ -51,7 +59,7 @@ pub(crate) fn apply_document(
                 apply_file(fs, source, &path, &changes)?;
             }
         } else {
-            apply_change(fs, source, change.as_ref())?;
+            apply_change(fs, source, change.as_ref(), ignore_hash)?;
         }
     }
     Ok(())
@@ -75,7 +83,17 @@ fn apply_file(
 /// Performs one structural change in the source directory.
 ///
 /// A content edit is applied with the other edits of its file, in `apply_content`.
-fn apply_change(fs: &dyn FileSystem, source: &Path, change: &dyn Change) -> Result<(), String> {
+/// `ignore_hash` still applies an added, deleted, or renamed file when its
+/// recorded hash does not match.
+fn apply_change(
+    fs: &dyn FileSystem,
+    source: &Path,
+    change: &dyn Change,
+    ignore_hash: bool,
+) -> Result<(), String> {
+    if !ignore_hash {
+        change.check_recorded_hash(fs, source)?;
+    }
     change.apply(fs, source)
 }
 
