@@ -8,6 +8,12 @@ Usage: semdiff <left> <right> <output>
        semdiff --apply [--ignore-hash] <semdif> <directory>
 ";
 
+/// The path that means the standard stream.
+///
+/// A comparison writes the semdif to standard output. Apply reads the semdif
+/// from standard input.
+pub(crate) const STANDARD_STREAM: &str = "-";
+
 /// The requested command, either a comparison or an apply.
 pub(crate) enum Command {
     Compare(Args),
@@ -78,6 +84,7 @@ enum CliError {
 /// applies an added, deleted, or renamed file when its hash does not match.
 /// Otherwise the three paths are a comparison. A missing source is rejected,
 /// and a file is not compared with a directory, so the command is not attempted.
+/// An output or semdif path of [`STANDARD_STREAM`] is the standard stream, not a file.
 fn parsed_args<I>(args: I) -> Result<Command, CliError>
 where
     I: IntoIterator<Item = String>,
@@ -107,7 +114,8 @@ where
 /// `--apply`, with an optional `--ignore-hash`, and the semdif and directory.
 ///
 /// The flag may sit anywhere among those arguments. It does not apply a
-/// comparison, and a second copy of either flag is rejected.
+/// comparison, and a second copy of either flag is rejected. A semdif path of
+/// [`STANDARD_STREAM`] is read from standard input, so that path need not exist.
 fn parse_apply(args: Vec<String>) -> Result<Command, CliError> {
     let mut ignore_hash = false;
     let mut saw_apply = false;
@@ -126,6 +134,7 @@ fn parse_apply(args: Vec<String>) -> Result<Command, CliError> {
                 }
                 ignore_hash = true;
             }
+            STANDARD_STREAM => paths.push(STANDARD_STREAM.to_string()),
             other if other.starts_with('-') => return Err(CliError::Usage),
             other => paths.push(other.to_string()),
         }
@@ -136,7 +145,7 @@ fn parse_apply(args: Vec<String>) -> Result<Command, CliError> {
     let semdif = paths.remove(0);
     let source = paths.remove(0);
     let fs = StdFileSystem::new();
-    if !fs.is_file(Path::new(&semdif)) {
+    if semdif != STANDARD_STREAM && !fs.is_file(Path::new(&semdif)) {
         return Err(CliError::NotFile(semdif));
     }
     if !fs.is_dir(Path::new(&source)) {

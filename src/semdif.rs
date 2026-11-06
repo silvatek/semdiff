@@ -1,4 +1,5 @@
 use std::collections::BTreeMap;
+use std::io::{self, Write};
 use std::path::Path;
 use std::process::ExitCode;
 
@@ -9,14 +10,16 @@ use crate::change::Change;
 use base64::engine::general_purpose::STANDARD;
 use base64::Engine;
 
-/// Saves the semdif file and lists the shared paths.
-///
-/// The file is the command's result. The listing shows which files were eligible for
-/// comparison. A failure to save the file returns exit code 1.
+/// The semdif text for these changes, including the header.
 pub(crate) fn document(changes: &[Box<dyn Change>]) -> String {
     semdif_document(env!("CARGO_PKG_VERSION"), &utc_timestamp(), changes)
 }
 
+/// Saves the semdif and lists the shared paths.
+///
+/// The semdif is the command's result. The listing shows which files were eligible
+/// for comparison. A failure to save the semdif returns exit code 1. An output path
+/// of `-` writes the semdif to standard output and the listing to standard error.
 pub(crate) fn write_output(
     fs: &dyn FileSystem,
     output: &str,
@@ -24,16 +27,40 @@ pub(crate) fn write_output(
     differences: &crate::Differences,
 ) -> ExitCode {
     let document = document(&differences.changes);
+    if output == crate::args::STANDARD_STREAM {
+        let mut stdout = io::stdout();
+        if let Err(error) = stdout
+            .write_all(document.as_bytes())
+            .and_then(|()| stdout.flush())
+        {
+            eprintln!("cannot write {output}: {error}");
+            return ExitCode::from(1);
+        }
+        report_comparison(&mut io::stderr(), sources, differences);
+        return ExitCode::SUCCESS;
+    }
     if let Err(error) = fs.write(Path::new(output), document.as_bytes()) {
         eprintln!("cannot write {output}: {error}");
         return ExitCode::from(1);
     }
-    println!("Semdiff {}", env!("CARGO_PKG_VERSION"));
-    println!("Comparing {} and {}", sources.left, sources.right);
-    for path in &differences.paths {
-        println!("{path}");
-    }
+    report_comparison(&mut io::stdout(), sources, differences);
     ExitCode::SUCCESS
+}
+
+/// The version, the two sources, and the paths that were compared.
+///
+/// The semdif is the data a later command reads. When that data is on standard
+/// output, this listing uses standard error so a pipe stays a semdif.
+fn report_comparison(
+    out: &mut dyn Write,
+    sources: &crate::Sources,
+    differences: &crate::Differences,
+) {
+    let _ = writeln!(out, "Semdiff {}", env!("CARGO_PKG_VERSION"));
+    let _ = writeln!(out, "Comparing {} and {}", sources.left, sources.right);
+    for path in &differences.paths {
+        let _ = writeln!(out, "{path}");
+    }
 }
 
 /// The semdif text for one comparison.
