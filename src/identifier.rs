@@ -217,6 +217,18 @@ mod tests {
             renamed("calc.py", "def fibonacci(n):", "def fib(n):"),
             Some(("fibonacci".to_string(), "fib".to_string()))
         );
+        assert_eq!(
+            renamed(
+                "src/main.js",
+                "function fibonacci(n) {",
+                "function fib(n) {"
+            ),
+            Some(("fibonacci".to_string(), "fib".to_string()))
+        );
+        assert_eq!(
+            renamed("src/main.js", "const $count = 1;", "const $total = 1;"),
+            Some(("$count".to_string(), "$total".to_string()))
+        );
     }
 
     #[test]
