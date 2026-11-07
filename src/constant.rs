@@ -7,15 +7,15 @@
 //! `return` all qualify. A minus after a value is subtraction and stays on
 //! the line, as in `count-1` or `items[i]-1`. A `--` glued to the digits is
 //! an operator. The line is not a line comment, the digits are not inside a
-//! string, and they do not continue an identifier. A file with no dialect is
-//! not read for constants.
+//! string or a comment, and they do not continue an identifier. A file with
+//! no dialect is not read for constants.
 //!
 //! A boolean constant is a spelling the dialect lists. The edit is a constant
 //! change when the lines differ only by one such spelling changing to another,
 //! and that spelling is a whole name. A spelling inside a string or a comment
-//! stays an identifier rename. ANSI C lists none.
+//! stays an identifier rename. ANSI C lists none. `span::classify` makes that
+//! decision from the one changed span.
 
-use crate::classify::{introduces_line_comment, span_in_string};
 use crate::dialect::Dialect;
 
 /// The old integer, the new integer, and which digit sequence on the old line changed.
@@ -23,6 +23,7 @@ use crate::dialect::Dialect;
 /// `occurrence` counts maximal digit sequences on the old line, starting at 1.
 /// A sequence inside a string or an identifier still counts, so the index
 /// stays put when those runs are not the integer that changed.
+#[cfg_attr(not(test), allow(dead_code))]
 pub(crate) struct IntegerConstant {
     pub(crate) old_value: String,
     pub(crate) new_value: String,
@@ -32,66 +33,42 @@ pub(crate) struct IntegerConstant {
 /// One integer on a line.
 ///
 /// `start` includes a unary minus when that minus belongs to the number.
-/// `digits` is the first digit, which is what `occurrence` counts.
-struct IntegerToken {
-    start: usize,
-    digits: usize,
-    end: usize,
+pub(crate) struct IntegerToken {
+    pub(crate) start: usize,
+    pub(crate) end: usize,
 }
 
 /// The integer constant changed between these two lines, when that is the whole edit.
 ///
-/// `None` leaves the edit as a line modification. The integer has to be the
-/// only difference, so the text between integers matches and every other
-/// integer matches. Shared digits at either end of a sequence belong to it,
-/// so `12` becoming `13` is one integer.
+/// `None` leaves the edit as a line modification. The changed span has to be
+/// one integer outside a string and a comment. Shared digits at either end of
+/// that integer belong to it, so `12` becoming `13` is one integer.
+#[cfg_attr(not(test), allow(dead_code))]
 pub(crate) fn integer_constant(
     path: &str,
     old_line: &str,
     new_line: &str,
 ) -> Option<IntegerConstant> {
-    let dialect = crate::dialect::for_path(path)?;
-    if introduces_line_comment(dialect, old_line) || introduces_line_comment(dialect, new_line) {
+    let found = crate::span::find_spans(path, old_line, new_line);
+    let [span] = found.as_slice() else {
+        return None;
+    };
+    let crate::span::Classification::Constant {
+        old_value,
+        new_value,
+        occurrence,
+    } = crate::span::classify(path, span)?
+    else {
+        return None;
+    };
+    if !is_integer(&old_value) {
         return None;
     }
-    let old_tokens = integer_tokens(dialect, old_line);
-    let new_tokens = integer_tokens(dialect, new_line);
-    if old_tokens.len() != new_tokens.len() {
-        return None;
-    }
-    let mut changed = None;
-    let mut old_from = 0;
-    let mut new_from = 0;
-    for (old_token, new_token) in old_tokens.iter().zip(new_tokens.iter()) {
-        if old_line[old_from..old_token.start] != new_line[new_from..new_token.start] {
-            return None;
-        }
-        let old_text = &old_line[old_token.start..old_token.end];
-        let new_text = &new_line[new_token.start..new_token.end];
-        if old_text != new_text {
-            if changed.is_some()
-                || span_in_string(dialect, old_line, old_token.digits, old_token.end)
-                || span_in_string(dialect, new_line, new_token.digits, new_token.end)
-            {
-                return None;
-            }
-            let occurrence = digit_runs(old_line)
-                .iter()
-                .position(|(start, _)| *start == old_token.digits)?
-                + 1;
-            changed = Some(IntegerConstant {
-                old_value: old_text.to_string(),
-                new_value: new_text.to_string(),
-                occurrence,
-            });
-        }
-        old_from = old_token.end;
-        new_from = new_token.end;
-    }
-    if old_line[old_from..] != new_line[new_from..] {
-        return None;
-    }
-    changed
+    Some(IntegerConstant {
+        old_value,
+        new_value,
+        occurrence,
+    })
 }
 
 /// Replaces one integer on `line`.
@@ -146,6 +123,7 @@ pub(crate) fn is_integer(text: &str) -> bool {
 /// `occurrence` counts spellings of the dialect's boolean constants on the old
 /// line, starting at 1. A spelling inside a string still counts, so the index
 /// stays put when that one is not the constant that changed.
+#[cfg_attr(not(test), allow(dead_code))]
 pub(crate) struct BooleanConstant {
     pub(crate) old_value: String,
     pub(crate) new_value: String,
@@ -154,57 +132,36 @@ pub(crate) struct BooleanConstant {
 
 /// The boolean constant changed between these two lines, when that is the whole edit.
 ///
-/// `None` leaves the edit to the other classifiers. The spelling has to be a
-/// whole name, one of the dialect's boolean constants, and the only difference
-/// on the line. The line is not a comment, and the spelling is not inside a
-/// string. A file with no dialect, and a dialect that lists none, is not read
+/// `None` leaves the edit to the other classifiers. Both sides of the changed
+/// span have to be spellings the dialect lists, outside a string and a
+/// comment. A file with no dialect, and a dialect that lists none, is not read
 /// for boolean constants.
+#[cfg_attr(not(test), allow(dead_code))]
 pub(crate) fn boolean_constant(
     path: &str,
     old_line: &str,
     new_line: &str,
 ) -> Option<BooleanConstant> {
-    let dialect = crate::dialect::for_path(path)?;
-    if dialect.boolean_constants.is_empty() {
+    let found = crate::span::find_spans(path, old_line, new_line);
+    let [span] = found.as_slice() else {
+        return None;
+    };
+    let crate::span::Classification::Constant {
+        old_value,
+        new_value,
+        occurrence,
+    } = crate::span::classify(path, span)?
+    else {
+        return None;
+    };
+    if !is_boolean(path, &old_value) {
         return None;
     }
-    if introduces_line_comment(dialect, old_line) || introduces_line_comment(dialect, new_line) {
-        return None;
-    }
-    let old_tokens = boolean_tokens(dialect, old_line);
-    let new_tokens = boolean_tokens(dialect, new_line);
-    if old_tokens.len() != new_tokens.len() {
-        return None;
-    }
-    let mut changed = None;
-    let mut old_from = 0;
-    let mut new_from = 0;
-    for (index, (old_token, new_token)) in old_tokens.iter().zip(new_tokens.iter()).enumerate() {
-        if old_line[old_from..old_token.0] != new_line[new_from..new_token.0] {
-            return None;
-        }
-        let old_text = &old_line[old_token.0..old_token.1];
-        let new_text = &new_line[new_token.0..new_token.1];
-        if old_text != new_text {
-            if changed.is_some()
-                || span_in_string(dialect, old_line, old_token.0, old_token.1)
-                || span_in_string(dialect, new_line, new_token.0, new_token.1)
-            {
-                return None;
-            }
-            changed = Some(BooleanConstant {
-                old_value: old_text.to_string(),
-                new_value: new_text.to_string(),
-                occurrence: index + 1,
-            });
-        }
-        old_from = old_token.1;
-        new_from = new_token.1;
-    }
-    if old_line[old_from..] != new_line[new_from..] {
-        return None;
-    }
-    changed
+    Some(BooleanConstant {
+        old_value,
+        new_value,
+        occurrence,
+    })
 }
 
 /// Replaces one boolean constant on `line`.
@@ -301,17 +258,26 @@ fn end_of_name(
     index
 }
 
+/// The 0-based index of the digit run that starts at `digits`.
+///
+/// Runs inside names and strings count, so an integer later on the line keeps
+/// its index when those runs are not the one that changed.
+pub(crate) fn digit_run_index(line: &str, digits: usize) -> Option<usize> {
+    digit_runs(line)
+        .iter()
+        .position(|(start, _)| *start == digits)
+}
+
 /// Integers on `line`, in order.
 ///
 /// A digit sequence that continues an identifier is not an integer. It stays
 /// in the text between integers, and it still counts toward `occurrence`.
-fn integer_tokens(dialect: &Dialect, line: &str) -> Vec<IntegerToken> {
+pub(crate) fn integer_tokens(dialect: &Dialect, line: &str) -> Vec<IntegerToken> {
     digit_runs(line)
         .into_iter()
         .filter(|(digits, _)| !continues_identifier(dialect, line, *digits))
         .map(|(digits, end)| IntegerToken {
             start: signed_start(dialect, line, digits),
-            digits,
             end,
         })
         .collect()

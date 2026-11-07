@@ -1,7 +1,7 @@
 //! How a line is read once a dialect has been selected.
 //!
-//! A line comment, a blank line, and a string span use the dialect's
-//! configuration directly. A margin and a named block go to the dialect's
+//! A line comment, a blank line, a string span, and a comment span use the
+//! dialect's configuration directly. A margin and a named block go to the dialect's
 //! reader. Brace-delimited
 //! languages share the C-family reader. Python has its own.
 
@@ -76,6 +76,23 @@ pub(crate) fn full_line_comment(path: &str, text: &str) -> bool {
 /// block comment on this line, hide the quotes inside them. A string or a
 /// comment that began on an earlier line is outside this function's view.
 pub(crate) fn span_in_string(dialect: &Dialect, line: &str, start: usize, end: usize) -> bool {
+    span_inside(&line_regions(dialect, line).strings, line, start, end)
+}
+
+/// Whether `line[start..end]` lies inside a comment.
+///
+/// `start` and `end` are byte offsets. The span has to be non-empty and lie
+/// entirely inside a comment that opens on this line. The comment markers
+/// themselves are outside. A `//` or `#` runs to the end of the line, and a
+/// `/*` runs to `*/` or to the end of the line. A marker inside a string does
+/// not open a comment. A comment that began on an earlier line is outside
+/// this function's view.
+pub(crate) fn span_in_comment(dialect: &Dialect, line: &str, start: usize, end: usize) -> bool {
+    span_inside(&line_regions(dialect, line).comments, line, start, end)
+}
+
+/// Whether `[start, end)` lies entirely inside one of `ranges`.
+fn span_inside(ranges: &[(usize, usize)], line: &str, start: usize, end: usize) -> bool {
     if start >= end
         || end > line.len()
         || !line.is_char_boundary(start)
@@ -83,21 +100,33 @@ pub(crate) fn span_in_string(dialect: &Dialect, line: &str, start: usize, end: u
     {
         return false;
     }
-    string_interiors(dialect, line)
-        .into_iter()
-        .any(|(from, to)| start >= from && end <= to)
+    ranges.iter().any(|(from, to)| start >= *from && end <= *to)
 }
 
-/// The interiors of the strings on `line`, as byte offsets.
+/// String and comment interiors on one line.
 ///
-/// Each range excludes its delimiters. An unclosed string runs to the end of
-/// the line. A comment on this line contributes nothing.
-fn string_interiors(dialect: &Dialect, line: &str) -> Vec<(usize, usize)> {
-    let mut interiors = Vec::new();
+/// Each range excludes its delimiters. An unclosed string or block comment
+/// runs to the end of the line. A line comment runs from after its marker to
+/// the end of the line.
+struct LineRegions {
+    strings: Vec<(usize, usize)>,
+    comments: Vec<(usize, usize)>,
+}
+
+/// The string and comment interiors of `line`.
+fn line_regions(dialect: &Dialect, line: &str) -> LineRegions {
+    let mut regions = LineRegions {
+        strings: Vec::new(),
+        comments: Vec::new(),
+    };
     let mut index = 0;
     while index < line.len() {
         let rest = &line[index..];
         if !dialect.line_comment.is_empty() && rest.starts_with(dialect.line_comment) {
+            let interior = index + dialect.line_comment.len();
+            if interior < line.len() {
+                regions.comments.push((interior, line.len()));
+            }
             break;
         }
         if let Some(comment) = dialect.block_comment {
@@ -106,10 +135,18 @@ fn string_interiors(dialect: &Dialect, line: &str) -> Vec<(usize, usize)> {
                 && rest.starts_with(comment.start)
             {
                 let after = index + comment.start.len();
-                let Some(end_at) = line[after..].find(comment.end) else {
+                if let Some(end_at) = line[after..].find(comment.end) {
+                    let close = after + end_at;
+                    if after < close {
+                        regions.comments.push((after, close));
+                    }
+                    index = close + comment.end.len();
+                } else {
+                    if after < line.len() {
+                        regions.comments.push((after, line.len()));
+                    }
                     break;
-                };
-                index = after + end_at + comment.end.len();
+                }
                 continue;
             }
         }
@@ -123,16 +160,16 @@ fn string_interiors(dialect: &Dialect, line: &str) -> Vec<(usize, usize)> {
         let content_at = index + delimiter.start.len();
         match closing_string(dialect, line, content_at, delimiter.end) {
             Some(close_at) => {
-                interiors.push((content_at, close_at));
+                regions.strings.push((content_at, close_at));
                 index = close_at + delimiter.end.len();
             }
             None => {
-                interiors.push((content_at, line.len()));
+                regions.strings.push((content_at, line.len()));
                 break;
             }
         }
     }
-    interiors
+    regions
 }
 
 /// The longest string delimiter that `rest` starts with.
@@ -350,7 +387,7 @@ fn enclosing_block(dialect: &Dialect, before: &str, addition: &str) -> Option<En
 mod tests {
     use super::{
         blank_line, full_line_comment, introduces_line_comment, margin_whitespace, named_block,
-        named_block_in, span_in_string,
+        named_block_in, span_in_comment, span_in_string,
     };
     use crate::dialect::{BlockCategory, ANSI_C, JAVASCRIPT, PYTHON, RUST};
 
@@ -461,6 +498,46 @@ mod tests {
         let inside_hash = "text = \"hello # there\"";
         let (start, end) = at(inside_hash, "there");
         assert!(span_in_string(&PYTHON, inside_hash, start, end));
+    }
+
+    #[test]
+    fn a_span_inside_a_comment_follows_the_dialect() {
+        let line = "let n = 1; // tail";
+        let (start, end) = at(line, "tail");
+        assert!(span_in_comment(&RUST, line, start, end));
+        let (start, end) = at(line, "1");
+        assert!(!span_in_comment(&RUST, line, start, end));
+        let marker = line.find("//").unwrap();
+        assert!(!span_in_comment(&RUST, line, marker, marker + 2));
+
+        let blocked = "/* tail */ let n = 1;";
+        let (start, end) = at(blocked, "tail");
+        assert!(span_in_comment(&RUST, blocked, start, end));
+        assert!(span_in_comment(&ANSI_C, blocked, start, end));
+        let (start, end) = at(blocked, "/*");
+        assert!(!span_in_comment(&RUST, blocked, start, end));
+        let (start, end) = at(blocked, "*/");
+        assert!(!span_in_comment(&RUST, blocked, start, end));
+        let (start, end) = at(blocked, "1");
+        assert!(!span_in_comment(&RUST, blocked, start, end));
+
+        let unclosed = "/* tail";
+        let (start, end) = at(unclosed, "tail");
+        assert!(span_in_comment(&RUST, unclosed, start, end));
+
+        let quoted = "let s = \"http://tail\";";
+        let (start, end) = at(quoted, "tail");
+        assert!(!span_in_comment(&RUST, quoted, start, end));
+        assert!(span_in_string(&RUST, quoted, start, end));
+
+        let python = "n = 1  # tail";
+        let (start, end) = at(python, "tail");
+        assert!(span_in_comment(&PYTHON, python, start, end));
+        let (start, end) = at(python, "1");
+        assert!(!span_in_comment(&PYTHON, python, start, end));
+        let hashed = "text = \"hello # there\"";
+        let (start, end) = at(hashed, "there");
+        assert!(!span_in_comment(&PYTHON, hashed, start, end));
     }
 
     fn at(line: &str, text: &str) -> (usize, usize) {

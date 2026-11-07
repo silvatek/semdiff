@@ -9,6 +9,7 @@
 use crate::dialect::{Dialect, IdentifierCharacters};
 
 /// The old and new spelling of one renamed identifier.
+#[cfg_attr(not(test), allow(dead_code))]
 pub(crate) struct Rename {
     pub(crate) oldname: String,
     pub(crate) newname: String,
@@ -18,31 +19,18 @@ pub(crate) struct Rename {
 ///
 /// `None` leaves the edit as a line modification. The old name must occur
 /// once: `foo(foo)` changing to `foo(bar)` is not a rename.
+#[cfg_attr(not(test), allow(dead_code))]
 pub(crate) fn identifier_rename(path: &str, old_line: &str, new_line: &str) -> Option<Rename> {
-    let dialect = crate::dialect::for_path(path)?;
-    let old_pieces = pieces(dialect, old_line);
-    let new_pieces = pieces(dialect, new_line);
-    if old_pieces.len() != new_pieces.len() {
+    let found = crate::span::find_spans(path, old_line, new_line);
+    let [span] = found.as_slice() else {
         return None;
-    }
-    let mut renamed = None;
-    for (old, new) in old_pieces.iter().zip(&new_pieces) {
-        if old.text == new.text {
-            continue;
-        }
-        if renamed.is_some() || !old.identifier || !new.identifier {
-            return None;
-        }
-        renamed = Some((old.text, new.text));
-    }
-    let (oldname, newname) = renamed?;
-    if count_name(&old_pieces, oldname) != 1 {
+    };
+    let crate::span::Classification::Rename { oldname, newname } =
+        crate::span::classify(path, span)?
+    else {
         return None;
-    }
-    Some(Rename {
-        oldname: oldname.to_string(),
-        newname: newname.to_string(),
-    })
+    };
+    Some(Rename { oldname, newname })
 }
 
 /// Replaces the one occurrence of `oldname` on this line.

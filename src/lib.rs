@@ -14,6 +14,7 @@ mod help;
 mod identifier;
 mod line_changes;
 mod semdif;
+mod span;
 
 pub use filesystem::{FileSystem, MemoryFileSystem, NodeKind, StdFileSystem};
 
