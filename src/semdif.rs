@@ -1,3 +1,6 @@
+//! Code that reads or writes semdif files, including serialising and deserialising
+//! change records.
+
 use std::collections::BTreeMap;
 use std::io::{self, Write};
 use std::path::Path;
