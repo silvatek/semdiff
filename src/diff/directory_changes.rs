@@ -2,7 +2,7 @@
 
 use std::collections::BTreeSet;
 
-use crate::change::{ChangeList, DirectoryAdded, DirectoryDeleted, TREE_SCOPE};
+use crate::change::ChangeList;
 
 /// Directories added or removed between the two sources.
 ///
@@ -41,14 +41,14 @@ pub(crate) fn directory_changes(
 
     let mut changes = ChangeList::new();
     for path in removed {
-        changes.add(DirectoryDeleted {
-            scope: TREE_SCOPE.to_string(),
+        changes.add(crate::change::DirectoryDeleted {
+            scope: crate::change::TREE_SCOPE.to_string(),
             path,
         });
     }
     for path in added {
-        changes.add(DirectoryAdded {
-            scope: TREE_SCOPE.to_string(),
+        changes.add(crate::change::DirectoryAdded {
+            scope: crate::change::TREE_SCOPE.to_string(),
             path,
         });
     }

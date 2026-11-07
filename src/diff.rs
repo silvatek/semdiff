@@ -22,9 +22,7 @@ pub(crate) use line_changes::{join_text, split_text, Text};
 use std::collections::BTreeSet;
 use std::path::Path;
 
-use crate::change::{
-    merge_adjacent, merge_identifier_files, promote_named_blocks, ChangeList, SourceText,
-};
+use crate::change::ChangeList;
 use crate::filesystem::FileSystem;
 
 /// The shared paths and the change records for one comparison.
@@ -72,14 +70,14 @@ pub(crate) fn find_differences(
         &right_files,
     ));
     directory_changes::place_replacement_files(&mut changes);
-    merge_adjacent(&mut changes);
+    crate::change::merge_adjacent(&mut changes);
     let right_root = fs.source_base(Path::new(&sources.right));
     let right_texts = source_texts(fs, right_root, &paired_files, &changes, ComparedSide::Right)?;
     let left_root = fs.source_base(Path::new(&sources.left));
     let old_paths = changes.old_text_paths(&left_files);
     let texts = source_texts(fs, left_root, &old_paths, &changes, ComparedSide::Left)?;
-    promote_named_blocks(&right_texts, &texts, &mut changes);
-    merge_identifier_files(&texts, &mut changes);
+    crate::change::promote_named_blocks(&right_texts, &texts, &mut changes);
+    crate::change::merge_identifier_files(&texts, &mut changes);
     Ok(Differences {
         paths: paired_files,
         changes,
@@ -129,15 +127,15 @@ fn source_texts(
     files: &[String],
     changes: &ChangeList,
     side: ComparedSide,
-) -> Result<Vec<SourceText>, String> {
+) -> Result<Vec<crate::change::SourceText>, String> {
     let mut texts = Vec::new();
     for path in files {
         let bytes = read_content(path, side, root, fs, changes)?;
         let lines = match std::str::from_utf8(&bytes) {
-            Ok(text) => split_text(text).lines,
+            Ok(text) => line_changes::split_text(text).lines,
             Err(_) => Vec::new(),
         };
-        texts.push(SourceText {
+        texts.push(crate::change::SourceText {
             path: path.clone(),
             lines,
         });

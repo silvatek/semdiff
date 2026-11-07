@@ -6,9 +6,7 @@ use std::path::Path;
 use std::process::ExitCode;
 
 use crate::change::{Change, ChangeList, LinePlan};
-use crate::diff::{join_text, sha256_hex, split_text, Text};
-use crate::filesystem::{path_inside, FileSystem};
-use crate::semdif::parse_changes;
+use crate::filesystem::FileSystem;
 
 /// Edits `source` so it gains the changes recorded in `semdif`.
 ///
@@ -57,7 +55,7 @@ pub(crate) fn apply_document(
     source: &Path,
     ignore_hash: bool,
 ) -> Result<(), String> {
-    let changes = parse_changes(document)?;
+    let changes = crate::semdif::parse_changes(document)?;
     let mut applied_content = BTreeSet::new();
     for change in &changes {
         if let Some(content) = change.content() {
@@ -126,7 +124,7 @@ fn apply_content(
     relative: &str,
     batch: &[&dyn Change],
 ) -> Result<(), String> {
-    let path = path_inside(root, relative)?;
+    let path = crate::filesystem::path_inside(root, relative)?;
     let bytes = fs
         .read(&path)
         .map_err(|error| format!("cannot read {}: {error}", path.display()))?;
@@ -165,7 +163,7 @@ fn file_digest(batch: &[&dyn Change]) -> Result<Option<(String, String)>, String
 }
 
 fn check_hash(path: &Path, bytes: &[u8], expected: &str, side: &str) -> Result<(), String> {
-    let actual = sha256_hex(bytes);
+    let actual = crate::diff::sha256_hex(bytes);
     if actual != expected {
         return Err(format!(
             "cannot apply {}: contents do not match the {side} hash",
@@ -223,7 +221,7 @@ fn new_contents(path: &Path, bytes: &[u8], batch: &[&dyn Change]) -> Result<Vec<
             ));
         }
     };
-    let source_lines = split_text(&text);
+    let source_lines = crate::diff::split_text(&text);
     // The only place a LinePlan is built. Each line edit adds the lines it
     // changes, then `rebuild` produces the new lines of this file. A
     // whole-file replacement returned above and never reaches here.
@@ -235,7 +233,7 @@ fn new_contents(path: &Path, bytes: &[u8], batch: &[&dyn Change]) -> Result<Vec<
         line.rebuild(path, &source_lines.lines, &mut plan)?;
     }
     let rebuilt = plan.rebuild(path, &source_lines.lines)?;
-    Ok(join_text(&Text {
+    Ok(crate::diff::join_text(&crate::diff::Text {
         lines: rebuilt,
         trailing_newline: source_lines.trailing_newline,
     })

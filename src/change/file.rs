@@ -4,9 +4,7 @@ use std::path::Path;
 
 use super::{applied_with_its_file, AddedFile, Change, Content, Digest, Replacement};
 
-use crate::diff::sha256_hex;
-use crate::filesystem::{path_inside, FileSystem};
-use crate::semdif::{write_detail, write_file_contents};
+use crate::filesystem::FileSystem;
 
 /// A file moved to a new path without a content change.
 ///
@@ -33,13 +31,13 @@ impl Change for FileRenamed {
     }
 
     fn write_details(&self, document: &mut String) {
-        write_detail(document, "from", &self.from);
-        write_detail(document, "to", &self.to);
-        write_detail(document, "hash", &self.hash);
+        crate::semdif::write_detail(document, "from", &self.from);
+        crate::semdif::write_detail(document, "to", &self.to);
+        crate::semdif::write_detail(document, "hash", &self.hash);
     }
 
     fn check_recorded_hash(&self, fs: &dyn FileSystem, source: &Path) -> Result<(), String> {
-        let path = path_inside(source, &self.from)?;
+        let path = crate::filesystem::path_inside(source, &self.from)?;
         let bytes = fs
             .read(&path)
             .map_err(|error| format!("cannot read {}: {error}", path.display()))?;
@@ -82,13 +80,13 @@ impl Change for FileMoved {
     }
 
     fn write_details(&self, document: &mut String) {
-        write_detail(document, "from", &self.from);
-        write_detail(document, "to", &self.to);
-        write_detail(document, "hash", &self.hash);
+        crate::semdif::write_detail(document, "from", &self.from);
+        crate::semdif::write_detail(document, "to", &self.to);
+        crate::semdif::write_detail(document, "hash", &self.hash);
     }
 
     fn check_recorded_hash(&self, fs: &dyn FileSystem, source: &Path) -> Result<(), String> {
-        let path = path_inside(source, &self.from)?;
+        let path = crate::filesystem::path_inside(source, &self.from)?;
         let bytes = fs
             .read(&path)
             .map_err(|error| format!("cannot read {}: {error}", path.display()))?;
@@ -124,12 +122,12 @@ impl Change for FileDeleted {
     }
 
     fn write_details(&self, document: &mut String) {
-        write_detail(document, "path", &self.path);
-        write_detail(document, "hash", &self.hash);
+        crate::semdif::write_detail(document, "path", &self.path);
+        crate::semdif::write_detail(document, "hash", &self.hash);
     }
 
     fn check_recorded_hash(&self, fs: &dyn FileSystem, source: &Path) -> Result<(), String> {
-        let path = path_inside(source, &self.path)?;
+        let path = crate::filesystem::path_inside(source, &self.path)?;
         let bytes = fs
             .read(&path)
             .map_err(|error| format!("cannot read {}: {error}", path.display()))?;
@@ -170,13 +168,13 @@ impl Change for FileAdded {
     }
 
     fn write_details(&self, document: &mut String) {
-        write_detail(document, "path", &self.path);
-        write_detail(document, "hash", &self.hash);
-        write_file_contents(document, &self.contents);
+        crate::semdif::write_detail(document, "path", &self.path);
+        crate::semdif::write_detail(document, "hash", &self.hash);
+        crate::semdif::write_file_contents(document, &self.contents);
     }
 
     fn check_recorded_hash(&self, _fs: &dyn FileSystem, source: &Path) -> Result<(), String> {
-        let path = path_inside(source, &self.path)?;
+        let path = crate::filesystem::path_inside(source, &self.path)?;
         require_recorded_hash(&path, &self.contents, &self.hash)
     }
 
@@ -197,7 +195,7 @@ impl AddedFile for FileAdded {
 /// addition checks the bytes about to be written. A mismatch leaves the tree
 /// unchanged.
 fn require_recorded_hash(path: &Path, bytes: &[u8], expected: &str) -> Result<(), String> {
-    let actual = sha256_hex(bytes);
+    let actual = crate::diff::sha256_hex(bytes);
     if actual == expected {
         Ok(())
     } else {
@@ -278,11 +276,11 @@ impl Change for FileChanged {
     fn write_details(&self, document: &mut String) {
         match &self.body {
             FileChangedBody::Hashes(hashes) => {
-                write_detail(document, "old", &hashes.old_hash);
-                write_detail(document, "new", &hashes.new_hash);
+                crate::semdif::write_detail(document, "old", &hashes.old_hash);
+                crate::semdif::write_detail(document, "new", &hashes.new_hash);
             }
             FileChangedBody::Contents(contents) => {
-                write_file_contents(document, &contents.0);
+                crate::semdif::write_file_contents(document, &contents.0);
             }
         }
     }
