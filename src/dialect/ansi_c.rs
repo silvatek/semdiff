@@ -1,5 +1,5 @@
-//! ANSI C's extensions, comments, strings, names, and keywords. Boolean spellings
-//! stay empty.
+//! ANSI C's extensions, comments, strings, names, keywords, and imports.
+//! Boolean spellings stay empty.
 
 use super::Dialect;
 
@@ -14,7 +14,8 @@ use super::Dialect;
 /// digits, or `_`. A c-style function has a type before its name, as in
 /// `int fib(int n) {`, optionally after `static` or `extern`. `step() {` stays
 /// a line edit. `if`, `while`, `for`, and `switch` stay line edits. ANSI C
-/// lists no boolean constants, so `true` and `false` stay names.
+/// lists no boolean constants, so `true` and `false` stay names. `#include`
+/// introduces an import.
 pub(crate) static ANSI_C: Dialect = Dialect {
     extensions: &[".c", ".h"],
     block_prefixes: &["static", "extern"],
@@ -22,5 +23,6 @@ pub(crate) static ANSI_C: Dialect = Dialect {
     c_fun_type_prefix: true,
     statement_keywords: &["if", "while", "for", "switch"],
     unary_minus_keywords: &["return", "case", "sizeof", "if", "while"],
+    import_keywords: &["#include"],
     ..Dialect::baseline()
 };

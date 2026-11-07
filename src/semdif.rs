@@ -9,8 +9,8 @@ use std::process::ExitCode;
 use crate::change::{
     parse_rename_scope, parse_span_scope, Change, ChangeList, ConstantChanged, DirectoryAdded,
     DirectoryDeleted, FileAdded, FileChanged, FileDeleted, FileMoved, FileRenamed,
-    IdentifierRenamed, LineAdded, LineModified, LineRemoved, NamedBlockAdded, NamedBlockRemoved,
-    RenameScope,
+    IdentifierRenamed, ImportMoved, LineAdded, LineModified, LineRemoved, NamedBlockAdded,
+    NamedBlockRemoved, RenameScope,
 };
 use crate::dialect::BlockCategory;
 use crate::diff::span_changes::constant::{is_boolean, is_integer};
@@ -276,6 +276,7 @@ impl PartialChange {
             ("line-removed", parse_line_removed),
             ("line-modified", parse_line_modified),
             ("identifier-renamed", parse_identifier_renamed),
+            ("import-moved", parse_import_moved),
             ("constant-changed", parse_constant_changed),
             ("directory-added", parse_directory_added),
             ("directory-deleted", parse_directory_deleted),
@@ -471,6 +472,29 @@ fn parse_identifier_renamed(
             changes.add(IdentifierRenamed::directory(
                 scope, oldname, newname,
             ));
+        }
+    }
+    Ok(())
+}
+
+fn parse_import_moved(
+    changes: &mut ChangeList,
+    scope: String,
+    fields: BTreeMap<String, String>,
+) -> Result<(), String> {
+    let oldname = required(&fields, "oldname", "import-moved")?;
+    let newname = required(&fields, "newname", "import-moved")?;
+    match parse_rename_scope(&scope)? {
+        RenameScope::Lines(span) => {
+            let new = if span.is_single() {
+                Some(required_line(&fields, "new", "import-moved")?)
+            } else {
+                None
+            };
+            changes.add(ImportMoved::recorded(span, new, oldname, newname));
+        }
+        RenameScope::Directory(scope) => {
+            changes.add(ImportMoved::directory(scope, oldname, newname));
         }
     }
     Ok(())

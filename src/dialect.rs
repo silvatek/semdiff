@@ -1,10 +1,10 @@
 //! What every language supplies, and which dialect a path selects.
 //!
 //! A dialect is configuration. It names the files it covers, how comments and
-//! blocks are written, which characters form a name, and which keywords open
-//! a named block. `family` selects the reader: brace-delimited languages share
-//! the C-family reader, and Python has its own. Each language lives in its own
-//! file under `dialect/`.
+//! blocks are written, which characters form a name, which keywords open a
+//! named block, and which keywords introduce an import. `family` selects the
+//! reader: brace-delimited languages share the C-family reader, and Python
+//! has its own. Each language lives in its own file under `dialect/`.
 
 #![cfg_attr(not(test), allow(dead_code))]
 
@@ -45,6 +45,7 @@ pub(crate) fn dialect_for_path(path: &str) -> Option<&'static Dialect> {
 /// rest of a block. String delimiters say which spans sit inside a string.
 /// The named-block keywords say which added runs are a new
 /// function, method, or structure, and which shared category each keyword is.
+/// The import keywords say which lines bring code in from somewhere else.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) struct Dialect {
     /// Which reader interprets this dialect.
@@ -123,6 +124,15 @@ pub(crate) struct Dialect {
     /// list `true` and `false`. Python lists `True` and `False`. ANSI C lists
     /// none, so those words stay names.
     pub boolean_constants: &'static [&'static str],
+    /// Keywords that introduce an import of code from somewhere else.
+    ///
+    /// A changed line that starts with one of these, after whitespace, can be
+    /// recorded as an import move. The keyword is a whole word: the next
+    /// character does not continue an identifier, so `use` does not match
+    /// `useful`. `baseline` lists none. Rust lists `use`. Python lists
+    /// `import` and `from`. JavaScript lists `import`. ANSI C lists
+    /// `#include`.
+    pub import_keywords: &'static [&'static str],
 }
 
 impl Dialect {
@@ -132,8 +142,8 @@ impl Dialect {
     /// a `"` string escaped by `\`, and the shared identifier characters.
     /// Extensions are empty. Prefixes, named-block keywords, method scopes,
     /// and c-style functions are off. `return` can precede a negative integer.
-    /// Boolean constants are unlisted. A language static replaces the fields
-    /// that differ.
+    /// Boolean constants and import keywords are unlisted. A language static
+    /// replaces the fields that differ.
     pub(crate) const fn baseline() -> Self {
         Self {
             family: Family::CFamily,
@@ -162,6 +172,7 @@ impl Dialect {
             statement_keywords: &[],
             unary_minus_keywords: &["return"],
             boolean_constants: &[],
+            import_keywords: &[],
         }
     }
 }

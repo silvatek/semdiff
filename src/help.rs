@@ -119,6 +119,15 @@ What a comparison records
   when the directory that covers them has no other occurrence of that name.
   A file with no dialect stays a line modification.
 
+  A line modification that starts with one of the dialect's import keywords
+  is import-moved when only the import name changed. The name is the text
+  after the keyword, without a trailing semicolon or a trailing line comment.
+  Rust lists use. Python lists import and from. JavaScript lists import.
+  ANSI C lists #include. The same move joins across lines and files the way
+  an identifier rename does. One renamed name inside the import stays an
+  identifier rename. A line that does not start with the keyword, or that
+  changes more than the import name, stays a line modification.
+
   A line edit whose only change is one integer is constant-changed. The
   integer is a sequence of digits, with a leading - when that minus starts
   the number. A minus after a value, as in count-1 or a[i]-1, is subtraction

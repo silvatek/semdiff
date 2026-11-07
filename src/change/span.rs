@@ -4,16 +4,20 @@
 //! Directory, file, and line changes each have their own scope rules. A span
 //! change names one old line, written `path:line`, or a run of old lines,
 //! written `path:start-end`. The path is the file apply edits. An identifier
-//! rename is the first span change. A later span change uses the same scope.
-//! A rename of one name across files drops the line numbers and names the
-//! directory that covers those files.
+//! rename is the first span change. An import move uses the same scope. A
+//! later span change uses it too. A rename or an import move of one name
+//! across files drops the line numbers and names the directory that covers
+//! those files.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::Path;
 
-use super::{applied_with_its_file, Change, Content, IdentifierRename, LineEdit, LinePlan};
+use super::{
+    applied_with_its_file, Change, Content, IdentifierRename, ImportMove, LineEdit, LinePlan,
+};
 
 use crate::dialect::dialect_for_path;
+use crate::diff::import_line::{import_occurrence, replace_import, replace_import_every};
 use crate::diff::span_changes::constant::{is_integer, replace_boolean, replace_integer};
 use crate::diff::span_changes::identifier::{occurrence_count, replace_every, replace_name};
 use crate::filesystem::FileSystem;
@@ -124,7 +128,7 @@ pub(crate) enum RenameScope {
     Directory(String),
 }
 
-/// Reads an identifier-rename scope.
+/// Reads an identifier-rename or import-moved scope.
 ///
 /// `path:line` and `path:start-end` are line spans. A scope with no line
 /// numbers is the directory those files share, including `.` for the whole
@@ -425,6 +429,257 @@ impl IdentifierRenamed {
     }
 }
 
+/// An import whose name moved on one or more old lines, or across the files in a directory.
+///
+/// A line that would otherwise be a line modification is this change when both
+/// copies start with one of the dialect's import keywords and replacing the
+/// old import name produces the new line. A line span's scope is that span.
+/// Apply edits that path and replaces the import name on those lines. `new`
+/// is that line in the new file when the move is one line. A merged run does
+/// not record `new`, because the lines do not share one new line number. A
+/// directory scope names the directory that covers every file in the move,
+/// and apply replaces the import name in each of those files.
+pub(crate) struct ImportMoved {
+    extent: Extent,
+    oldname: String,
+    newname: String,
+}
+
+impl ImportMoved {
+    /// A move of one import on the old line named by `span`.
+    ///
+    /// `new` is that line's number in the new file.
+    pub(crate) fn new(span: SpanScope, new: usize, oldname: String, newname: String) -> Self {
+        Self::recorded(span, Some(new), oldname, newname)
+    }
+
+    /// A move read from a semdif record.
+    ///
+    /// `new` is present for one line and absent for a run.
+    pub(crate) fn recorded(
+        span: SpanScope,
+        new: Option<usize>,
+        oldname: String,
+        newname: String,
+    ) -> Self {
+        Self {
+            extent: Extent::Lines { span, new },
+            oldname,
+            newname,
+        }
+    }
+
+    /// A move of one import in every file under `scope`.
+    ///
+    /// The scope is a directory, or `.` for the whole tree. It records no line
+    /// numbers.
+    pub(crate) fn directory(scope: String, oldname: String, newname: String) -> Self {
+        Self {
+            extent: Extent::Directory { scope },
+            oldname,
+            newname,
+        }
+    }
+
+    fn merged(span: SpanScope, oldname: String, newname: String) -> Self {
+        Self::recorded(span, None, oldname, newname)
+    }
+}
+
+impl Change for ImportMoved {
+    fn kind(&self) -> &'static str {
+        "import-moved"
+    }
+
+    fn scope(&self) -> &str {
+        match &self.extent {
+            Extent::Lines { span, .. } => span.scope(),
+            Extent::Directory { scope } => scope,
+        }
+    }
+
+    fn line_edit(&self) -> Option<&dyn LineEdit> {
+        Some(self)
+    }
+
+    fn content(&self) -> Option<&dyn Content> {
+        match &self.extent {
+            Extent::Lines { .. } => Some(self),
+            Extent::Directory { .. } => None,
+        }
+    }
+
+    fn write_details(&self, document: &mut String) {
+        if let Extent::Lines { new: Some(new), .. } = &self.extent {
+            write_plain(document, "new", &new.to_string());
+        }
+        write_detail(document, "oldname", &self.oldname);
+        write_detail(document, "newname", &self.newname);
+    }
+
+    fn apply(&self, _fs: &dyn FileSystem, _source: &Path) -> Result<(), String> {
+        applied_with_its_file(self.kind())
+    }
+
+    fn import_move(&self) -> Option<ImportMove<'_>> {
+        let Extent::Lines { span, .. } = &self.extent else {
+            return None;
+        };
+        Some(ImportMove {
+            file: span.file(),
+            oldname: &self.oldname,
+            newname: &self.newname,
+            start: span.start(),
+            end: span.end(),
+        })
+    }
+
+    fn edits_file(&self, path: &str) -> bool {
+        match &self.extent {
+            Extent::Lines { span, .. } => span.file() == path,
+            Extent::Directory { scope } => covers(scope, path),
+        }
+    }
+
+    fn directory_scope(&self) -> Option<&str> {
+        match &self.extent {
+            Extent::Directory { scope } => Some(scope),
+            Extent::Lines { .. } => None,
+        }
+    }
+}
+
+impl Content for ImportMoved {
+    fn file(&self) -> &str {
+        match &self.extent {
+            Extent::Lines { span, .. } => span.file(),
+            Extent::Directory { .. } => "",
+        }
+    }
+}
+
+impl LineEdit for ImportMoved {
+    fn position(&self) -> (usize, usize) {
+        match &self.extent {
+            Extent::Lines { span, new } => (span.start(), new.unwrap_or(span.start())),
+            Extent::Directory { .. } => (0, 0),
+        }
+    }
+
+    fn rebuild(
+        &self,
+        file: &Path,
+        source_lines: &[String],
+        plan: &mut LinePlan,
+    ) -> Result<(), String> {
+        match &self.extent {
+            Extent::Directory { .. } => self.rebuild_directory(file, source_lines, plan),
+            Extent::Lines { span, .. } => self.rebuild_lines(file, span, source_lines, plan),
+        }
+    }
+}
+
+impl ImportMoved {
+    /// Replaces the old import on each line of one file under a directory scope.
+    ///
+    /// A file with no dialect is left alone. A line that does not import the
+    /// old name is left alone. The file's other line edits still run.
+    fn rebuild_directory(
+        &self,
+        file: &Path,
+        source_lines: &[String],
+        plan: &mut LinePlan,
+    ) -> Result<(), String> {
+        let path = file.to_string_lossy();
+        if dialect_for_path(&path).is_none() {
+            return Ok(());
+        }
+        for line_no in 1..=source_lines.len() {
+            let current = &source_lines[line_no - 1];
+            let replaced = match replace_import_every(&path, current, &self.oldname, &self.newname)
+            {
+                Ok(text) => text,
+                Err(message) => {
+                    return Err(format!(
+                        "cannot move import {} on line {line_no} in {}: {message}",
+                        self.oldname,
+                        file.display()
+                    ));
+                }
+            };
+            if replaced != *current {
+                plan.replace(file, line_no, replaced)?;
+            }
+        }
+        Ok(())
+    }
+
+    /// Replaces the old import on the old lines named by a line span.
+    fn rebuild_lines(
+        &self,
+        file: &Path,
+        span: &SpanScope,
+        source_lines: &[String],
+        plan: &mut LinePlan,
+    ) -> Result<(), String> {
+        let start = span.start();
+        let end = span.end();
+        if start == 0 || end < start || end > source_lines.len() {
+            return Err(format!(
+                "line {start}-{end} is outside {} which has {} lines",
+                file.display(),
+                source_lines.len()
+            ));
+        }
+        if span.is_single() {
+            let replaced = match replace_import(
+                span.file(),
+                &source_lines[start - 1],
+                &self.oldname,
+                &self.newname,
+            ) {
+                Ok(text) => text,
+                Err(message) => {
+                    return Err(format!(
+                        "cannot move import {} on line {start} in {}: {message}",
+                        self.oldname,
+                        file.display()
+                    ));
+                }
+            };
+            return plan.replace(file, start, replaced);
+        }
+        let mut found = false;
+        for line_no in start..=end {
+            let current = &source_lines[line_no - 1];
+            let replaced =
+                match replace_import_every(span.file(), current, &self.oldname, &self.newname) {
+                    Ok(text) => text,
+                    Err(message) => {
+                        return Err(format!(
+                            "cannot move import {} on line {line_no} in {}: {message}",
+                            self.oldname,
+                            file.display()
+                        ));
+                    }
+                };
+            if replaced != *current {
+                found = true;
+                plan.replace(file, line_no, replaced)?;
+            }
+        }
+        if !found {
+            return Err(format!(
+                "cannot move import {} on lines {start}-{end} in {}: {} does not occur",
+                self.oldname,
+                file.display(),
+                self.oldname
+            ));
+        }
+        Ok(())
+    }
+}
+
 /// An integer or boolean constant changed on one old line.
 ///
 /// The scope is that line. Apply replaces one integer or one boolean spelling
@@ -566,18 +821,88 @@ pub(crate) fn merge_identifier_spans(
     old_lines: &[String],
     changes: &mut super::ChangeList,
 ) {
+    merge_line_moves(
+        path,
+        old_lines,
+        changes,
+        |change| {
+            let rename = change.identifier_rename()?;
+            Some(MoveKey {
+                oldname: rename.oldname.to_string(),
+                newname: rename.newname.to_string(),
+                start: rename.start,
+                end: rename.end,
+            })
+        },
+        occurrence_count,
+        |span, oldname, newname| Box::new(IdentifierRenamed::merged(span, oldname, newname)),
+    );
+}
+
+/// Merges import moves of one import in one file.
+///
+/// This is the same merge as an identifier rename. Every move with the same
+/// old import name and new import name is a candidate. A candidate merges
+/// with the next candidate of that import when every line between them that
+/// imports the old name is already one of those moves. The merged scope is
+/// `path:start-end`.
+pub(crate) fn merge_import_spans(
+    path: &str,
+    old_lines: &[String],
+    changes: &mut super::ChangeList,
+) {
+    merge_line_moves(
+        path,
+        old_lines,
+        changes,
+        |change| {
+            let moved = change.import_move()?;
+            Some(MoveKey {
+                oldname: moved.oldname.to_string(),
+                newname: moved.newname.to_string(),
+                start: moved.start,
+                end: moved.end,
+            })
+        },
+        import_occurrence,
+        |span, oldname, newname| Box::new(ImportMoved::merged(span, oldname, newname)),
+    );
+}
+
+/// One rename or import move taken from the change list so it can be merged.
+struct MoveKey {
+    oldname: String,
+    newname: String,
+    start: usize,
+    end: usize,
+}
+
+/// Merges line-scoped moves of one name in one file.
+///
+/// `select` reads a move from a change. `occurs` counts that old name on one
+/// old line. `build` makes the merged record. Candidates that share an old
+/// name and a new name join when every occurrence of the old name between
+/// them is already one of those moves.
+fn merge_line_moves(
+    path: &str,
+    old_lines: &[String],
+    changes: &mut super::ChangeList,
+    select: impl Fn(&dyn Change) -> Option<MoveKey>,
+    occurs: impl Fn(&str, &str, &str) -> Option<usize>,
+    build: impl Fn(SpanScope, String, String) -> Box<dyn Change>,
+) {
     let mut groups: BTreeMap<(String, String), Vec<Candidate>> = BTreeMap::new();
     for index in 0..changes.len() {
-        let Some(rename) = changes[index].identifier_rename() else {
+        let Some(moved) = select(&changes[index]) else {
             continue;
         };
         groups
-            .entry((rename.oldname.to_string(), rename.newname.to_string()))
+            .entry((moved.oldname, moved.newname))
             .or_default()
             .push(Candidate {
                 index,
-                start: rename.start,
-                end: rename.end,
+                start: moved.start,
+                end: moved.end,
             });
     }
 
@@ -596,6 +921,7 @@ pub(crate) fn merge_identifier_spans(
                         candidate.end,
                         &oldname,
                         &covered,
+                        &occurs,
                     )
             });
             if extend {
@@ -618,18 +944,18 @@ pub(crate) fn merge_identifier_spans(
             pending.push((
                 run.first,
                 run.rest,
-                Box::new(IdentifierRenamed::merged(
+                build(
                     SpanScope::lines(path, run.start, run.end),
                     oldname.clone(),
                     newname.clone(),
-                )) as Box<dyn Change>,
+                ),
             ));
         }
     }
     apply_merges(changes, pending);
 }
 
-/// One identifier rename already in the change list.
+/// One rename or import move already in the change list.
 ///
 /// `index` is its place in that list. `start` and `end` are the old lines it
 /// already covers.
@@ -639,7 +965,7 @@ struct Candidate {
     end: usize,
 }
 
-/// A run of renames of one name that can share a scope.
+/// A run of moves of one name that can share a scope.
 struct Run {
     first: usize,
     start: usize,
@@ -655,7 +981,11 @@ fn covered_lines(group: &[Candidate]) -> BTreeSet<usize> {
 }
 
 /// Whether every occurrence of `oldname` on `start` through `end` is a line
-/// already renamed to that name.
+/// already moved to that name.
+///
+/// `occurs` counts the old name on one line. A line with no occurrence is
+/// skipped. A line where the name occurs has to be one of the moves, and the
+/// name has to occur once there.
 fn occurrences_covered(
     path: &str,
     old_lines: &[String],
@@ -663,16 +993,13 @@ fn occurrences_covered(
     end: usize,
     oldname: &str,
     covered: &BTreeSet<usize>,
+    occurs: &impl Fn(&str, &str, &str) -> Option<usize>,
 ) -> bool {
     if start == 0 || end < start || end > old_lines.len() {
         return false;
     }
     for line_no in start..=end {
-        let Some(count) = occurrence_count(
-            path,
-            &old_lines[line_no - 1],
-            oldname,
-        ) else {
+        let Some(count) = occurs(path, &old_lines[line_no - 1], oldname) else {
             return false;
         };
         if count == 0 {
@@ -688,7 +1015,7 @@ fn occurrences_covered(
 /// One old file's text, used to see where a name still occurs.
 ///
 /// The lines are the old file. A file that is not text has no lines, so it
-/// holds no identifiers.
+/// holds no identifiers and no imports.
 pub(crate) struct SourceText {
     pub(crate) path: String,
     pub(crate) lines: Vec<String>,
@@ -703,19 +1030,84 @@ pub(crate) struct SourceText {
 /// covers both is already one of those renames. The merged scope is that
 /// directory, with no line numbers.
 pub(crate) fn merge_identifier_files(sources: &[SourceText], changes: &mut super::ChangeList) {
+    merge_file_moves(
+        sources,
+        changes,
+        |change| {
+            let rename = change.identifier_rename()?;
+            Some(FileMoveKey {
+                file: rename.file.to_string(),
+                oldname: rename.oldname.to_string(),
+                newname: rename.newname.to_string(),
+                start: rename.start,
+                end: rename.end,
+            })
+        },
+        occurrence_count,
+        |scope, oldname, newname| Box::new(IdentifierRenamed::directory(scope, oldname, newname)),
+    );
+}
+
+/// Merges import moves of one import across files.
+///
+/// This is the same merge as an identifier rename. Moves inside one file are
+/// already merged. A candidate joins the next candidate when every import of
+/// the old name in the directory that covers both is already one of those
+/// moves. The merged scope is that directory, with no line numbers.
+pub(crate) fn merge_import_files(sources: &[SourceText], changes: &mut super::ChangeList) {
+    merge_file_moves(
+        sources,
+        changes,
+        |change| {
+            let moved = change.import_move()?;
+            Some(FileMoveKey {
+                file: moved.file.to_string(),
+                oldname: moved.oldname.to_string(),
+                newname: moved.newname.to_string(),
+                start: moved.start,
+                end: moved.end,
+            })
+        },
+        import_occurrence,
+        |scope, oldname, newname| Box::new(ImportMoved::directory(scope, oldname, newname)),
+    );
+}
+
+/// One rename or import move in a file, taken from the change list.
+struct FileMoveKey {
+    file: String,
+    oldname: String,
+    newname: String,
+    start: usize,
+    end: usize,
+}
+
+/// Merges file-scoped moves of one name across files.
+///
+/// `select` reads a move from a change. `occurs` counts that old name on one
+/// old line. `build` makes the directory-scoped record. Candidates that share
+/// an old name and a new name join when every occurrence of the old name in
+/// the directory that covers them is already one of those moves.
+fn merge_file_moves(
+    sources: &[SourceText],
+    changes: &mut super::ChangeList,
+    select: impl Fn(&dyn Change) -> Option<FileMoveKey>,
+    occurs: impl Fn(&str, &str, &str) -> Option<usize>,
+    build: impl Fn(String, String, String) -> Box<dyn Change>,
+) {
     let mut groups: BTreeMap<(String, String), Vec<FileCandidate>> = BTreeMap::new();
     for index in 0..changes.len() {
-        let Some(rename) = changes[index].identifier_rename() else {
+        let Some(moved) = select(&changes[index]) else {
             continue;
         };
         groups
-            .entry((rename.oldname.to_string(), rename.newname.to_string()))
+            .entry((moved.oldname, moved.newname))
             .or_default()
             .push(FileCandidate {
                 index,
-                file: rename.file.to_string(),
-                start: rename.start,
-                end: rename.end,
+                file: moved.file,
+                start: moved.start,
+                end: moved.end,
             });
     }
 
@@ -732,7 +1124,7 @@ pub(crate) fn merge_identifier_files(sources: &[SourceText], changes: &mut super
                 let mut paths: Vec<&str> = run.files.iter().map(String::as_str).collect();
                 paths.push(&candidate.file);
                 let directory = common_directory(&paths);
-                directory_occurrences_covered(sources, &directory, &oldname, &covered)
+                directory_occurrences_covered(sources, &directory, &oldname, &covered, &occurs)
                     .then_some(directory)
             });
             if let Some(directory) = directory {
@@ -756,11 +1148,7 @@ pub(crate) fn merge_identifier_files(sources: &[SourceText], changes: &mut super
             pending.push((
                 run.first,
                 run.rest,
-                Box::new(IdentifierRenamed::directory(
-                    run.directory,
-                    oldname.clone(),
-                    newname.clone(),
-                )) as Box<dyn Change>,
+                build(run.directory, oldname.clone(), newname.clone()),
             ));
         }
     }
@@ -796,7 +1184,7 @@ fn apply_merges(
     }
 }
 
-/// One identifier rename in a file, already merged with the other lines of that file.
+/// One rename or import move in a file, already merged with the other lines of that file.
 struct FileCandidate {
     index: usize,
     file: String,
@@ -804,7 +1192,7 @@ struct FileCandidate {
     end: usize,
 }
 
-/// A run of renames of one name that can share a directory scope.
+/// A run of moves of one name that can share a directory scope.
 struct FileRun {
     first: usize,
     directory: String,
@@ -859,12 +1247,17 @@ fn covers(directory: &str, file: &str) -> bool {
         .is_some_and(|rest| rest.starts_with('/'))
 }
 
-/// Whether every occurrence of `oldname` under `directory` is a line already renamed to that name.
+/// Whether every occurrence of `oldname` under `directory` is a line already moved to that name.
+///
+/// `occurs` counts the old name on one line. A file with no dialect is
+/// skipped. A line where the name occurs has to be one of the moves, and the
+/// name has to occur once there.
 fn directory_occurrences_covered(
     sources: &[SourceText],
     directory: &str,
     oldname: &str,
     covered: &BTreeSet<(String, usize)>,
+    occurs: &impl Fn(&str, &str, &str) -> Option<usize>,
 ) -> bool {
     for source in sources {
         if !covers(directory, &source.path) {
@@ -872,11 +1265,7 @@ fn directory_occurrences_covered(
         }
         for (index, line) in source.lines.iter().enumerate() {
             let line_no = index + 1;
-            let Some(count) = occurrence_count(
-                &source.path,
-                line,
-                oldname,
-            ) else {
+            let Some(count) = occurs(&source.path, line, oldname) else {
                 continue;
             };
             if count == 0 {
@@ -893,8 +1282,9 @@ fn directory_occurrences_covered(
 #[cfg(test)]
 mod tests {
     use super::{
-        merge_identifier_files, merge_identifier_spans, parse_rename_scope, parse_span_scope,
-        IdentifierRenamed, RenameScope, SourceText, SpanScope,
+        merge_identifier_files, merge_identifier_spans, merge_import_files, merge_import_spans,
+        parse_rename_scope, parse_span_scope, IdentifierRenamed, ImportMoved, RenameScope,
+        SourceText, SpanScope,
     };
     use crate::change::ChangeList;
 
@@ -1102,5 +1492,123 @@ mod tests {
         assert_eq!(merged.len(), 2);
         assert_eq!(merged[0].scope(), "other/c.rs:1");
         assert_eq!(merged[1].scope(), "src");
+    }
+
+    /// The list after import moves in one file have been merged.
+    fn import_spans(path: &str, lines: &[String], mut changes: ChangeList) -> ChangeList {
+        merge_import_spans(path, lines, &mut changes);
+        changes
+    }
+
+    /// The list after import moves across files have been merged.
+    fn import_files(sources: &[SourceText], mut changes: ChangeList) -> ChangeList {
+        merge_import_files(sources, &mut changes);
+        changes
+    }
+
+    fn moved(line: usize, oldname: &str, newname: &str) -> ImportMoved {
+        moved_at("src/main.rs", line, oldname, newname)
+    }
+
+    fn moved_at(path: &str, line: usize, oldname: &str, newname: &str) -> ImportMoved {
+        ImportMoved::new(
+            SpanScope::new(path, line),
+            line,
+            oldname.to_string(),
+            newname.to_string(),
+        )
+    }
+
+    /// A change list holding these import moves, in order.
+    fn listed_imports(items: impl IntoIterator<Item = ImportMoved>) -> ChangeList {
+        let mut changes = ChangeList::new();
+        for item in items {
+            changes.add(item);
+        }
+        changes
+    }
+
+    #[test]
+    fn import_moves_of_one_import_merge_across_a_gap_that_lacks_that_import() {
+        let lines = vec![
+            "use old::path::Item;".to_string(),
+            "let keep = 1;".to_string(),
+            "use old::path::Item;".to_string(),
+        ];
+        let changes = listed_imports([
+            moved(1, "old::path::Item", "new::place::Item"),
+            moved(3, "old::path::Item", "new::place::Item"),
+        ]);
+        let merged = import_spans("src/main.rs", &lines, changes);
+        assert_eq!(merged.len(), 1);
+        assert_eq!(merged[0].scope(), "src/main.rs:1-3");
+        assert_eq!(merged[0].kind(), "import-moved");
+    }
+
+    #[test]
+    fn an_uncovered_import_between_moves_keeps_them_apart() {
+        let lines = vec![
+            "use old::path::Item;".to_string(),
+            "use old::path::Item;".to_string(),
+            "use old::path::Item;".to_string(),
+        ];
+        let changes = listed_imports([
+            moved(1, "old::path::Item", "new::place::Item"),
+            moved(3, "old::path::Item", "new::place::Item"),
+        ]);
+        let merged = import_spans("src/main.rs", &lines, changes);
+        assert_eq!(merged.len(), 2);
+        assert_eq!(merged[0].scope(), "src/main.rs:1");
+        assert_eq!(merged[1].scope(), "src/main.rs:3");
+    }
+
+    #[test]
+    fn a_different_new_import_stays_apart() {
+        let lines = vec![
+            "use old::path::Item;".to_string(),
+            "use old::path::Item;".to_string(),
+        ];
+        let changes = listed_imports([
+            moved(1, "old::path::Item", "new::place::Item"),
+            moved(2, "old::path::Item", "other::spot::Item"),
+        ]);
+        let merged = import_spans("src/main.rs", &lines, changes);
+        assert_eq!(merged.len(), 2);
+        assert_eq!(merged[0].scope(), "src/main.rs:1");
+        assert_eq!(merged[1].scope(), "src/main.rs:2");
+    }
+
+    #[test]
+    fn import_moves_in_one_directory_merge_when_that_directory_is_covered() {
+        let sources = vec![
+            source("src/a.rs", "use old::path::Item;\n"),
+            source("src/b.rs", "use old::path::Item;\n"),
+            source("tests/c.rs", "use old::path::Item;\n"),
+        ];
+        let changes = listed_imports([
+            moved_at("src/a.rs", 1, "old::path::Item", "new::place::Item"),
+            moved_at("src/b.rs", 1, "old::path::Item", "new::place::Item"),
+        ]);
+        let merged = import_files(&sources, changes);
+        assert_eq!(merged.len(), 1);
+        assert_eq!(merged[0].scope(), "src");
+        assert_eq!(merged[0].kind(), "import-moved");
+    }
+
+    #[test]
+    fn an_uncovered_import_in_the_directory_keeps_the_files_apart() {
+        let sources = vec![
+            source("src/a.rs", "use old::path::Item;\n"),
+            source("src/b.rs", "use old::path::Item;\n"),
+            source("src/c.rs", "use old::path::Item;\n"),
+        ];
+        let changes = listed_imports([
+            moved_at("src/a.rs", 1, "old::path::Item", "new::place::Item"),
+            moved_at("src/b.rs", 1, "old::path::Item", "new::place::Item"),
+        ]);
+        let merged = import_files(&sources, changes);
+        assert_eq!(merged.len(), 2);
+        assert_eq!(merged[0].scope(), "src/a.rs:1");
+        assert_eq!(merged[1].scope(), "src/b.rs:1");
     }
 }

@@ -3,7 +3,8 @@
 //!
 //! One pass collects the files and directories, splits the paths, and records
 //! file, content, and directory changes. Later passes merge adjacent lines,
-//! name a complete block, and join identifier renames that cover one directory.
+//! name a complete block, and join identifier renames and import moves that
+//! cover one directory.
 //!
 //! A file that exists on only one side, a paired file, an empty directory, and
 //! the lines of a text file each live in their own module. A paired file whose
@@ -13,6 +14,7 @@
 
 mod directory_changes;
 mod file_change;
+pub(crate) mod import_line;
 mod line_changes;
 pub(crate) mod span_changes;
 
@@ -23,7 +25,8 @@ use std::collections::BTreeSet;
 use std::path::Path;
 
 use crate::change::{
-    merge_adjacent, merge_identifier_files, promote_named_blocks, ChangeList, SourceText,
+    merge_adjacent, merge_identifier_files, merge_import_files, promote_named_blocks, ChangeList,
+    SourceText,
 };
 use crate::filesystem::FileSystem;
 
@@ -51,7 +54,9 @@ pub(crate) struct Differences {
 /// removed run that is one complete named block is then recorded as that
 /// block.
 /// Identifier renames of one name then join across files when the directory
-/// that covers them has no other occurrence of that name.
+/// that covers them has no other occurrence of that name. Import moves of one
+/// import join the same way, when every import of that name in the directory
+/// is already one of those moves.
 pub(crate) fn find_differences(
     fs: &dyn FileSystem,
     sources: &crate::Sources,
@@ -80,6 +85,7 @@ pub(crate) fn find_differences(
     let texts = source_texts(fs, left_root, &old_paths, &changes, ComparedSide::Left)?;
     promote_named_blocks(&right_texts, &texts, &mut changes);
     merge_identifier_files(&texts, &mut changes);
+    merge_import_files(&texts, &mut changes);
     Ok(Differences {
         paths: paired_files,
         changes,

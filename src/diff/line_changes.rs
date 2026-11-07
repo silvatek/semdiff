@@ -1,7 +1,11 @@
 //! Identifying and classifying changes at the line level.
 
+use super::import_line::import_move;
 use super::span_changes::{find_spans, record};
-use crate::change::{merge_identifier_spans, ChangeList, LineAdded, LineModified, LineRemoved};
+use crate::change::{
+    merge_identifier_spans, merge_import_spans, ChangeList, ImportMoved, LineAdded, LineModified,
+    LineRemoved, SpanScope,
+};
 use crate::dialect::{dialect_for_path, Dialect, Family};
 
 /// Line records for two copies of one file, when both copies are text.
@@ -28,7 +32,11 @@ pub(crate) fn text_line_changes(path: &str, before: &[u8], after: &[u8]) -> Opti
 /// a boolean spelling or an integer outside a string and a comment, and an
 /// identifier rename when it is one name. A leading `-` is part of the integer
 /// when it starts the number. ANSI C lists no boolean spellings, so those
-/// words stay names. Several changed spans stay a line modification.
+/// words stay names. Several changed spans stay a line modification, unless
+/// both lines start with one of the dialect's import keywords and replacing
+/// the old import name produces the new line. That edit is an import move.
+/// The name is the text after the keyword, without a trailing semicolon or a
+/// trailing line comment.
 /// An added or removed line is a full-line comment when that line opens with
 /// the dialect's line comment. A modification is one when
 /// both the old line and the new line do. A file with no dialect is never a
@@ -46,6 +54,7 @@ pub(crate) fn text_line_changes(path: &str, before: &[u8], after: &[u8]) -> Opti
 /// the same. Renames of one name in
 /// that file become `path:start-end` when every occurrence of the old name
 /// between them is one of those renames, and that run does not record `new`.
+/// Import moves of one import join the same way.
 /// The records are ordered by
 /// `old`, then `new`, which walks the file from the top. Apply rebuilds the
 /// file from the old positions, so that order is for reading.
@@ -59,6 +68,7 @@ pub(crate) fn line_changes(path: &str, before: &str, after: &str) -> ChangeList 
     }
     changes.sort_by_line();
     merge_identifier_spans(path, &old_lines.lines, &mut changes);
+    merge_import_spans(path, &old_lines.lines, &mut changes);
     changes
 }
 
@@ -283,13 +293,14 @@ fn changes_in_hunk(path: &str, hunk: &Hunk) -> ChangeList {
     changes
 }
 
-/// A paired line, recorded as a boolean constant, an identifier rename, or an
-/// integer constant when that is the whole edit.
+/// A paired line, recorded as a boolean constant, an identifier rename, an
+/// import move, or an integer constant when that is the whole edit.
 ///
-/// The scope of those records is `path:line`, with the old line. Anything else
-/// is a line modification. It is a full-line comment when both lines open with the
-/// dialect's line comment. It is whitespace when the edit is a blank line or
-/// only an insignificant margin.
+/// The scope of those records is `path:line`, with the old line. A line that
+/// starts with an import keyword is an import move when the import name is
+/// the whole edit. Anything else is a line modification. It is a full-line
+/// comment when both lines open with the dialect's line comment. It is
+/// whitespace when the edit is a blank line or only an insignificant margin.
 fn modified_line(
     changes: &mut ChangeList,
     path: &str,
@@ -303,6 +314,15 @@ fn modified_line(
         if record(changes, path, old, new, span) {
             return;
         }
+    }
+    if let Some((oldname, newname)) = import_move(path, old_text, new_text) {
+        changes.add(ImportMoved::new(
+            SpanScope::new(path, old),
+            new,
+            oldname,
+            newname,
+        ));
+        return;
     }
     changes.add(LineModified::new(
         path.to_string(),
@@ -367,12 +387,8 @@ fn margin_whitespace(path: &str, old_line: &str, new_line: &str) -> bool {
         return false;
     };
     match dialect.family {
-        Family::CFamily => {
-            crate::family::c_family::margin_whitespace(old_line, new_line)
-        }
-        Family::Python => {
-            crate::family::python::margin_whitespace(dialect, old_line, new_line)
-        }
+        Family::CFamily => crate::family::c_family::margin_whitespace(old_line, new_line),
+        Family::Python => crate::family::python::margin_whitespace(dialect, old_line, new_line),
     }
 }
 
