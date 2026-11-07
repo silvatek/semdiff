@@ -1,4 +1,5 @@
-//! The ANSI C dialect.
+//! ANSI C's extensions, comments, strings, names, and keywords. Boolean spellings
+//! stay empty. Behavior that uses these settings lives in a reader.
 
 use super::Dialect;
 

@@ -1,3 +1,6 @@
+//! Interpreting argv. A new flag is parsed here. Carrying out the request belongs
+//! in run, diff, or apply.
+
 use std::env;
 use std::path::Path;
 

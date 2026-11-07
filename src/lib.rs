@@ -1,4 +1,5 @@
-//! Semantic diff of two source trees.
+//! The public entries and the module list. A comparison stage belongs under diff.
+//! Replaying a semdif belongs in apply.
 
 mod apply;
 mod args;
