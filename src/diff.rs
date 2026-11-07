@@ -74,19 +74,18 @@ pub(crate) fn find_differences(
         &right_dirs,
         &right_files,
     ));
-    let changes = ChangeList::of(crate::change::merge_adjacent(
-        directory_changes::place_replacement_files(changes.to_vec()),
-    ));
+    directory_changes::place_replacement_files(&mut changes);
+    crate::change::merge_adjacent(&mut changes);
     let right_root = fs.source_base(Path::new(&sources.right));
     let right_texts = source_texts(fs, right_root, &paired_files, &changes, ComparedSide::Right)?;
     let left_root = fs.source_base(Path::new(&sources.left));
     let old_paths = changes.old_text_paths(&left_files);
     let texts = source_texts(fs, left_root, &old_paths, &changes, ComparedSide::Left)?;
-    let changes = crate::change::promote_named_blocks(&right_texts, &texts, changes.to_vec());
-    let changes = crate::change::merge_identifier_files(&texts, changes);
+    crate::change::promote_named_blocks(&right_texts, &texts, &mut changes);
+    crate::change::merge_identifier_files(&texts, &mut changes);
     Ok(Differences {
         paths: paired_files,
-        changes,
+        changes: changes.to_vec(),
     })
 }
 

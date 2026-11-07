@@ -1,6 +1,6 @@
 //! Identifying and classifying changes at the line level.
 
-use crate::change::Change;
+use crate::change::{Change, ChangeList};
 
 /// Line records for two copies of one file, when both copies are text.
 ///
@@ -60,7 +60,9 @@ pub(crate) fn line_changes(path: &str, before: &str, after: &str) -> Vec<Box<dyn
         changes.extend(changes_in_hunk(path, &hunk));
     }
     changes.sort_by_key(|change| line_position(change.as_ref()));
-    crate::change::merge_identifier_spans(path, &old_lines.lines, changes)
+    let mut changes = ChangeList::of(changes);
+    crate::change::merge_identifier_spans(path, &old_lines.lines, &mut changes);
+    changes.to_vec()
 }
 
 /// The lines of a text file, without their separating newlines.

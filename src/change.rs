@@ -414,9 +414,10 @@ pub(super) fn applied_with_its_file(kind: &str) -> Result<(), String> {
 
 /// The records gathered while one comparison runs.
 ///
-/// The records stay private. A pass asks this list for a moved file, the new
-/// paths those moves add, or the paths of the old text, instead of walking
-/// the records itself.
+/// The records stay private. A pass reads one by its index. Moving, replacing,
+/// merging, or removing a record goes through this list. A pass also asks the
+/// list for a moved file, the new paths those moves add, or the paths of the
+/// old text.
 pub(crate) struct ChangeList {
     records: Vec<Box<dyn Change>>,
 }
@@ -432,9 +433,71 @@ impl ChangeList {
         self.records.extend(more);
     }
 
-    /// The records as a vector, for a pass that rewrites the whole list.
+    /// The records, in their current order.
+    ///
+    /// The comparison hands these to its result once the passes have finished.
     pub(crate) fn to_vec(self) -> Vec<Box<dyn Change>> {
         self.records
+    }
+
+    /// How many records this list holds.
+    pub(crate) fn len(&self) -> usize {
+        self.records.len()
+    }
+
+    /// Lends the record at `index` and the record after it.
+    ///
+    /// `decide` can ask the first record whether it absorbs the second. The
+    /// borrows end when `decide` returns, so the caller can then remove the
+    /// second record. There is no following record when `index` is the last.
+    pub(crate) fn with_next<R>(
+        &mut self,
+        index: usize,
+        decide: impl FnOnce(&mut dyn Change, &dyn Change) -> R,
+    ) -> Option<R> {
+        if index + 1 >= self.records.len() {
+            return None;
+        }
+        let (earlier, later) = self.records.split_at_mut(index + 1);
+        Some(decide(earlier[index].as_mut(), later[0].as_ref()))
+    }
+
+    /// Moves the record at `from` so it sits at `to`.
+    ///
+    /// The record itself is unchanged. The records between the two indexes
+    /// shift to close the gap.
+    pub(crate) fn move_record(&mut self, from: usize, to: usize) {
+        if from == to {
+            return;
+        }
+        if from < to {
+            self.records[from..=to].rotate_left(1);
+        } else {
+            self.records[to..=from].rotate_right(1);
+        }
+    }
+
+    /// Puts `record` at `index` in place of the record already there.
+    pub(crate) fn replace(&mut self, index: usize, record: Box<dyn Change>) {
+        self.records[index] = record;
+    }
+
+    /// Removes the record at `index` and returns it.
+    pub(crate) fn remove(&mut self, index: usize) -> Box<dyn Change> {
+        self.records.remove(index)
+    }
+
+    /// Puts `record` at `index` and removes every index in `drop`.
+    ///
+    /// `record` is the merged change. `drop` lists the other records folded
+    /// into it. Each of those indexes is later in the list than `index`.
+    pub(crate) fn merge(&mut self, index: usize, drop: &[usize], record: Box<dyn Change>) {
+        self.replace(index, record);
+        let mut later = drop.to_vec();
+        later.sort_unstable();
+        for position in later.into_iter().rev() {
+            self.remove(position);
+        }
     }
 
     /// The file-moved record whose new path is `path`.
@@ -486,5 +549,13 @@ impl ChangeList {
         paths.extend(self.moved_destinations());
         paths.sort();
         paths
+    }
+}
+
+impl std::ops::Index<usize> for ChangeList {
+    type Output = dyn Change;
+
+    fn index(&self, index: usize) -> &Self::Output {
+        self.records[index].as_ref()
     }
 }

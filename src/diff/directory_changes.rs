@@ -2,7 +2,7 @@
 
 use std::collections::BTreeSet;
 
-use crate::change::Change;
+use crate::change::{Change, ChangeList};
 
 /// Directories added or removed between the two sources.
 ///
@@ -59,29 +59,31 @@ pub(crate) fn directory_changes(
 ///
 /// The file cannot be written while its path is still a directory. Deleting the
 /// files inside, then the directory, leaves the path free for the new file.
-pub(crate) fn place_replacement_files(changes: Vec<Box<dyn Change>>) -> Vec<Box<dyn Change>> {
-    let removed: BTreeSet<_> = changes
-        .iter()
-        .filter_map(|change| {
-            change
-                .removed_directory()
-                .map(|dir| dir.directory().to_string())
-        })
-        .collect();
-    let mut kept = Vec::new();
+pub(crate) fn place_replacement_files(changes: &mut ChangeList) {
+    let mut removed = BTreeSet::new();
+    for index in 0..changes.len() {
+        if let Some(dir) = changes[index].removed_directory() {
+            removed.insert(dir.directory().to_string());
+        }
+    }
     let mut replacements = Vec::new();
-    for change in changes {
-        if change
+    for index in 0..changes.len() {
+        if changes[index]
             .added_file()
             .is_some_and(|file| removed.contains(file.path()))
         {
-            replacements.push(change);
-        } else {
-            kept.push(change);
+            replacements.push(index);
         }
     }
-    kept.extend(replacements);
-    kept
+    // Each earlier replacement has already moved to the end, which shifts
+    // this index left by one for each of those moves.
+    for (nth, index) in replacements.into_iter().enumerate() {
+        let from = index - nth;
+        let to = changes.len() - 1;
+        if from != to {
+            changes.move_record(from, to);
+        }
+    }
 }
 
 fn directory_depth(path: &str) -> usize {

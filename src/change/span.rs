@@ -560,11 +560,11 @@ impl LineEdit for ConstantChanged {
 pub(crate) fn merge_identifier_spans(
     path: &str,
     old_lines: &[String],
-    changes: Vec<Box<dyn Change>>,
-) -> Vec<Box<dyn Change>> {
+    changes: &mut super::ChangeList,
+) {
     let mut groups: BTreeMap<(String, String), Vec<Candidate>> = BTreeMap::new();
-    for (index, change) in changes.iter().enumerate() {
-        let Some(rename) = change.identifier_rename() else {
+    for index in 0..changes.len() {
+        let Some(rename) = changes[index].identifier_rename() else {
             continue;
         };
         groups
@@ -577,8 +577,7 @@ pub(crate) fn merge_identifier_spans(
             });
     }
 
-    let mut replace = BTreeMap::new();
-    let mut drop = BTreeSet::new();
+    let mut pending = Vec::new();
     for ((oldname, newname), mut group) in groups {
         group.sort_by_key(|candidate| (candidate.start, candidate.end));
         let covered = covered_lines(&group);
@@ -612,33 +611,18 @@ pub(crate) fn merge_identifier_spans(
             if run.rest.is_empty() || run.end <= run.start {
                 continue;
             }
-            replace.insert(
+            pending.push((
                 run.first,
+                run.rest,
                 Box::new(IdentifierRenamed::merged(
                     SpanScope::lines(path, run.start, run.end),
                     oldname.clone(),
                     newname.clone(),
                 )) as Box<dyn Change>,
-            );
-            drop.extend(run.rest);
+            ));
         }
     }
-    if replace.is_empty() {
-        return changes;
-    }
-
-    let mut merged = Vec::new();
-    for (index, change) in changes.into_iter().enumerate() {
-        if drop.contains(&index) {
-            continue;
-        }
-        if let Some(span) = replace.remove(&index) {
-            merged.push(span);
-        } else {
-            merged.push(change);
-        }
-    }
-    merged
+    apply_merges(changes, pending);
 }
 
 /// One identifier rename already in the change list.
@@ -714,13 +698,10 @@ pub(crate) struct SourceText {
 /// next candidate when every occurrence of the old name in the directory that
 /// covers both is already one of those renames. The merged scope is that
 /// directory, with no line numbers.
-pub(crate) fn merge_identifier_files(
-    sources: &[SourceText],
-    changes: Vec<Box<dyn Change>>,
-) -> Vec<Box<dyn Change>> {
+pub(crate) fn merge_identifier_files(sources: &[SourceText], changes: &mut super::ChangeList) {
     let mut groups: BTreeMap<(String, String), Vec<FileCandidate>> = BTreeMap::new();
-    for (index, change) in changes.iter().enumerate() {
-        let Some(rename) = change.identifier_rename() else {
+    for index in 0..changes.len() {
+        let Some(rename) = changes[index].identifier_rename() else {
             continue;
         };
         groups
@@ -734,8 +715,7 @@ pub(crate) fn merge_identifier_files(
             });
     }
 
-    let mut replace = BTreeMap::new();
-    let mut drop = BTreeSet::new();
+    let mut pending = Vec::new();
     for ((oldname, newname), mut group) in groups {
         group.sort_by_key(|candidate| (candidate.file.clone(), candidate.start, candidate.end));
         let covered = covered_file_lines(&group);
@@ -769,33 +749,32 @@ pub(crate) fn merge_identifier_files(
             if run.rest.is_empty() {
                 continue;
             }
-            replace.insert(
+            pending.push((
                 run.first,
+                run.rest,
                 Box::new(IdentifierRenamed::directory(
                     run.directory,
                     oldname.clone(),
                     newname.clone(),
                 )) as Box<dyn Change>,
-            );
-            drop.extend(run.rest);
+            ));
         }
     }
-    if replace.is_empty() {
-        return changes;
-    }
+    apply_merges(changes, pending);
+}
 
-    let mut merged = Vec::new();
-    for (index, change) in changes.into_iter().enumerate() {
-        if drop.contains(&index) {
-            continue;
-        }
-        if let Some(span) = replace.remove(&index) {
-            merged.push(span);
-        } else {
-            merged.push(change);
-        }
+/// Writes each merged record and removes the records it folded in.
+///
+/// Later indexes are merged first, so removing them leaves the earlier
+/// indexes where the next merge expects them.
+fn apply_merges(
+    changes: &mut super::ChangeList,
+    mut pending: Vec<(usize, Vec<usize>, Box<dyn Change>)>,
+) {
+    pending.sort_by(|left, right| right.0.cmp(&left.0));
+    for (index, folded, record) in pending {
+        changes.merge(index, &folded, record);
     }
-    merged
 }
 
 /// One identifier rename in a file, already merged with the other lines of that file.
@@ -898,7 +877,21 @@ mod tests {
         merge_identifier_files, merge_identifier_spans, parse_rename_scope, parse_span_scope,
         IdentifierRenamed, RenameScope, SourceText, SpanScope,
     };
-    use crate::change::Change;
+    use crate::change::{Change, ChangeList};
+
+    /// The list after renames in one file have been merged.
+    fn spans(path: &str, lines: &[String], records: Vec<Box<dyn Change>>) -> ChangeList {
+        let mut changes = ChangeList::of(records);
+        merge_identifier_spans(path, lines, &mut changes);
+        changes
+    }
+
+    /// The list after renames across files have been merged.
+    fn files(sources: &[SourceText], records: Vec<Box<dyn Change>>) -> ChangeList {
+        let mut changes = ChangeList::of(records);
+        merge_identifier_files(sources, &mut changes);
+        changes
+    }
 
     fn rename(line: usize, oldname: &str, newname: &str) -> Box<dyn Change> {
         rename_at("src/main.rs", line, oldname, newname)
@@ -962,7 +955,7 @@ mod tests {
             rename(3, "foo", "bar"),
             rename(5, "foo", "bar"),
         ];
-        let merged = merge_identifier_spans("src/main.rs", &lines, changes);
+        let merged = spans("src/main.rs", &lines, changes);
         assert_eq!(merged.len(), 1);
         assert_eq!(merged[0].scope(), "src/main.rs:1-5");
     }
@@ -971,7 +964,7 @@ mod tests {
     fn an_uncovered_name_between_renames_keeps_them_apart() {
         let lines = vec!["foo".to_string(), "foo".to_string(), "foo".to_string()];
         let changes = vec![rename(1, "foo", "bar"), rename(3, "foo", "bar")];
-        let merged = merge_identifier_spans("src/main.rs", &lines, changes);
+        let merged = spans("src/main.rs", &lines, changes);
         assert_eq!(merged.len(), 2);
         assert_eq!(merged[0].scope(), "src/main.rs:1");
         assert_eq!(merged[1].scope(), "src/main.rs:3");
@@ -981,7 +974,7 @@ mod tests {
     fn a_different_new_name_stays_apart() {
         let lines = vec!["foo".to_string(), "foo".to_string()];
         let changes = vec![rename(1, "foo", "bar"), rename(2, "foo", "baz")];
-        let merged = merge_identifier_spans("src/main.rs", &lines, changes);
+        let merged = spans("src/main.rs", &lines, changes);
         assert_eq!(merged.len(), 2);
         assert_eq!(merged[0].scope(), "src/main.rs:1");
         assert_eq!(merged[1].scope(), "src/main.rs:2");
@@ -1015,7 +1008,7 @@ mod tests {
             rename_at("src/a.rs", 1, "foo", "bar"),
             rename_at("src/b.rs", 1, "foo", "bar"),
         ];
-        let merged = merge_identifier_files(&sources, changes);
+        let merged = files(&sources, changes);
         assert_eq!(merged.len(), 1);
         assert_eq!(merged[0].scope(), "src");
     }
@@ -1031,7 +1024,7 @@ mod tests {
             rename_at("src/a.rs", 1, "foo", "bar"),
             rename_at("src/b.rs", 1, "foo", "bar"),
         ];
-        let merged = merge_identifier_files(&sources, changes);
+        let merged = files(&sources, changes);
         assert_eq!(merged.len(), 2);
         assert_eq!(merged[0].scope(), "src/a.rs:1");
         assert_eq!(merged[1].scope(), "src/b.rs:1");
@@ -1050,7 +1043,7 @@ mod tests {
             rename_at("src/a.rs", 1, "foo", "bar"),
             rename_at("src/b.rs", 1, "foo", "bar"),
         ];
-        let merged = merge_identifier_files(&sources, changes);
+        let merged = files(&sources, changes);
         assert_eq!(merged.len(), 2);
         assert_eq!(merged[0].scope(), "other/c.rs:1");
         assert_eq!(merged[1].scope(), "src");
