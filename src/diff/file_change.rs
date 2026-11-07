@@ -135,7 +135,7 @@ pub(crate) fn paired_changes(
     fs: &dyn FileSystem,
     sources: &crate::Sources,
     paired_files: &[String],
-    recorded: &[Box<dyn Change>],
+    recorded: &crate::change::ChangeList,
 ) -> Result<Vec<Box<dyn Change>>, String> {
     let left_root = fs.source_base(Path::new(&sources.left));
     let right_root = fs.source_base(Path::new(&sources.right));
@@ -152,7 +152,7 @@ fn paired_change(
     left_root: &Path,
     right_root: &Path,
     path: &str,
-    recorded: &[Box<dyn Change>],
+    recorded: &crate::change::ChangeList,
 ) -> Result<Vec<Box<dyn Change>>, String> {
     let before = super::read_content(path, super::ComparedSide::Left, left_root, fs, recorded)?;
     let after = super::read_content(path, super::ComparedSide::Right, right_root, fs, recorded)?;
