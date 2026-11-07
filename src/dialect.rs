@@ -27,7 +27,7 @@ pub(crate) use rust::RUST;
 ///
 /// The path's extension is matched. A file with no known extension has no
 /// dialect, so its text is not read as Rust, Python, JavaScript, or ANSI C.
-pub(crate) fn for_path(path: &str) -> Option<&'static Dialect> {
+pub(crate) fn dialect_for_path(path: &str) -> Option<&'static Dialect> {
     DIALECTS.iter().copied().find(|dialect| {
         dialect
             .extensions
@@ -310,7 +310,7 @@ pub(crate) enum BlockEdge {
 
 #[cfg(test)]
 mod tests {
-    use super::{for_path, BlockCategory, ANSI_C, BLOCK_CATEGORIES, JAVASCRIPT, PYTHON, RUST};
+    use super::{dialect_for_path, BlockCategory, ANSI_C, BLOCK_CATEGORIES, JAVASCRIPT, PYTHON, RUST};
 
     #[test]
     fn a_category_parses_back_from_its_name() {
@@ -323,15 +323,15 @@ mod tests {
 
     #[test]
     fn a_path_selects_its_dialect() {
-        assert_eq!(for_path("src/main.rs"), Some(&RUST));
-        assert_eq!(for_path("pkg/__init__.py"), Some(&PYTHON));
-        assert_eq!(for_path("src/main.js"), Some(&JAVASCRIPT));
-        assert_eq!(for_path("src/main.c"), Some(&ANSI_C));
-        assert_eq!(for_path("src/fib.h"), Some(&ANSI_C));
-        assert_eq!(for_path("notes.txt"), None);
-        assert_eq!(for_path("notes.json"), None);
-        assert_eq!(for_path("main.rs.bak"), None);
-        assert_eq!(for_path("main.js.bak"), None);
-        assert_eq!(for_path("main.c.bak"), None);
+        assert_eq!(dialect_for_path("src/main.rs"), Some(&RUST));
+        assert_eq!(dialect_for_path("pkg/__init__.py"), Some(&PYTHON));
+        assert_eq!(dialect_for_path("src/main.js"), Some(&JAVASCRIPT));
+        assert_eq!(dialect_for_path("src/main.c"), Some(&ANSI_C));
+        assert_eq!(dialect_for_path("src/fib.h"), Some(&ANSI_C));
+        assert_eq!(dialect_for_path("notes.txt"), None);
+        assert_eq!(dialect_for_path("notes.json"), None);
+        assert_eq!(dialect_for_path("main.rs.bak"), None);
+        assert_eq!(dialect_for_path("main.js.bak"), None);
+        assert_eq!(dialect_for_path("main.c.bak"), None);
     }
 }

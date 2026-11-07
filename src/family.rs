@@ -7,7 +7,7 @@
 pub(crate) mod c_family;
 pub(crate) mod python;
 
-use crate::dialect::{for_path, BlockCategory, Dialect, Family, IdentifierCharacters};
+use crate::dialect::{dialect_for_path, BlockCategory, Dialect, Family, IdentifierCharacters};
 
 /// The name and category of one named block.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -72,7 +72,7 @@ pub(super) fn matching_qualifier<'a>(
 /// brace block is already not a named block. Python uses indentation, so a
 /// further-indented line is still in the block.
 pub(crate) fn block_resumes(path: &str, addition: &str, following: &str) -> bool {
-    let Some(dialect) = for_path(path) else {
+    let Some(dialect) = dialect_for_path(path) else {
         return false;
     };
     match dialect.family {
@@ -147,7 +147,7 @@ pub(crate) fn named_block(path: &str, text: &str) -> Option<NamedBlock> {
 /// method records that block's name. An empty `before` means the block is at
 /// the top of the file.
 pub(crate) fn named_block_in(path: &str, text: &str, before: &str) -> Option<NamedBlock> {
-    let dialect = for_path(path)?;
+    let dialect = dialect_for_path(path)?;
     let enclosing = enclosing_block(dialect, before, text);
     let mut block = match dialect.family {
         Family::CFamily => c_family::named_block(dialect, text, enclosing.as_ref())?,
