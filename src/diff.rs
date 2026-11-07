@@ -5,10 +5,11 @@
 //! name a complete block, and join identifier renames that cover one directory.
 //!
 //! A file that exists on only one side, a paired file, an empty directory, and
-//! the lines of a text file each live in their own module. A changed line is
-//! split into spans, and one classified span becomes its own record.
+//! the lines of a text file each live in their own module. A paired file whose
+//! bytes differ is compared in `file_change`, which asks `line_changes` when
+//! both copies are text. A changed line is split into spans, and one classified
+//! span becomes its own record.
 
-mod content_changes;
 mod directory_changes;
 mod file_change;
 mod line_changes;
@@ -56,11 +57,7 @@ pub(crate) fn find_differences(
     let right_dirs = fs.collect_directories(Path::new(&sources.right))?;
     let (left_only, right_only, paired_files) = partition_files(&left_files, &right_files);
     let mut changes = file_change::file_changes(fs, sources, &left_only, &right_only)?;
-    changes.extend(content_changes::content_changes(
-        fs,
-        sources,
-        &paired_files,
-    )?);
+    changes.extend(file_change::paired_changes(fs, sources, &paired_files)?);
     changes.extend(directory_changes::directory_changes(
         &left_dirs,
         &right_dirs,

@@ -1,5 +1,22 @@
 use crate::change::Change;
 
+/// Line records for two copies of one file, when both copies are text.
+///
+/// `None` means a copy is not text, so the caller records the file as a whole.
+/// An empty list means the lines match.
+pub(crate) fn text_line_changes(
+    path: &str,
+    before: &[u8],
+    after: &[u8],
+) -> Option<Vec<Box<dyn Change>>> {
+    let (Ok(before_text), Ok(after_text)) =
+        (std::str::from_utf8(before), std::str::from_utf8(after))
+    else {
+        return None;
+    };
+    Some(line_changes(path, before_text, after_text))
+}
+
 /// Line additions, removals, and modifications between two copies of one text file.
 ///
 /// The copies are split into lines, and one longest common subsequence picks the
