@@ -183,8 +183,17 @@ pub(crate) fn common_line_proportion(left: &[u8], right: &[u8]) -> Option<f64> {
     if longer == 0 {
         return Some(1.0);
     }
-    let common = super::line_changes::common_line_count(&left_lines, &right_lines);
+    let common = common_line_count(&left_lines, &right_lines);
     Some(common as f64 / longer as f64)
+}
+
+/// How many lines a change list can keep.
+///
+/// The count is the length of one longest common subsequence of the two
+/// copies. A change list keeps those lines and stores the lines outside it.
+fn common_line_count(left: &[String], right: &[String]) -> usize {
+    let lengths = super::line_changes::common_lengths(left, right);
+    lengths[left.len()][right.len()]
 }
 
 #[cfg(test)]
