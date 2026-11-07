@@ -93,6 +93,21 @@ enum ComparedSide {
     Right,
 }
 
+/// The file-moved record whose new path is `path`.
+///
+/// A comparison pass uses this when it has the file's new scope and needs the
+/// record that still names the old path.
+fn file_move_for<'a>(path: &str, changes: &'a [Box<dyn Change>]) -> Option<&'a dyn Change> {
+    for change in changes {
+        if let Some((_, to)) = change.file_move() {
+            if to == path {
+                return Some(change.as_ref());
+            }
+        }
+    }
+    None
+}
+
 /// The bytes at a paired path.
 ///
 /// `path` is the scope of the content records. On the right, those bytes are
@@ -109,12 +124,9 @@ fn read_compared(
 ) -> Result<Vec<u8>, String> {
     let mut relative = path;
     if let ComparedSide::Left = side {
-        for change in changes {
-            if let Some((from, to)) = change.file_move() {
-                if to == path {
-                    relative = from;
-                    break;
-                }
+        if let Some(moved) = file_move_for(path, changes) {
+            if let Some((from, _)) = moved.file_move() {
+                relative = from;
             }
         }
     }
