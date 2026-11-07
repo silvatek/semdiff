@@ -1,5 +1,4 @@
-//! The --help text and the usage line for bad arguments. A flag is parsed in args;
-//! its explanation belongs here.
+//! The --help text and the usage line for bad arguments.
 //!
 //! The full help begins with [`USAGE`], so the two messages stay the same text.
 //! The rest of the help is chosen from [`details_by_language`] by language code.

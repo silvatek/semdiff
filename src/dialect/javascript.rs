@@ -1,5 +1,4 @@
-//! JavaScript's extensions, comments, strings, names, keywords, and boolean
-//! spellings. Behavior that uses them lives in a reader.
+//! JavaScript's extensions, comments, strings, names, keywords, and boolean spellings.
 
 use super::{BlockCategory, Dialect, IdentifierCharacters, NamedBlockKeyword, StringDelimiter};
 

@@ -1,5 +1,4 @@
-//! Replaying a parsed semdif onto one tree. A record's own rewrite belongs on that
-//! record. Reading the text belongs in semdif.
+//! Replaying a parsed semdif onto one tree.
 
 use std::collections::BTreeSet;
 use std::io::Read;

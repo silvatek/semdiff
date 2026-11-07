@@ -1,4 +1,4 @@
-//! The process entry. Behavior of the command belongs in the library.
+//! The process entry.
 
 fn main() -> std::process::ExitCode {
     semdiff::run()

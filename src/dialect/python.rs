@@ -1,5 +1,4 @@
 //! Python's extensions, comments, strings, names, keywords, and boolean spellings.
-//! Behavior that uses them lives in a reader.
 
 use super::{BlockCategory, BlockEdge, Dialect, Family, NamedBlockKeyword, StringDelimiter};
 
