@@ -36,13 +36,13 @@ Arguments
       Prints this message on standard output and exits. The other arguments
       are left unused.
 
-  left, right
+  <left>, <right>
       The two sources of a comparison. Both are files, or both are directories.
       A missing path is reported as \"not a file or directory\". A file paired
       with a directory is reported as \"sources must both be files or both be
       directories\".
 
-  output
+  <output>
       Where the semdif is written. A path of - writes the semdif to standard
       output and writes the listing to standard error. Any other path is a
       file, and the listing goes to standard output. The listing is the tool
@@ -53,12 +53,12 @@ Arguments
       Replays a semdif onto a directory. The flag may appear anywhere among
       the apply arguments. A second --apply is a usage error.
 
-  semdif
+  <semdif>
       The semdif to apply. A path of - reads it from standard input, and that
       path need not exist. Any other path must name a file. A missing file is
       reported as \"not a file\".
 
-  directory
+  <directory>
       The directory --apply edits. It must be a directory. A file is reported
       as \"not a directory\". A rename moves a file inside this directory.
 
@@ -94,103 +94,77 @@ Exit status
      check failed.
   2  The arguments are wrong. The short usage is written to standard error.
 
-What a comparison records
+Supported change types
 
-  Files present at the same path on both sides are paired. A moved file is
-  paired at its new path. Matching bytes are left out of the semdif. The
-  listing still names each paired path.
+  - Directory added
+    A new directory (folder) was added to the source tree
 
-  A changed text file is recorded as line-added, line-removed, and
-  line-modified edits. The file-changed record keeps the old and new SHA-256
-  of the whole file. Adjacent edits of the same kind and scope become one
-  record when they share the same comment flag and the same whitespace flag.
-  A full-line comment is marked isComment. Insignificant whitespace is marked
-  isWhitespace. False is left out.
+  - Directory deleted
+    A directory (folder) was removed from the source tree
 
-  Bytes that are not UTF-8 stay one whole-file replacement. The record stores
-  them as base64 and names that encoding.
+  - File added
+    A new file was added to the source tree
 
-  An added or removed run that is one complete named block is recorded as
-  named-block-added or named-block-removed, with a category and a name.
-  A method's scope names the file and the enclosing block, as file[Name].
+  - File deleted
+    A file was removed from the source tree
 
-  A line edit that changes exactly one identifier, when that old name occurs
-  once on the line, is identifier-renamed. The same rename joins across files
-  when the directory that covers them has no other occurrence of that name.
-  A file with no dialect stays a line modification.
+  - File renamed
+    A file was renamed, but the content did not change
 
-  A line modification that starts with one of the dialect's import keywords
-  is import-moved when only the import name changed. The name is the text
-  after the keyword, without a trailing semicolon or a trailing line comment.
-  Rust lists use. Python lists import and from. JavaScript lists import.
-  ANSI C lists #include. The same move joins across lines and files the way
-  an identifier rename does. One renamed name inside the import stays an
-  identifier rename. A line that does not start with the keyword, or that
-  changes more than the import name, stays a line modification.
+  - File moved
+    A file was moved, with changes made during the move
 
-  A line edit whose only change is one integer is constant-changed. The
-  integer is a sequence of digits, with a leading - when that minus starts
-  the number. A minus after a value, as in count-1 or a[i]-1, is subtraction
-  and is not part of the number. A -- glued to the digits stays an operator.
-  The digits are not inside a string or a comment. The record names the old
-  integer, the new integer, and which one on the line changed. A sequence
-  that continues an identifier stays an identifier rename. An integer inside
-  a comment stays a line modification.
-  A file with no dialect stays a line modification.
+  - File changed
+    A file was changed; used if a the details of the change could not be identified
 
-  A line edit whose only change is one boolean constant is constant-changed
-  on the same terms. The dialect lists the spellings. Rust and JavaScript
-  list true and false. Python lists True and False. ANSI C lists none, so
-  those words stay identifiers. The spelling has to be the whole name, and
-  the change is from one listed spelling to another. A spelling inside a
-  string or a comment stays an identifier rename.
+  - Line added
+    A new line was added to an existing file
 
-  A file only on the left is file-deleted. A file only on the right is
-  file-added, and the semdif keeps its bytes. One unpaired file on each side
-  with the same SHA-256 is file-renamed. One deleted file and one added file
-  that share a filename are file-moved when more than half the lines of the
-  longer copy stay in order. The filename is the final path component. The
-  record names both paths and the hash of the bytes at the old path. The new
-  path is compared with the paired files, and the edit is recorded there.
-  Several files with that name, a file that is not text, or a copy that shares
-  half or fewer of those lines stay file-deleted and file-added. Each record
-  includes the SHA-256 of the bytes it removes, renames, or writes. An empty
-  directory that appears or disappears is directory-added or directory-deleted,
-  including a directory left empty because its files moved. Nested removals
-  come before their parents, and
-  additions come parents first.
+  - LineRemoved
+    A line was removed from an existing file
 
-  A directory replaced by a file whose bytes match none of the files inside
-  it is the inner deletions, the directory removal, and the new file.
+  - LineModified
+    An existing line was modified; used if a semantic change could not be identified
 
-  The header records the tool version, the UTC time as YYYY-MM-DDTHH:MM:SSZ,
-  hash sha256, text-encoding utf-8, and binary-encoding base64. Apply replays
-  the changes.
+  - NamedBlockAdded
+    A named block of code (function, procedure, etc) was added
+
+  - NamedBlockRemoved
+    A named block of code was removed
+
+  - IdentifierRenamed
+    An identifier was renamed; the scope of this change can be multiple files
+
+  - ConstantChanged
+    The value of a constant was changed
+
+  - ImportMoved
+    An import of code from somewhere else changed
+
+Hash checks
+
+  Where applicable, change records include sha-256 hashes of the old and new
+  versions of the file. When applying a semdif against a source tree, the old
+  hashes are checked before the change, and the new hashes checked after.
+
+  This helps to avoid scenarios where a semdif is applied to the wrong base,
+  or where the semdidf apply does not correctly reproduce the target state.
 
 Dialects
 
-  Rust (.rs)
-  Python (.py)
-  JavaScript (.js)
-  ANSI C (.c, .h)
+  Dialects are used to configure the specifics of semantic change detection
+  based on a files extension. 
+
+  The following dialects are currently supported:-
+
+  - Rust (.rs)
+  - Python (.py)
+  - JavaScript (.js)
+  - ANSI C (.c, .h)
 
   The language documentation describes how a dialect reads comments, blocks,
   and names. A file with another extension has no dialect. These files are
   treated as plain text, not ignored.
-
-What apply checks
-
-  Apply replays the changes in order. A file-changed record checks the old
-  hash against the file as it is, rebuilds the file, and checks the new hash
-  against the bytes about to be written. A mismatch leaves that file
-  unchanged and is reported as \"cannot apply PATH: contents do not match the
-  old hash\" or \"the new hash\". --ignore-hash leaves those checks in place.
-
-  A file-deleted, file-renamed, or file-moved change checks the hash of the
-  file in the tree. A file-moved change renames that file. A file-added change
-  checks the hash of the bytes about to be written. A mismatch is reported as
-  \"cannot apply PATH: contents do not match the hash\" and leaves the tree
-  unchanged. --ignore-hash applies those changes anyway.
 
 Limitations
 
@@ -225,6 +199,10 @@ Limitations
   Python decorator above def or class, or an async def, leaves the run a
   line edit. A JavaScript generator written function*, or text above function
   or class, leaves the run a line edit.
+
+  Bytes that are not UTF-8 stay one whole-file replacement. The record stores
+  them as base64 and names that encoding.
+
 ";
 
 /// The detailed help for each language code.
