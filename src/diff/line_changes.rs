@@ -116,6 +116,15 @@ fn longest_common_subsequence(old_lines: &[String], new_lines: &[String]) -> Vec
     recover_common_lines(old_lines, new_lines, &lengths)
 }
 
+/// How many lines occur in both copies, in the same order.
+///
+/// The count is the length of one longest common subsequence. A change list
+/// keeps those lines and stores the lines outside it.
+pub(crate) fn common_line_count(old_lines: &[String], new_lines: &[String]) -> usize {
+    let lengths = common_lengths(old_lines, new_lines);
+    lengths[old_lines.len()][new_lines.len()]
+}
+
 fn common_lengths(old_lines: &[String], new_lines: &[String]) -> Vec<Vec<usize>> {
     let mut lengths = vec![vec![0; new_lines.len() + 1]; old_lines.len() + 1];
     for old_index in 0..old_lines.len() {

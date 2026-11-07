@@ -160,16 +160,17 @@ fn digest_hex(digest: &[u8]) -> String {
 
 /// The proportion of lines two files have in common.
 ///
-/// A later move check uses this to tell a renamed file with edited contents
-/// from an unrelated deletion and addition. `None` means a file is not UTF-8
-/// text, so it has no lines to compare.
+/// A later move check uses this to tell whether a list of changes to the
+/// existing file is a smaller record than the new file's contents. `None`
+/// means a file is not UTF-8 text, so it has no lines to compare.
 ///
 /// Lines are split the same way as a line diff. A trailing newline is not a
-/// line, and a carriage return stays on its line. Each occurrence of a line
-/// is common when the other file has that same line left to match, wherever
-/// it sits. The proportion is that count divided by the number of lines in
-/// the longer file. Two empty files share every line, so the proportion is 1.
-/// A file with lines and an empty file share none, so the proportion is 0.
+/// line, and a carriage return stays on its line. The common lines are one
+/// longest common subsequence: the same lines in the same order. A change
+/// list keeps those lines and stores the lines outside it. The proportion is
+/// that count divided by the number of lines in the longer file. Two empty
+/// files share every line, so the proportion is 1. A file with lines and an
+/// empty file share none, so the proportion is 0.
 #[allow(dead_code)]
 pub(crate) fn common_line_proportion(left: &[u8], right: &[u8]) -> Option<f64> {
     let (Ok(left_text), Ok(right_text)) = (std::str::from_utf8(left), std::str::from_utf8(right))
@@ -182,30 +183,8 @@ pub(crate) fn common_line_proportion(left: &[u8], right: &[u8]) -> Option<f64> {
     if longer == 0 {
         return Some(1.0);
     }
-    Some(shared_lines(&left_lines, &right_lines) as f64 / longer as f64)
-}
-
-/// Occurrences of a line that both files still have left to match.
-///
-/// A line that occurs three times in one file and once in the other contributes
-/// one. The match is the line's text.
-fn shared_lines(left: &[String], right: &[String]) -> usize {
-    let mut remaining = HashMap::<&str, usize>::new();
-    for line in left {
-        *remaining.entry(line.as_str()).or_default() += 1;
-    }
-    let mut shared = 0;
-    for line in right {
-        let Some(count) = remaining.get_mut(line.as_str()) else {
-            continue;
-        };
-        if *count == 0 {
-            continue;
-        }
-        *count -= 1;
-        shared += 1;
-    }
-    shared
+    let common = super::line_changes::common_line_count(&left_lines, &right_lines);
+    Some(common as f64 / longer as f64)
 }
 
 #[cfg(test)]
@@ -230,11 +209,19 @@ mod tests {
     }
 
     #[test]
-    fn the_same_lines_match_in_either_order() {
-        assert_eq!(common_line_proportion(b"b\na\n", b"a\nb\n"), Some(1.0));
+    fn only_lines_that_stay_in_order_are_common() {
+        assert_eq!(common_line_proportion(b"b\na\n", b"a\nb\n"), Some(0.5));
         assert_eq!(
-            common_line_proportion(b"c\nb\na\n", b"a\nb\nc\n"),
-            Some(1.0)
+            common_line_proportion(b"a\nb\nc\nd\n", b"d\nc\nb\na\n"),
+            Some(0.25)
+        );
+        assert_eq!(
+            common_line_proportion(b"a\nb\na\nb\n", b"b\na\nb\na\n"),
+            Some(0.75)
+        );
+        assert_eq!(
+            common_line_proportion(b"a\nb\nc\nd\n", b"a\nb\nx\ny\nx\ny\nc\nd\n"),
+            Some(0.5)
         );
     }
 
