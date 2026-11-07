@@ -54,12 +54,12 @@ pub(crate) fn file_changes(
         if from_paths.len() == 1 && to_paths.len() == 1 {
             renamed_from.insert(from_paths[0].as_str());
             renamed_to.insert(to_paths[0].as_str());
-            changes.add(Box::new(crate::change::FileRenamed {
+            changes.add(crate::change::FileRenamed {
                 scope: crate::change::TREE_SCOPE.to_string(),
                 from: from_paths[0].clone(),
                 to: to_paths[0].clone(),
                 hash: digest_hex(&hash),
-            }));
+            });
         }
     }
     let mut moved_from = HashSet::new();
@@ -94,30 +94,30 @@ pub(crate) fn file_changes(
         }
         moved_from.insert(from.as_str());
         moved_to.insert(to.as_str());
-        changes.add(Box::new(crate::change::FileMoved {
+        changes.add(crate::change::FileMoved {
             scope: crate::change::TREE_SCOPE.to_string(),
             from: (*from).clone(),
             to: (*to).clone(),
             hash: digest_hex(&left_by_path[from.as_str()]),
-        }));
+        });
     }
     for path in left_only {
         if !renamed_from.contains(path.as_str()) && !moved_from.contains(path.as_str()) {
-            changes.add(Box::new(crate::change::FileDeleted {
+            changes.add(crate::change::FileDeleted {
                 scope: crate::change::TREE_SCOPE.to_string(),
                 path: path.clone(),
                 hash: digest_hex(&left_by_path[path.as_str()]),
-            }));
+            });
         }
     }
     for path in right_only {
         if !renamed_to.contains(path.as_str()) && !moved_to.contains(path.as_str()) {
-            changes.add(Box::new(crate::change::FileAdded {
+            changes.add(crate::change::FileAdded {
                 scope: crate::change::TREE_SCOPE.to_string(),
                 path: path.clone(),
                 hash: digest_hex(&right_by_path[path.as_str()]),
                 contents: read_file(fs, right_root, path)?,
-            }));
+            });
         }
     }
     changes.sort();
@@ -160,17 +160,17 @@ fn paired_change(
         return Ok(ChangeList::new());
     }
     let mut changes = ChangeList::new();
-    changes.add(Box::new(crate::change::FileChanged::hashes(
+    changes.add(crate::change::FileChanged::hashes(
         path.to_string(),
         sha256_hex(&before),
         sha256_hex(&after),
-    )));
+    ));
     match super::line_changes::text_line_changes(path, &before, &after) {
         Some(line_edits) if !line_edits.is_empty() => changes.append(line_edits),
-        _ => changes.add(Box::new(crate::change::FileChanged::contents(
+        _ => changes.add(crate::change::FileChanged::contents(
             path.to_string(),
             after,
-        ))),
+        )),
     }
     Ok(changes)
 }

@@ -439,8 +439,11 @@ impl ChangeList {
     }
 
     /// Adds one change at the end of the list.
-    pub(crate) fn add(&mut self, change: Box<dyn Change>) {
-        self.changes.push(change);
+    ///
+    /// The change is boxed here so a rename, a line edit, and a directory
+    /// deletion can sit together.
+    pub(crate) fn add(&mut self, change: impl Change + 'static) {
+        self.changes.push(Box::new(change));
     }
 
     /// Orders the changes by the pair each change uses to sort.

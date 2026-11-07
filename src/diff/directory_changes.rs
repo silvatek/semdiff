@@ -41,16 +41,16 @@ pub(crate) fn directory_changes(
 
     let mut changes = ChangeList::new();
     for path in removed {
-        changes.add(Box::new(crate::change::DirectoryDeleted {
+        changes.add(crate::change::DirectoryDeleted {
             scope: crate::change::TREE_SCOPE.to_string(),
             path,
-        }));
+        });
     }
     for path in added {
-        changes.add(Box::new(crate::change::DirectoryAdded {
+        changes.add(crate::change::DirectoryAdded {
             scope: crate::change::TREE_SCOPE.to_string(),
             path,
-        }));
+        });
     }
     changes
 }
