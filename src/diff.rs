@@ -107,16 +107,17 @@ fn read_compared(
     changes: &[Box<dyn Change>],
     side: ComparedSide,
 ) -> Result<Vec<u8>, String> {
-    let relative = match side {
-        ComparedSide::Right => path,
-        ComparedSide::Left => changes
-            .iter()
-            .find_map(|change| {
-                let (from, to) = change.file_move()?;
-                (to == path).then_some(from)
-            })
-            .unwrap_or(path),
-    };
+    let mut relative = path;
+    if let ComparedSide::Left = side {
+        for change in changes {
+            if let Some((from, to)) = change.file_move() {
+                if to == path {
+                    relative = from;
+                    break;
+                }
+            }
+        }
+    }
     let full = root.join(relative);
     fs.read(&full)
         .map_err(|error| format!("cannot read {}: {error}", full.display()))
