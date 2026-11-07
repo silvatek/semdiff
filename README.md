@@ -1,5 +1,19 @@
 # semdiff
 
+## Overview
+
+SemDiff, short for "Semantic Difference" is a tool for comparing two versions of a source code tree and collating a list of differences.
+
+The output is one "semdif" file containing all the changes for the entire source tree.
+
+Where possible, the differences are captured as semantic changes such as "this identifier was renamed" or "a new function with this name was added". Where that is not possible the differences are described as inserts/deletions/modifications to individual directories/files/lines.
+
+An "apply" feature is provided which applies the changes described in a semdif file to the original revision, to produce another copy of the revised source.
+
+Note: "semdiff" is the tool, "semdif" is the file format used by the tool.
+
+SemDiff is built in Rust.
+
 ## Dialects
 
 A dialect describes one language: which files belong to it, how comments are written, and how a block of code starts and ends. Rust, Python, JavaScript, and ANSI C have dialects. Rust, JavaScript, and ANSI C are read by the C-family reader, shared with other brace-delimited languages. Python is read by its own reader. Classification and merging will use that description.
