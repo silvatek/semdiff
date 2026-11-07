@@ -6,7 +6,7 @@
 //! line modification. Comments and strings are still read as ordinary text, so
 //! a one-name edit inside a full-line comment stays a rename.
 
-use crate::dialect::{Dialect, IdentifierCharacters};
+use crate::dialect::{for_path, Dialect, IdentifierCharacters};
 
 /// The old and new spelling of one renamed identifier.
 #[cfg_attr(not(test), allow(dead_code))]
@@ -42,7 +42,7 @@ pub(crate) fn replace_name(
     oldname: &str,
     newname: &str,
 ) -> Result<String, String> {
-    let dialect = crate::dialect::for_path(path)
+    let dialect = for_path(path)
         .ok_or_else(|| format!("{path} has no dialect for an identifier rename"))?;
     let pieces = pieces(dialect, line);
     let mut found = None;
@@ -74,7 +74,7 @@ pub(crate) fn replace_every(
     oldname: &str,
     newname: &str,
 ) -> Result<String, String> {
-    let dialect = crate::dialect::for_path(path)
+    let dialect = for_path(path)
         .ok_or_else(|| format!("{path} has no dialect for an identifier rename"))?;
     let mut replaced = String::new();
     for piece in pieces(dialect, line) {
@@ -91,7 +91,7 @@ pub(crate) fn replace_every(
 ///
 /// `None` means the file has no dialect, so the line is not read for names.
 pub(crate) fn occurrence_count(path: &str, line: &str, name: &str) -> Option<usize> {
-    let dialect = crate::dialect::for_path(path)?;
+    let dialect = for_path(path)?;
     Some(count_name(&pieces(dialect, line), name))
 }
 
