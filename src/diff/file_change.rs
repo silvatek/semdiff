@@ -5,7 +5,7 @@ use std::path::Path;
 
 use sha2::{Digest, Sha256};
 
-use crate::change::{Change, ChangeList};
+use crate::change::ChangeList;
 use crate::filesystem::FileSystem;
 
 /// Renames, moves, deletions, and additions among the files that exist on only
@@ -26,7 +26,7 @@ pub(crate) fn file_changes(
     sources: &crate::Sources,
     left_only: &[String],
     right_only: &[String],
-) -> Result<Vec<Box<dyn Change>>, String> {
+) -> Result<ChangeList, String> {
     let left_root = fs.source_base(Path::new(&sources.left));
     let right_root = fs.source_base(Path::new(&sources.right));
     let mut left_by_path = HashMap::<&str, [u8; 32]>::new();
@@ -44,7 +44,7 @@ pub(crate) fn file_changes(
         right_hashes.entry(hash).or_default().push(path);
     }
 
-    let mut changes: Vec<Box<dyn Change>> = Vec::new();
+    let mut changes = ChangeList::new();
     let mut renamed_from = HashSet::new();
     let mut renamed_to = HashSet::new();
     for (hash, from_paths) in left_hashes {
@@ -54,12 +54,12 @@ pub(crate) fn file_changes(
         if from_paths.len() == 1 && to_paths.len() == 1 {
             renamed_from.insert(from_paths[0].as_str());
             renamed_to.insert(to_paths[0].as_str());
-            changes.push(Box::new(crate::change::FileRenamed {
+            changes.add(crate::change::FileRenamed {
                 scope: crate::change::TREE_SCOPE.to_string(),
                 from: from_paths[0].clone(),
                 to: to_paths[0].clone(),
                 hash: digest_hex(&hash),
-            }));
+            });
         }
     }
     let mut moved_from = HashSet::new();
@@ -94,33 +94,33 @@ pub(crate) fn file_changes(
         }
         moved_from.insert(from.as_str());
         moved_to.insert(to.as_str());
-        changes.push(Box::new(crate::change::FileMoved {
+        changes.add(crate::change::FileMoved {
             scope: crate::change::TREE_SCOPE.to_string(),
             from: (*from).clone(),
             to: (*to).clone(),
             hash: digest_hex(&left_by_path[from.as_str()]),
-        }));
+        });
     }
     for path in left_only {
         if !renamed_from.contains(path.as_str()) && !moved_from.contains(path.as_str()) {
-            changes.push(Box::new(crate::change::FileDeleted {
+            changes.add(crate::change::FileDeleted {
                 scope: crate::change::TREE_SCOPE.to_string(),
                 path: path.clone(),
                 hash: digest_hex(&left_by_path[path.as_str()]),
-            }));
+            });
         }
     }
     for path in right_only {
         if !renamed_to.contains(path.as_str()) && !moved_to.contains(path.as_str()) {
-            changes.push(Box::new(crate::change::FileAdded {
+            changes.add(crate::change::FileAdded {
                 scope: crate::change::TREE_SCOPE.to_string(),
                 path: path.clone(),
                 hash: digest_hex(&right_by_path[path.as_str()]),
                 contents: read_file(fs, right_root, path)?,
-            }));
+            });
         }
     }
-    changes.sort_by(|left, right| left.sort_key().cmp(&right.sort_key()));
+    changes.sort();
     Ok(changes)
 }
 
@@ -139,7 +139,7 @@ pub(crate) fn paired_changes(
 ) -> Result<ChangeList, String> {
     let left_root = fs.source_base(Path::new(&sources.left));
     let right_root = fs.source_base(Path::new(&sources.right));
-    let mut changes = ChangeList::of(Vec::new());
+    let mut changes = ChangeList::new();
     for path in paired_files {
         changes.append(paired_change(fs, left_root, right_root, path, recorded)?);
     }
@@ -157,18 +157,20 @@ fn paired_change(
     let before = super::read_content(path, super::ComparedSide::Left, left_root, fs, recorded)?;
     let after = super::read_content(path, super::ComparedSide::Right, right_root, fs, recorded)?;
     if before == after {
-        return Ok(ChangeList::of(Vec::new()));
+        return Ok(ChangeList::new());
     }
-    let mut changes = ChangeList::of(vec![Box::new(crate::change::FileChanged::hashes(
+    let mut changes = ChangeList::new();
+    changes.add(crate::change::FileChanged::hashes(
         path.to_string(),
         sha256_hex(&before),
         sha256_hex(&after),
-    )) as Box<dyn Change>]);
+    ));
     match super::line_changes::text_line_changes(path, &before, &after) {
         Some(line_edits) if !line_edits.is_empty() => changes.append(line_edits),
-        _ => changes.append(ChangeList::of(vec![Box::new(
-            crate::change::FileChanged::contents(path.to_string(), after),
-        )])),
+        _ => changes.add(crate::change::FileChanged::contents(
+            path.to_string(),
+            after,
+        )),
     }
     Ok(changes)
 }
