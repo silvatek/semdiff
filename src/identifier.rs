@@ -26,7 +26,7 @@ pub(crate) fn identifier_rename(path: &str, old_line: &str, new_line: &str) -> O
         return None;
     };
     let crate::span::Classification::Rename { oldname, newname } =
-        crate::span::classify(path, old_line, span)?
+        crate::span::classify(path, span)?
     else {
         return None;
     };

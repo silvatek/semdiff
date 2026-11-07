@@ -57,7 +57,7 @@ pub(crate) fn integer_constant(
         old_value,
         new_value,
         occurrence,
-    } = crate::span::classify(path, old_line, span)?
+    } = crate::span::classify(path, span)?
     else {
         return None;
     };
@@ -150,7 +150,7 @@ pub(crate) fn boolean_constant(
         old_value,
         new_value,
         occurrence,
-    } = crate::span::classify(path, old_line, span)?
+    } = crate::span::classify(path, span)?
     else {
         return None;
     };

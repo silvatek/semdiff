@@ -270,7 +270,7 @@ fn modified_line(
 ) -> Box<dyn Change> {
     let found = crate::span::find_spans(path, old_text, new_text);
     if let [span] = found.as_slice() {
-        if let Some(edit) = crate::span::classify(path, old_text, span) {
+        if let Some(edit) = crate::span::classify(path, span) {
             return match edit {
                 crate::span::Classification::Constant {
                     old_value,

@@ -13,9 +13,13 @@ use crate::dialect::Dialect;
 
 /// One changed stretch of a line.
 ///
-/// The text is the token that contains the edit.
+/// The text is the token that contains the edit. `line` is the old copy of
+/// the whole line, so a later step can count names and constants on it
+/// without being handed the line again.
 pub(crate) struct Span<'a> {
-    /// Byte offset of this span on the old line.
+    /// The old copy of the line this span sits in.
+    pub(crate) line: &'a str,
+    /// Byte offset of this span on `line`.
     pub(crate) start: usize,
     /// The changed text on the old line.
     pub(crate) old_text: &'a str,
@@ -58,6 +62,7 @@ pub(crate) fn find_spans<'a>(path: &str, old_line: &'a str, new_line: &'a str) -
             let in_comment = span_in_comment(dialect, old_line, start, old_end)
                 || span_in_comment(dialect, new_line, new_start, new_end);
             Span {
+                line: old_line,
                 start,
                 old_text: &old_line[start..old_end],
                 new_text: &new_line[new_start..new_end],
@@ -72,15 +77,15 @@ pub(crate) fn find_spans<'a>(path: &str, old_line: &'a str, new_line: &'a str) -
 ///
 /// A boolean spelling outside a string and a comment is a constant. An integer
 /// outside a string and a comment is a constant. One identifier whose old name
-/// occurs once on `old_line` is a rename. Anything else is `None`.
-pub(crate) fn classify(path: &str, old_line: &str, span: &Span<'_>) -> Option<Classification> {
+/// occurs once on `span.line` is a rename. Anything else is `None`.
+pub(crate) fn classify(path: &str, span: &Span<'_>) -> Option<Classification> {
     let dialect = crate::dialect::for_path(path)?;
     let shielded = span.in_string || span.in_comment;
     if !shielded
         && crate::constant::is_boolean(path, span.old_text)
         && crate::constant::is_boolean(path, span.new_text)
     {
-        let occurrence = boolean_occurrence(dialect, old_line, span.start)?;
+        let occurrence = boolean_occurrence(dialect, span.line, span.start)?;
         return Some(Classification::Constant {
             old_value: span.old_text.to_string(),
             new_value: span.new_text.to_string(),
@@ -92,7 +97,7 @@ pub(crate) fn classify(path: &str, old_line: &str, span: &Span<'_>) -> Option<Cl
         && crate::constant::is_integer(span.new_text)
     {
         let digits = first_digit(span)?;
-        let occurrence = crate::constant::digit_run_index(old_line, digits)? + 1;
+        let occurrence = crate::constant::digit_run_index(span.line, digits)? + 1;
         return Some(Classification::Constant {
             old_value: span.old_text.to_string(),
             new_value: span.new_text.to_string(),
@@ -101,7 +106,7 @@ pub(crate) fn classify(path: &str, old_line: &str, span: &Span<'_>) -> Option<Cl
     }
     if is_one_identifier(dialect, span.old_text)
         && is_one_identifier(dialect, span.new_text)
-        && crate::identifier::occurrence_count(path, old_line, span.old_text) == Some(1)
+        && crate::identifier::occurrence_count(path, span.line, span.old_text) == Some(1)
     {
         return Some(Classification::Rename {
             oldname: span.old_text.to_string(),
@@ -365,6 +370,6 @@ mod tests {
         let found = find_spans("src/main.rs", old_line, new_line);
         assert_eq!(found.len(), 1);
         assert!(found[0].in_comment);
-        assert!(classify("src/main.rs", old_line, &found[0]).is_none());
+        assert!(classify("src/main.rs", &found[0]).is_none());
     }
 }
