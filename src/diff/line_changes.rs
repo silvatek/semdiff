@@ -116,7 +116,14 @@ fn longest_common_subsequence(old_lines: &[String], new_lines: &[String]) -> Vec
     recover_common_lines(old_lines, new_lines, &lengths)
 }
 
-fn common_lengths(old_lines: &[String], new_lines: &[String]) -> Vec<Vec<usize>> {
+/// How long the common subsequence is for every prefix of the two copies.
+///
+/// `lengths[old][new]` is that length for the first `old` lines and the first
+/// `new` lines. The bottom-right cell is both copies taken whole.
+pub(in crate::diff) fn common_lengths(
+    old_lines: &[String],
+    new_lines: &[String],
+) -> Vec<Vec<usize>> {
     let mut lengths = vec![vec![0; new_lines.len() + 1]; old_lines.len() + 1];
     for old_index in 0..old_lines.len() {
         for new_index in 0..new_lines.len() {
