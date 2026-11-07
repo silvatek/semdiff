@@ -13,7 +13,7 @@ use crate::dialect::{BlockCategory, BlockEdge, Dialect, IdentifierCharacters, Na
 /// ends. A leading change is a block boundary, unless both lines are blank or
 /// both are full-line comments. Trailing space is insignificant. A carriage
 /// return stays part of the line.
-pub(super) fn margin_whitespace(dialect: &Dialect, old_line: &str, new_line: &str) -> bool {
+pub(crate) fn margin_whitespace(dialect: &Dialect, old_line: &str, new_line: &str) -> bool {
     if strip_ascii_blank(old_line) != strip_ascii_blank(new_line) {
         return false;
     }

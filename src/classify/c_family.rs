@@ -13,7 +13,7 @@ use crate::dialect::{BlockCategory, BlockEdge, Dialect, IdentifierCharacters, Na
 /// Braces mark the block, so indentation is formatting. Trailing spaces and
 /// tabs are formatting too. The lines have to match once those are removed.
 /// A carriage return stays part of the line.
-pub(super) fn margin_whitespace(old_line: &str, new_line: &str) -> bool {
+pub(crate) fn margin_whitespace(old_line: &str, new_line: &str) -> bool {
     strip_ascii_blank(old_line) == strip_ascii_blank(new_line)
 }
 

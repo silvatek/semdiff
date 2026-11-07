@@ -32,7 +32,10 @@ pub(crate) fn text_line_changes(
 /// An added or removed line is a full-line comment when that line opens with
 /// the dialect's line comment. A modification is one when
 /// both the old line and the new line do. A file with no dialect is never a
-/// comment. Leftover old lines were removed, and leftover new lines were added.
+/// comment. An added or removed line is blank when it holds only ASCII spaces
+/// and tabs. A modification is margin whitespace when the dialect's reader
+/// treats the difference as formatting. Leftover old lines were removed, and
+/// leftover new lines were added.
 ///
 /// Each record carries `old` and `new`. `old` is a line in the old file. For an
 /// added line it is the old line the text is inserted before, or one past the
@@ -254,8 +257,8 @@ fn changes_in_hunk(path: &str, hunk: &Hunk) -> Vec<Box<dyn Change>> {
             line.index + 1,
             hunk.next_new_line,
             line.text.clone(),
-            crate::classify::full_line_comment(path, &line.text),
-            crate::classify::blank_line(path, &line.text),
+            full_line_comment(path, &line.text),
+            blank_line(path, &line.text),
         )));
     }
     for line in &hunk.new_lines[paired..] {
@@ -264,8 +267,8 @@ fn changes_in_hunk(path: &str, hunk: &Hunk) -> Vec<Box<dyn Change>> {
             hunk.next_old_line,
             line.index + 1,
             line.text.clone(),
-            crate::classify::full_line_comment(path, &line.text),
-            crate::classify::blank_line(path, &line.text),
+            full_line_comment(path, &line.text),
+            blank_line(path, &line.text),
         )));
     }
     changes
@@ -296,9 +299,8 @@ fn modified_line(
         old,
         new,
         new_text.to_string(),
-        crate::classify::full_line_comment(path, old_text)
-            && crate::classify::full_line_comment(path, new_text),
-        crate::classify::margin_whitespace(path, old_text, new_text),
+        full_line_comment(path, old_text) && full_line_comment(path, new_text),
+        margin_whitespace(path, old_text, new_text),
     ))
 }
 
@@ -308,4 +310,214 @@ fn line_position(change: &dyn Change) -> (usize, usize) {
         .line_edit()
         .map(|line| line.position())
         .unwrap_or((0, 0))
+}
+
+/// Whether `line` introduces this dialect's line comment before any other text.
+///
+/// Leading whitespace is skipped. The line-comment marker then has to be the
+/// next characters. A block comment is not recognized here.
+fn introduces_line_comment(dialect: &crate::dialect::Dialect, line: &str) -> bool {
+    line.trim_start().starts_with(dialect.line_comment)
+}
+
+/// Whether `text` is a full-line comment for the file at `path`.
+///
+/// Every line has to introduce the dialect's line comment. A file with no
+/// dialect is not a comment. An empty line is not one either.
+fn full_line_comment(path: &str, text: &str) -> bool {
+    let Some(dialect) = crate::dialect::for_path(path) else {
+        return false;
+    };
+    if text.is_empty() {
+        return false;
+    }
+    text.split('\n')
+        .all(|line| introduces_line_comment(dialect, line))
+}
+
+/// Whether `text` is a blank line for the file at `path`.
+///
+/// A blank line is empty or holds only ASCII spaces and tabs. A known dialect
+/// ignores that line, so editing one has no functional effect. A file with
+/// no dialect is not blank for this purpose. A comment, a carriage return, or
+/// any other character keeps the line unflagged.
+fn blank_line(path: &str, text: &str) -> bool {
+    if crate::dialect::for_path(path).is_none() {
+        return false;
+    }
+    text.split('\n').all(only_ascii_blank)
+}
+
+/// Whether `line` contains nothing but ASCII spaces and tabs.
+fn only_ascii_blank(line: &str) -> bool {
+    line.chars()
+        .all(|character| character == ' ' || character == '\t')
+}
+
+/// Whether changing `old_line` into `new_line` touches only an insignificant margin.
+///
+/// The dialect's reader decides. In the C family, braces mark the block, so
+/// indentation is formatting. In Python, a leading indent change is a block
+/// boundary. Trailing space is insignificant in either reader. A file with no
+/// dialect is not whitespace. A carriage return stays part of the line.
+fn margin_whitespace(path: &str, old_line: &str, new_line: &str) -> bool {
+    let Some(dialect) = crate::dialect::for_path(path) else {
+        return false;
+    };
+    match dialect.family {
+        crate::dialect::Family::CFamily => {
+            crate::classify::c_family::margin_whitespace(old_line, new_line)
+        }
+        crate::dialect::Family::Python => {
+            crate::classify::python::margin_whitespace(dialect, old_line, new_line)
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{blank_line, full_line_comment, introduces_line_comment, margin_whitespace};
+    use crate::dialect::{ANSI_C, JAVASCRIPT, PYTHON, RUST};
+
+    #[test]
+    fn a_line_comment_is_the_first_non_whitespace() {
+        assert!(introduces_line_comment(&RUST, "// note"));
+        assert!(introduces_line_comment(&RUST, "    /// doc"));
+        assert!(introduces_line_comment(&RUST, "//! inner"));
+        assert!(!introduces_line_comment(&RUST, "let x = 1; // note"));
+        assert!(!introduces_line_comment(&RUST, "/* block */"));
+        assert!(!introduces_line_comment(&RUST, "#[allow(dead_code)]"));
+        assert!(!introduces_line_comment(&RUST, ""));
+        assert!(!introduces_line_comment(&RUST, "    "));
+        assert!(introduces_line_comment(&PYTHON, "# note"));
+        assert!(introduces_line_comment(&PYTHON, "  # note"));
+        assert!(!introduces_line_comment(&PYTHON, "x = 1  # note"));
+        assert!(!introduces_line_comment(&PYTHON, "// not python"));
+        assert!(introduces_line_comment(&JAVASCRIPT, "// note"));
+        assert!(introduces_line_comment(&JAVASCRIPT, "    // note"));
+        assert!(!introduces_line_comment(
+            &JAVASCRIPT,
+            "const x = 1; // note"
+        ));
+        assert!(!introduces_line_comment(&JAVASCRIPT, "/* block */"));
+        assert!(introduces_line_comment(&ANSI_C, "// note"));
+        assert!(introduces_line_comment(&ANSI_C, "    // note"));
+        assert!(!introduces_line_comment(&ANSI_C, "int n; // note"));
+        assert!(!introduces_line_comment(&ANSI_C, "/* note */"));
+    }
+
+    #[test]
+    fn a_full_line_comment_needs_a_known_dialect() {
+        assert!(full_line_comment("src/main.rs", "// note"));
+        assert!(full_line_comment("src/main.rs", "// one\n// two"));
+        assert!(!full_line_comment("src/main.rs", "// one\nlet x = 1;"));
+        assert!(!full_line_comment("src/main.rs", "/* note */"));
+        assert!(full_line_comment("calc.py", "# note"));
+        assert!(full_line_comment("src/main.js", "// note"));
+        assert!(full_line_comment("src/main.js", "// one\n// two"));
+        assert!(!full_line_comment("src/main.js", "/* note */"));
+        assert!(full_line_comment("src/main.c", "// note"));
+        assert!(!full_line_comment("src/main.c", "/* note */"));
+        assert!(!full_line_comment("src/main.c", "int n;"));
+        assert!(!full_line_comment("notes.txt", "// note"));
+        assert!(!full_line_comment("main.rs.bak", "// note"));
+        assert!(!full_line_comment("src/main.rs", ""));
+    }
+
+    #[test]
+    fn a_blank_line_needs_a_known_dialect() {
+        assert!(blank_line("src/main.rs", ""));
+        assert!(blank_line("src/main.rs", " "));
+        assert!(blank_line("src/main.rs", "\t"));
+        assert!(blank_line("src/main.rs", " \t "));
+        assert!(blank_line("calc.py", ""));
+        assert!(blank_line("calc.py", "  "));
+        assert!(blank_line("src/main.js", ""));
+        assert!(blank_line("src/main.js", "  "));
+        assert!(blank_line("src/main.c", ""));
+        assert!(blank_line("src/main.c", "  "));
+        assert!(!blank_line("src/main.rs", "\r"));
+        assert!(!blank_line("src/main.rs", " \r"));
+        assert!(!blank_line("src/main.rs", "\u{00a0}"));
+        assert!(!blank_line("src/main.rs", "let x = 1;"));
+        assert!(!blank_line("src/main.rs", "    let x = 1;"));
+        assert!(!blank_line("calc.py", "    x = 1"));
+        assert!(!blank_line("src/main.rs", "// note"));
+        assert!(!blank_line("src/main.rs", "  // note"));
+        assert!(!blank_line("calc.py", "# note"));
+        assert!(!blank_line("notes.txt", ""));
+        assert!(!blank_line("notes.txt", " "));
+        assert!(!blank_line("main.rs.bak", " "));
+    }
+
+    #[test]
+    fn margin_whitespace_follows_the_block_edge() {
+        assert!(margin_whitespace(
+            "src/main.rs",
+            "let value = 1;",
+            "    let value = 1;"
+        ));
+        assert!(margin_whitespace(
+            "src/main.rs",
+            "let value = 1;",
+            "let value = 1; "
+        ));
+        assert!(margin_whitespace(
+            "src/main.rs",
+            "let value = 1;",
+            "\tlet value = 1;\t"
+        ));
+        assert!(margin_whitespace("src/main.rs", "// note", "    // note"));
+        assert!(margin_whitespace(
+            "src/main.js",
+            "let value = 1;",
+            "    let value = 1;"
+        ));
+        assert!(margin_whitespace(
+            "src/main.js",
+            "const trailing = 1;",
+            "const trailing = 1; "
+        ));
+        assert!(margin_whitespace(
+            "src/main.js",
+            "// margin",
+            "    // margin"
+        ));
+        assert!(margin_whitespace(
+            "src/main.c",
+            "int value = 1;",
+            "    int value = 1;"
+        ));
+        assert!(margin_whitespace(
+            "src/main.c",
+            "int trailing = 1;",
+            "int trailing = 1; "
+        ));
+        assert!(margin_whitespace("calc.py", "x = 1", "x = 1 "));
+        assert!(margin_whitespace("calc.py", "x = 1", "x = 1\t"));
+        assert!(margin_whitespace("calc.py", "# note", "  # note"));
+        assert!(margin_whitespace("calc.py", "# note", "# note "));
+        assert!(margin_whitespace("src/main.rs", "    ", "\t"));
+        assert!(margin_whitespace("calc.py", "", "  "));
+        assert!(!margin_whitespace("calc.py", "x = 1", "    x = 1"));
+        assert!(!margin_whitespace("calc.py", "x = 1", " x = 1 "));
+        assert!(!margin_whitespace(
+            "src/main.rs",
+            "let value = 1;",
+            "let  value = 1;"
+        ));
+        assert!(!margin_whitespace(
+            "src/main.rs",
+            "let value = 1;",
+            "let value = 1;\r"
+        ));
+        assert!(!margin_whitespace("src/main.rs", "    ", "let value = 1;"));
+        assert!(!margin_whitespace("notes.txt", "hello", "hello "));
+        assert!(!margin_whitespace("notes.txt", "hello", "  hello"));
+        assert!(!margin_whitespace(
+            "main.rs.bak",
+            "let value = 1;",
+            "  let value = 1;"
+        ));
+    }
 }

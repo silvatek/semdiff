@@ -5,7 +5,7 @@
 //! Characters that are the same on both lines are not a span. String and
 //! comment flags are set here, before a span is classified.
 
-use crate::classify::{span_in_comment, span_in_string};
+use super::span_changes::{span_in_comment, span_in_string};
 use crate::constant::IntegerToken;
 use crate::dialect::Dialect;
 
