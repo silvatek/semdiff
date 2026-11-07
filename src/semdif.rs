@@ -24,7 +24,7 @@ pub(crate) fn write_output(
     fs: &dyn FileSystem,
     output: &str,
     sources: &crate::Sources,
-    differences: &crate::Differences,
+    differences: &crate::diff::Differences,
 ) -> ExitCode {
     let document = document(&differences.changes);
     if output == crate::args::STANDARD_STREAM {
@@ -54,7 +54,7 @@ pub(crate) fn write_output(
 fn report_comparison(
     out: &mut dyn Write,
     sources: &crate::Sources,
-    differences: &crate::Differences,
+    differences: &crate::diff::Differences,
 ) {
     let _ = writeln!(out, "Semdiff {}", env!("CARGO_PKG_VERSION"));
     let _ = writeln!(out, "Comparing {} and {}", sources.left, sources.right);
