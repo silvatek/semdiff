@@ -61,8 +61,8 @@ pub(crate) fn directory_changes(
 /// files inside, then the directory, leaves the path free for the new file.
 pub(crate) fn place_replacement_files(changes: &mut ChangeList) {
     let mut removed = BTreeSet::new();
-    for index in 0..changes.len() {
-        if let Some(dir) = changes[index].removed_directory() {
+    for change in &*changes {
+        if let Some(dir) = change.removed_directory() {
             removed.insert(dir.directory().to_string());
         }
     }

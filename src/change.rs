@@ -412,12 +412,13 @@ pub(super) fn applied_with_its_file(kind: &str) -> Result<(), String> {
     Err(format!("{kind} is applied with its file"))
 }
 
-/// The changes gathered while one comparison runs.
+/// The changes gathered while one comparison runs, or parsed from a semdif.
 ///
-/// The changes stay inside the list. A pass reads one by its index. Adding,
-/// sorting, moving, replacing, merging, or removing a change goes through
-/// this list. A pass also asks the list for a moved file, the new paths those
-/// moves add, or the paths of the old text.
+/// The changes stay inside the list. A pass walks them in order, or reads one
+/// by its index when it will move or replace that change. Adding, sorting,
+/// moving, replacing, merging, or removing a change goes through this list.
+/// A pass also asks the list for a moved file, the new paths those moves add,
+/// or the paths of the old text.
 pub(crate) struct ChangeList {
     changes: Vec<Box<dyn Change>>,
 }
@@ -522,7 +523,7 @@ impl ChangeList {
     /// A comparison pass uses this when it has the file's new scope and needs
     /// the change that still names the old path.
     pub(crate) fn file_move_for(&self, path: &str) -> Option<&FileMoved> {
-        for change in &self.changes {
+        for change in self {
             if let Some(moved) = change.file_move() {
                 if moved.to == path {
                     return Some(moved);
@@ -538,7 +539,7 @@ impl ChangeList {
     /// list is the new path, and the changes to its contents are scoped to it.
     pub(crate) fn moved_destinations(&self) -> Vec<String> {
         let mut paths = Vec::new();
-        for change in &self.changes {
+        for change in self {
             if let Some(moved) = change.file_move() {
                 paths.push(moved.to.clone());
             }
@@ -552,7 +553,7 @@ impl ChangeList {
     /// stored under its new path. The bytes are still read from the old path.
     pub(crate) fn old_text_paths(&self, left_files: &[String]) -> Vec<String> {
         let mut moved_from = BTreeSet::new();
-        for change in &self.changes {
+        for change in self {
             if let Some(moved) = change.file_move() {
                 moved_from.insert(moved.from.as_str());
             }
@@ -574,5 +575,29 @@ impl std::ops::Index<usize> for ChangeList {
 
     fn index(&self, index: usize) -> &Self::Output {
         self.changes[index].as_ref()
+    }
+}
+
+/// Walks a change list from first to last.
+pub(crate) struct ChangeListIter<'a> {
+    inner: std::slice::Iter<'a, Box<dyn Change>>,
+}
+
+impl<'a> Iterator for ChangeListIter<'a> {
+    type Item = &'a dyn Change;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        self.inner.next().map(|change| change.as_ref())
+    }
+}
+
+impl<'a> IntoIterator for &'a ChangeList {
+    type Item = &'a dyn Change;
+    type IntoIter = ChangeListIter<'a>;
+
+    fn into_iter(self) -> Self::IntoIter {
+        ChangeListIter {
+            inner: self.changes.iter(),
+        }
     }
 }

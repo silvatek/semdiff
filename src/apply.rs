@@ -5,7 +5,7 @@ use std::io::Read;
 use std::path::Path;
 use std::process::ExitCode;
 
-use crate::change::{Change, LinePlan};
+use crate::change::{Change, ChangeList, LinePlan};
 use crate::filesystem::FileSystem;
 
 /// Edits `source` so it gains the changes recorded in `semdif`.
@@ -75,7 +75,7 @@ pub(crate) fn apply_document(
                 apply_file(fs, source, &path, &changes)?;
             }
         } else {
-            apply_change(fs, source, change.as_ref(), ignore_hash)?;
+            apply_change(fs, source, change, ignore_hash)?;
         }
     }
     Ok(())
@@ -86,13 +86,14 @@ fn apply_file(
     fs: &dyn FileSystem,
     source: &Path,
     path: &str,
-    changes: &[Box<dyn Change>],
+    changes: &ChangeList,
 ) -> Result<(), String> {
-    let batch: Vec<&dyn Change> = changes
-        .iter()
-        .filter(|candidate| candidate.edits_file(path))
-        .map(|candidate| candidate.as_ref())
-        .collect();
+    let mut batch = Vec::new();
+    for change in changes {
+        if change.edits_file(path) {
+            batch.push(change);
+        }
+    }
     apply_content(fs, source, path, &batch)
 }
 

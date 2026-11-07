@@ -76,8 +76,8 @@ fn semdif_document(version: &str, timestamp: &str, changes: &ChangeList) -> Stri
         return document;
     }
     document.push_str("changes:\n");
-    for index in 0..changes.len() {
-        write_change(&mut document, &changes[index]);
+    for change in changes {
+        write_change(&mut document, change);
     }
     document
 }
@@ -189,10 +189,10 @@ fn utc_timestamp() -> String {
 ///
 /// The header is not needed to replay the edits. A change whose kind is not known
 /// is rejected so an unsupported edit is not skipped.
-pub(crate) fn parse_changes(document: &str) -> Result<Vec<Box<dyn Change>>, String> {
+pub(crate) fn parse_changes(document: &str) -> Result<ChangeList, String> {
     let mut lines = document.lines();
     if lines.find(|line| line.trim() == "changes:").is_none() {
-        return Ok(Vec::new());
+        return Ok(ChangeList::new());
     }
     let mut found = Vec::new();
     let mut record: Option<PartialChange> = None;
@@ -216,7 +216,7 @@ pub(crate) fn parse_changes(document: &str) -> Result<Vec<Box<dyn Change>>, Stri
     if let Some(done) = record {
         found.push(done.finish()?);
     }
-    Ok(found)
+    Ok(ChangeList::of(found))
 }
 
 /// Fields of one change record, gathered before its kind is known.
