@@ -15,6 +15,7 @@ Skipped means apply does not reproduce the right-hand tree. Coarser means the tr
 | 7 | Identical copies | Coarser | Leave |
 | 8 | Directory rename | Coarser | Leave |
 | 9 | Edits inside a changed file | Coarser | Fix |
+| 10 | File moved under the same name | Coarser | Fix later |
 
 **Fixed** means the change is in the code. **Fix** means we will change semdiff. **Fix later** means the change is deferred. **Leave** means the current behavior stays.
 
@@ -61,3 +62,7 @@ Leave. There is no `directory-renamed` record. Renaming a directory of unchanged
 Fix. A file present at the same path on both sides is compared byte for byte. Matching copies are left out. Any difference is one `file-changed` record holding the entire new file, as a YAML string or base64. Apply replaces the whole file with those bytes.
 
 That whole-file record is the starting point for the semantic difference engine. The Fibonacci sample is this case: the added line `// Print Fibonacci numbers.` in `src/main.rs` is recorded as the whole new file. Later changes will describe the edit itself, such as a line comment, a line edit, or a symbol rename, instead of only the new bytes.
+
+## 10. File moved under the same name
+
+Fix later. This narrows item 6. A file that moves and also changes stays `file-deleted` plus `file-added`, because the hashes differ. The filename is the final component of the path. When exactly one deleted file and exactly one added file share that name, the two copies can be compared. If the contents are broadly similar, the pair is one `file-moved` record instead of the deletion and the addition. The record names both paths and carries the new bytes, so apply removes the old file and writes the new one. Several files with that name, or contents that are not similar, stay a deletion and an addition.
