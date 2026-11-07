@@ -154,8 +154,8 @@ fn paired_change(
     path: &str,
     recorded: &[Box<dyn Change>],
 ) -> Result<Vec<Box<dyn Change>>, String> {
-    let before = super::read_compared(fs, left_root, path, recorded, super::ComparedSide::Left)?;
-    let after = super::read_compared(fs, right_root, path, recorded, super::ComparedSide::Right)?;
+    let before = super::read_content(path, super::ComparedSide::Left, left_root, fs, recorded)?;
+    let after = super::read_content(path, super::ComparedSide::Right, right_root, fs, recorded)?;
     if before == after {
         return Ok(Vec::new());
     }

@@ -111,19 +111,17 @@ fn file_move_for<'a>(
     None
 }
 
-/// The bytes at a paired path.
+/// The content at `path` on one side of the comparison.
 ///
-/// `path` is the scope of the content records. On the right, those bytes are
-/// the file at that path. On the left, a file-moved record whose new path is
-/// this one means the old bytes are still at `from`. Any comparison pass can
-/// read through this, so locating a moved file stays out of the code that
-/// classifies the edit.
-fn read_compared(
-    fs: &dyn FileSystem,
-    root: &Path,
+/// On the right, those bytes are the file at `path`. On the left, a
+/// file-moved record whose new path is `path` means the old bytes are still
+/// at `from`. `root` is that side's tree.
+fn read_content(
     path: &str,
-    changes: &[Box<dyn Change>],
     side: ComparedSide,
+    root: &Path,
+    fs: &dyn FileSystem,
+    changes: &[Box<dyn Change>],
 ) -> Result<Vec<u8>, String> {
     let mut relative = path;
     if let ComparedSide::Left = side {
@@ -150,7 +148,7 @@ fn source_texts(
 ) -> Result<Vec<crate::change::SourceText>, String> {
     let mut texts = Vec::new();
     for path in files {
-        let bytes = read_compared(fs, root, path, changes, side)?;
+        let bytes = read_content(path, side, root, fs, changes)?;
         let lines = match std::str::from_utf8(&bytes) {
             Ok(text) => line_changes::split_text(text).lines,
             Err(_) => Vec::new(),
