@@ -44,7 +44,7 @@ pub(crate) fn file_changes(
         right_hashes.entry(hash).or_default().push(path);
     }
 
-    let mut changes = ChangeList::of(Vec::new());
+    let mut changes = ChangeList::new();
     let mut renamed_from = HashSet::new();
     let mut renamed_to = HashSet::new();
     for (hash, from_paths) in left_hashes {
@@ -139,7 +139,7 @@ pub(crate) fn paired_changes(
 ) -> Result<ChangeList, String> {
     let left_root = fs.source_base(Path::new(&sources.left));
     let right_root = fs.source_base(Path::new(&sources.right));
-    let mut changes = ChangeList::of(Vec::new());
+    let mut changes = ChangeList::new();
     for path in paired_files {
         changes.append(paired_change(fs, left_root, right_root, path, recorded)?);
     }
@@ -157,9 +157,9 @@ fn paired_change(
     let before = super::read_content(path, super::ComparedSide::Left, left_root, fs, recorded)?;
     let after = super::read_content(path, super::ComparedSide::Right, right_root, fs, recorded)?;
     if before == after {
-        return Ok(ChangeList::of(Vec::new()));
+        return Ok(ChangeList::new());
     }
-    let mut changes = ChangeList::of(Vec::new());
+    let mut changes = ChangeList::new();
     changes.add(Box::new(crate::change::FileChanged::hashes(
         path.to_string(),
         sha256_hex(&before),

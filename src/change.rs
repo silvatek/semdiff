@@ -423,6 +423,11 @@ pub(crate) struct ChangeList {
 }
 
 impl ChangeList {
+    /// An empty list.
+    pub(crate) fn new() -> Self {
+        Self::of(Vec::new())
+    }
+
     /// A list holding these changes.
     pub(crate) fn of(changes: Vec<Box<dyn Change>>) -> Self {
         Self { changes }

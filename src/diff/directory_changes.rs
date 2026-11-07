@@ -39,7 +39,7 @@ pub(crate) fn directory_changes(
             .then(left.cmp(right))
     });
 
-    let mut changes = ChangeList::of(Vec::new());
+    let mut changes = ChangeList::new();
     for path in removed {
         changes.add(Box::new(crate::change::DirectoryDeleted {
             scope: crate::change::TREE_SCOPE.to_string(),
