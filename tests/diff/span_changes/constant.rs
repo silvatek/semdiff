@@ -1,4 +1,4 @@
-//! Identifying and classifying a changed constant.
+//! Tests of identifying and classifying a changed constant.
 
 use crate::filesystem::Tree;
 

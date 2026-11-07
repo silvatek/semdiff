@@ -1,5 +1,4 @@
-//! Interacting with the filesystem (real or mocked), including walking directory
-//! trees.
+//! The in-memory tree an integration test builds.
 
 use std::path::Path;
 

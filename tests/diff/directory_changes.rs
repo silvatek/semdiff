@@ -1,4 +1,4 @@
-//! Identifying and classifying changes at the directory level.
+//! Tests of identifying and classifying changes at the directory level.
 
 use crate::filesystem::Tree;
 

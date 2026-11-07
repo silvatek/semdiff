@@ -1,4 +1,4 @@
-//! Interpreting argv, including a new flag.
+//! Tests of interpreting argv, including a new flag.
 
 use crate::main::run;
 use std::fs;

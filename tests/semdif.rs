@@ -1,5 +1,4 @@
-//! Code that reads or writes semdif files, including serialising and deserialising
-//! change records.
+//! Tests of reading or writing a semdif, including a document the command rejects.
 
 use crate::filesystem::Tree;
 use crate::main::{run, run_with_stdin};

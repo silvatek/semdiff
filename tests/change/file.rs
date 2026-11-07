@@ -1,4 +1,4 @@
-//! The record of a file-level change, including how apply carries it out.
+//! Tests of how apply carries out a file-level change.
 
 use crate::filesystem::Tree;
 

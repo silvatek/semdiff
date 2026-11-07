@@ -1,4 +1,4 @@
-//! JavaScript's extensions, comments, strings, names, keywords, and boolean spellings.
+//! Tests of how the JavaScript sample is classified.
 
 use std::path::Path;
 

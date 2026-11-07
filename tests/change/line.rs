@@ -1,5 +1,5 @@
-//! The record of a line-level change, including how such records combine and how
-//! apply carries one out.
+//! Tests of a line-level record, including how such records combine and how apply
+//! carries one out.
 
 use crate::filesystem::Tree;
 use std::path::Path;

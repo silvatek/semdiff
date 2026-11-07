@@ -1,4 +1,4 @@
-//! What every language supplies, and which dialect a path selects.
+//! The language modules under test.
 
 mod ansi_c;
 mod javascript;

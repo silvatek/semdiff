@@ -1,4 +1,4 @@
-//! Replaying a parsed semdif onto one tree.
+//! Tests of replaying a semdif onto one tree.
 
 use crate::filesystem::Tree;
 

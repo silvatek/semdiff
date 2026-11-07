@@ -1,5 +1,4 @@
-//! Reading named blocks in source, including where one opens, closes, and
-//! continues.
+//! Tests of reading named blocks in source.
 
 use crate::filesystem::Tree;
 use std::path::Path;

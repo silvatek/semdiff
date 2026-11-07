@@ -1,5 +1,4 @@
-//! ANSI C's extensions, comments, strings, names, and keywords. Boolean spellings
-//! stay empty.
+//! Tests of how the ANSI C sample is classified.
 
 use std::path::Path;
 

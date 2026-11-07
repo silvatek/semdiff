@@ -1,5 +1,5 @@
-//! The record of a span-level change, including how such records combine and how
-//! apply carries one out. A span is a changed sequence within a line.
+//! Tests of a span-level record, including how such records combine and how apply
+//! carries one out.
 
 use crate::filesystem::Tree;
 

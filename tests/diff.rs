@@ -1,5 +1,4 @@
-//! Comparing two trees, including the order of the stages and the passes that
-//! combine records.
+//! The comparison modules under test.
 
 mod directory_changes;
 mod file_change;

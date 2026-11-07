@@ -1,4 +1,4 @@
-//! Comparing a sample and replaying that semdif onto a copy of the old tree.
+//! Tests that compare a sample and then replay that semdif onto a copy of the old tree.
 
 use crate::main::run;
 

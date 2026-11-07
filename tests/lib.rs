@@ -1,4 +1,4 @@
-//! The public entries and the module list.
+//! The module list for the integration tests.
 
 #![allow(special_module_name)]
 

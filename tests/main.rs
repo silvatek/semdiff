@@ -1,4 +1,4 @@
-//! The process entry.
+//! Tests of the process entry, including the helper that runs semdiff.
 
 use std::fs;
 use std::process::Command;

@@ -1,4 +1,4 @@
-//! Identifying and classifying a renamed name.
+//! Tests of identifying and classifying a renamed name.
 
 use crate::filesystem::Tree;
 

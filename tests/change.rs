@@ -1,5 +1,4 @@
-//! The shared shape of every change record, including how apply rebuilds a file
-//! from one.
+//! The change-record modules under test.
 
 mod file;
 mod line;

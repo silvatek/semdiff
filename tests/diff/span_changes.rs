@@ -1,4 +1,4 @@
-//! Identifying and classifying changes at the span level.
+//! The span-level test modules.
 
 mod constant;
 mod identifier;

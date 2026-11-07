@@ -1,4 +1,4 @@
-//! Identifying and classifying changes at the line level.
+//! Tests of identifying and classifying changes at the line level.
 
 use crate::filesystem::Tree;
 use std::path::Path;
