@@ -412,7 +412,7 @@ pub(super) fn applied_with_its_file(kind: &str) -> Result<(), String> {
     Err(format!("{kind} is applied with its file"))
 }
 
-/// The changes gathered while one comparison runs.
+/// The changes gathered while one comparison runs, or parsed from a semdif.
 ///
 /// The changes stay inside the list. A pass reads one by its index. Adding,
 /// sorting, moving, replacing, merging, or removing a change goes through

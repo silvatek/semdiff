@@ -5,7 +5,7 @@ use std::io::Read;
 use std::path::Path;
 use std::process::ExitCode;
 
-use crate::change::{Change, LinePlan};
+use crate::change::{Change, ChangeList, LinePlan};
 use crate::filesystem::FileSystem;
 
 /// Edits `source` so it gains the changes recorded in `semdif`.
@@ -57,16 +57,16 @@ pub(crate) fn apply_document(
 ) -> Result<(), String> {
     let changes = crate::semdif::parse_changes(document)?;
     let mut applied_content = BTreeSet::new();
-    for change in &changes {
-        if let Some(content) = change.content() {
+    for index in 0..changes.len() {
+        if let Some(content) = changes[index].content() {
             let path = content.file();
             if !applied_content.insert(path.to_string()) {
                 continue;
             }
             apply_file(fs, source, path, &changes)?;
-        } else if change.directory_scope().is_some() {
+        } else if changes[index].directory_scope().is_some() {
             for path in fs.collect_files(source)? {
-                if !change.edits_file(&path) {
+                if !changes[index].edits_file(&path) {
                     continue;
                 }
                 if !applied_content.insert(path.clone()) {
@@ -75,7 +75,7 @@ pub(crate) fn apply_document(
                 apply_file(fs, source, &path, &changes)?;
             }
         } else {
-            apply_change(fs, source, change.as_ref(), ignore_hash)?;
+            apply_change(fs, source, &changes[index], ignore_hash)?;
         }
     }
     Ok(())
@@ -86,13 +86,14 @@ fn apply_file(
     fs: &dyn FileSystem,
     source: &Path,
     path: &str,
-    changes: &[Box<dyn Change>],
+    changes: &ChangeList,
 ) -> Result<(), String> {
-    let batch: Vec<&dyn Change> = changes
-        .iter()
-        .filter(|candidate| candidate.edits_file(path))
-        .map(|candidate| candidate.as_ref())
-        .collect();
+    let mut batch = Vec::new();
+    for index in 0..changes.len() {
+        if changes[index].edits_file(path) {
+            batch.push(&changes[index]);
+        }
+    }
     apply_content(fs, source, path, &batch)
 }
 
