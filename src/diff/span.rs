@@ -5,8 +5,8 @@
 //! Characters that are the same on both lines are not a span. String and
 //! comment flags are set here, before a span is classified.
 
+use super::span_changes::constant::IntegerToken;
 use super::span_changes::{span_in_comment, span_in_string};
-use crate::constant::IntegerToken;
 use crate::dialect::Dialect;
 
 /// One changed stretch of a line.
@@ -161,7 +161,7 @@ fn longest_common_subsequence(old_atoms: &[Atom<'_>], new_atoms: &[Atom<'_>]) ->
 /// An integer includes a leading `-` when that minus starts the number.
 /// Digits that continue a name stay inside that name.
 pub(super) fn atoms<'a>(dialect: &Dialect, line: &'a str) -> Vec<Atom<'a>> {
-    let integers = crate::constant::integer_tokens(dialect, line);
+    let integers = super::span_changes::constant::integer_tokens(dialect, line);
     let mut next_integer = 0;
     let mut found = Vec::new();
     let mut index = 0;

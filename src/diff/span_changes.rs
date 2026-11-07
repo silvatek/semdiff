@@ -5,6 +5,11 @@
 //! spelling or an integer outside a string and a comment, then one identifier
 //! whose old name occurs once. Finding a span asks this module whether the
 //! stretch lies inside a string or a comment that opens on the same line.
+//! An integer or a boolean spelling is recognized in `constant`. One renamed
+//! name is recognized in `identifier`.
+
+pub(crate) mod constant;
+pub(crate) mod identifier;
 
 use crate::change::Change;
 use crate::dialect::{Dialect, StringDelimiter};
@@ -32,8 +37,8 @@ pub(crate) fn classify(path: &str, span: &Span<'_>) -> Option<Classification> {
     let dialect = crate::dialect::for_path(path)?;
     let shielded = span.in_string || span.in_comment;
     if !shielded
-        && crate::constant::is_boolean(path, span.old_text)
-        && crate::constant::is_boolean(path, span.new_text)
+        && constant::is_boolean(path, span.old_text)
+        && constant::is_boolean(path, span.new_text)
     {
         let occurrence = boolean_occurrence(dialect, span.line, span.start)?;
         return Some(Classification::Constant {
@@ -42,12 +47,9 @@ pub(crate) fn classify(path: &str, span: &Span<'_>) -> Option<Classification> {
             occurrence,
         });
     }
-    if !shielded
-        && crate::constant::is_integer(span.old_text)
-        && crate::constant::is_integer(span.new_text)
-    {
+    if !shielded && constant::is_integer(span.old_text) && constant::is_integer(span.new_text) {
         let digits = first_digit(span)?;
-        let occurrence = crate::constant::digit_run_index(span.line, digits)? + 1;
+        let occurrence = constant::digit_run_index(span.line, digits)? + 1;
         return Some(Classification::Constant {
             old_value: span.old_text.to_string(),
             new_value: span.new_text.to_string(),
@@ -56,7 +58,7 @@ pub(crate) fn classify(path: &str, span: &Span<'_>) -> Option<Classification> {
     }
     if is_one_identifier(dialect, span.old_text)
         && is_one_identifier(dialect, span.new_text)
-        && crate::identifier::occurrence_count(path, span.line, span.old_text) == Some(1)
+        && identifier::occurrence_count(path, span.line, span.old_text) == Some(1)
     {
         return Some(Classification::Rename {
             oldname: span.old_text.to_string(),
@@ -287,10 +289,10 @@ fn closing_string(dialect: &Dialect, line: &str, from: usize, end: &str) -> Opti
 mod tests {
     use super::super::span::find_spans;
     use super::classify;
+    use super::constant::{boolean_constant, integer_constant};
+    use super::identifier::identifier_rename;
     use super::{span_in_comment, span_in_string};
-    use crate::constant::{boolean_constant, integer_constant};
     use crate::dialect::{ANSI_C, JAVASCRIPT, PYTHON, RUST};
-    use crate::identifier::identifier_rename;
 
     #[test]
     fn an_integer_inside_a_comment_stays_a_modification() {

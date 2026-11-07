@@ -53,11 +53,11 @@ pub(crate) fn integer_constant(
     let [span] = found.as_slice() else {
         return None;
     };
-    let crate::diff::span_changes::Classification::Constant {
+    let super::Classification::Constant {
         old_value,
         new_value,
         occurrence,
-    } = crate::diff::span_changes::classify(path, span)?
+    } = super::classify(path, span)?
     else {
         return None;
     };
@@ -146,11 +146,11 @@ pub(crate) fn boolean_constant(
     let [span] = found.as_slice() else {
         return None;
     };
-    let crate::diff::span_changes::Classification::Constant {
+    let super::Classification::Constant {
         old_value,
         new_value,
         occurrence,
-    } = crate::diff::span_changes::classify(path, span)?
+    } = super::classify(path, span)?
     else {
         return None;
     };

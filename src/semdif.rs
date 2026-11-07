@@ -458,15 +458,19 @@ fn parse_constant_changed(
 
 /// Whether both values are integers, or both are boolean spellings for `path`.
 fn constant_pair(path: &str, old_value: &str, new_value: &str) -> bool {
-    if crate::constant::is_integer(old_value) && crate::constant::is_integer(new_value) {
+    if crate::diff::span_changes::constant::is_integer(old_value)
+        && crate::diff::span_changes::constant::is_integer(new_value)
+    {
         return true;
     }
-    crate::constant::is_boolean(path, old_value) && crate::constant::is_boolean(path, new_value)
+    crate::diff::span_changes::constant::is_boolean(path, old_value)
+        && crate::diff::span_changes::constant::is_boolean(path, new_value)
 }
 
 /// Whether `text` is an integer or a boolean spelling for `path`.
 fn constant_value(path: &str, text: &str) -> bool {
-    crate::constant::is_integer(text) || crate::constant::is_boolean(path, text)
+    crate::diff::span_changes::constant::is_integer(text)
+        || crate::diff::span_changes::constant::is_boolean(path, text)
 }
 
 fn parse_directory_added(

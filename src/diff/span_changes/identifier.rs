@@ -25,9 +25,7 @@ pub(crate) fn identifier_rename(path: &str, old_line: &str, new_line: &str) -> O
     let [span] = found.as_slice() else {
         return None;
     };
-    let crate::diff::span_changes::Classification::Rename { oldname, newname } =
-        crate::diff::span_changes::classify(path, span)?
-    else {
+    let super::Classification::Rename { oldname, newname } = super::classify(path, span)? else {
         return None;
     };
     Some(Rename { oldname, newname })
