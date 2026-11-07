@@ -12,7 +12,7 @@
 pub(crate) mod constant;
 pub(crate) mod identifier;
 
-use crate::change::Change;
+use crate::change::ChangeList;
 use crate::dialect::{Dialect, StringDelimiter};
 use constant::IntegerToken;
 
@@ -68,36 +68,42 @@ pub(crate) fn classify(path: &str, span: &Span<'_>) -> Option<Classification> {
     None
 }
 
-/// The semdif record for `span` on line `old` of `path`.
+/// Records `span` on line `old` of `path` when it classifies.
 ///
-/// `None` means the span does not classify, so the caller records a line
+/// `false` means the span does not classify, so the caller records a line
 /// modification instead. `old` and `new` are the line numbers from the line diff.
 pub(crate) fn record(
+    changes: &mut ChangeList,
     path: &str,
     old: usize,
     new: usize,
     span: &Span<'_>,
-) -> Option<Box<dyn Change>> {
-    match classify(path, span)? {
-        Classification::Constant {
+) -> bool {
+    match classify(path, span) {
+        Some(Classification::Constant {
             old_value,
             new_value,
             occurrence,
-        } => Some(Box::new(crate::change::ConstantChanged::new(
-            crate::change::SpanScope::new(path, old),
-            new,
-            old_value,
-            new_value,
-            occurrence,
-        ))),
-        Classification::Rename { oldname, newname } => {
-            Some(Box::new(crate::change::IdentifierRenamed::new(
+        }) => {
+            changes.add(crate::change::ConstantChanged::new(
+                crate::change::SpanScope::new(path, old),
+                new,
+                old_value,
+                new_value,
+                occurrence,
+            ));
+            true
+        }
+        Some(Classification::Rename { oldname, newname }) => {
+            changes.add(crate::change::IdentifierRenamed::new(
                 crate::change::SpanScope::new(path, old),
                 new,
                 oldname,
                 newname,
-            )))
+            ));
+            true
         }
+        None => false,
     }
 }
 

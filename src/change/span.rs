@@ -892,7 +892,7 @@ mod tests {
         merge_identifier_files, merge_identifier_spans, parse_rename_scope, parse_span_scope,
         IdentifierRenamed, RenameScope, SourceText, SpanScope,
     };
-    use crate::change::{Change, ChangeList};
+    use crate::change::ChangeList;
 
     /// The list after renames in one file have been merged.
     fn spans(path: &str, lines: &[String], mut changes: ChangeList) -> ChangeList {
@@ -906,17 +906,26 @@ mod tests {
         changes
     }
 
-    fn rename(line: usize, oldname: &str, newname: &str) -> Box<dyn Change> {
+    fn rename(line: usize, oldname: &str, newname: &str) -> IdentifierRenamed {
         rename_at("src/main.rs", line, oldname, newname)
     }
 
-    fn rename_at(path: &str, line: usize, oldname: &str, newname: &str) -> Box<dyn Change> {
-        Box::new(IdentifierRenamed::new(
+    fn rename_at(path: &str, line: usize, oldname: &str, newname: &str) -> IdentifierRenamed {
+        IdentifierRenamed::new(
             SpanScope::new(path, line),
             line,
             oldname.to_string(),
             newname.to_string(),
-        ))
+        )
+    }
+
+    /// A change list holding these renames, in order.
+    fn listed(items: impl IntoIterator<Item = IdentifierRenamed>) -> ChangeList {
+        let mut changes = ChangeList::new();
+        for item in items {
+            changes.add(item);
+        }
+        changes
     }
 
     fn source(path: &str, text: &str) -> SourceText {
@@ -963,7 +972,7 @@ mod tests {
             "keep".to_string(),
             "foo".to_string(),
         ];
-        let changes = ChangeList::of(vec![
+        let changes = listed([
             rename(1, "foo", "bar"),
             rename(3, "foo", "bar"),
             rename(5, "foo", "bar"),
@@ -987,7 +996,7 @@ mod tests {
             "foo".to_string(),
             "baz".to_string(),
         ];
-        let changes = ChangeList::of(vec![
+        let changes = listed([
             rename(1, "foo", "bar"),
             rename(2, "old", "new"),
             rename(3, "old", "new"),
@@ -1005,7 +1014,7 @@ mod tests {
     #[test]
     fn an_uncovered_name_between_renames_keeps_them_apart() {
         let lines = vec!["foo".to_string(), "foo".to_string(), "foo".to_string()];
-        let changes = ChangeList::of(vec![rename(1, "foo", "bar"), rename(3, "foo", "bar")]);
+        let changes = listed([rename(1, "foo", "bar"), rename(3, "foo", "bar")]);
         let merged = spans("src/main.rs", &lines, changes);
         assert_eq!(merged.len(), 2);
         assert_eq!(merged[0].scope(), "src/main.rs:1");
@@ -1015,7 +1024,7 @@ mod tests {
     #[test]
     fn a_different_new_name_stays_apart() {
         let lines = vec!["foo".to_string(), "foo".to_string()];
-        let changes = ChangeList::of(vec![rename(1, "foo", "bar"), rename(2, "foo", "baz")]);
+        let changes = listed([rename(1, "foo", "bar"), rename(2, "foo", "baz")]);
         let merged = spans("src/main.rs", &lines, changes);
         assert_eq!(merged.len(), 2);
         assert_eq!(merged[0].scope(), "src/main.rs:1");
@@ -1046,7 +1055,7 @@ mod tests {
             source("src/b.rs", "foo\n"),
             source("tests/c.rs", "foo\n"),
         ];
-        let changes = ChangeList::of(vec![
+        let changes = listed([
             rename_at("src/a.rs", 1, "foo", "bar"),
             rename_at("src/b.rs", 1, "foo", "bar"),
         ]);
@@ -1062,7 +1071,7 @@ mod tests {
             source("src/b.rs", "foo\n"),
             source("src/c.rs", "foo\n"),
         ];
-        let changes = ChangeList::of(vec![
+        let changes = listed([
             rename_at("src/a.rs", 1, "foo", "bar"),
             rename_at("src/b.rs", 1, "foo", "bar"),
         ]);
@@ -1080,7 +1089,7 @@ mod tests {
             source("src/a.rs", "foo\n"),
             source("src/b.rs", "foo\n"),
         ];
-        let changes = ChangeList::of(vec![
+        let changes = listed([
             rename_at("other/c.rs", 1, "foo", "bar"),
             rename_at("src/a.rs", 1, "foo", "bar"),
             rename_at("src/b.rs", 1, "foo", "bar"),

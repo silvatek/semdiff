@@ -908,9 +908,19 @@ impl LineEdit for LineModified {
 mod tests {
     use super::{merge_adjacent, promote_named_blocks, LineAdded, LineRemoved};
 
+    /// A change list holding these changes, in order.
+    fn listed<T: super::Change + 'static>(
+        items: impl IntoIterator<Item = T>,
+    ) -> crate::change::ChangeList {
+        let mut changes = crate::change::ChangeList::new();
+        for item in items {
+            changes.add(item);
+        }
+        changes
+    }
+
     /// The list after adjacent line edits have been merged.
-    fn adjacent(records: Vec<Box<dyn super::Change>>) -> crate::change::ChangeList {
-        let mut changes = crate::change::ChangeList::of(records);
+    fn adjacent(mut changes: crate::change::ChangeList) -> crate::change::ChangeList {
         merge_adjacent(&mut changes);
         changes
     }
@@ -919,9 +929,8 @@ mod tests {
     fn promoted(
         new_sources: &[crate::change::SourceText],
         old_sources: &[crate::change::SourceText],
-        records: Vec<Box<dyn super::Change>>,
+        mut changes: crate::change::ChangeList,
     ) -> crate::change::ChangeList {
-        let mut changes = crate::change::ChangeList::of(records);
         promote_named_blocks(new_sources, old_sources, &mut changes);
         changes
     }
@@ -952,10 +961,10 @@ mod tests {
 
     #[test]
     fn a_whitespace_line_stays_apart_from_a_line_that_is_not_whitespace() {
-        let merged = adjacent(vec![
-            Box::new(added(1, "    ", false, true)),
-            Box::new(added(2, "fn main() {}", false, false)),
-        ]);
+        let merged = adjacent(listed([
+            added(1, "    ", false, true),
+            added(2, "fn main() {}", false, false),
+        ]));
 
         assert_eq!(merged.len(), 2);
         let first = merged[0].line_edit().expect("line edit");
@@ -968,10 +977,10 @@ mod tests {
 
     #[test]
     fn adjacent_whitespace_lines_merge_and_keep_the_flag() {
-        let merged = adjacent(vec![
-            Box::new(added(1, "    ", false, true)),
-            Box::new(added(2, "\t", false, true)),
-        ]);
+        let merged = adjacent(listed([
+            added(1, "    ", false, true),
+            added(2, "\t", false, true),
+        ]));
 
         assert_eq!(merged.len(), 1);
         let line = merged[0].line_edit().expect("line edit");
@@ -985,12 +994,12 @@ mod tests {
         let merged = promoted(
             &[],
             &[],
-            vec![Box::new(added(
+            listed([added(
                 2,
                 "fn added() {\n    let value = 1;\n}",
                 false,
                 false,
-            ))],
+            )]),
         );
 
         assert_eq!(merged.len(), 1);
@@ -1018,7 +1027,7 @@ mod tests {
         let merged = promoted(
             &sources,
             &[],
-            vec![Box::new(added(2, "    fn added() {}", false, false))],
+            listed([added(2, "    fn added() {}", false, false)]),
         );
 
         assert_eq!(merged[0].kind(), "named-block-added");
@@ -1035,12 +1044,12 @@ mod tests {
         let merged = promoted(
             &[],
             &[],
-            vec![Box::new(removed(
+            listed([removed(
                 2,
                 "fn dropped() {\n    let value = 1;\n}",
                 false,
                 false,
-            ))],
+            )]),
         );
 
         assert_eq!(merged.len(), 1);
@@ -1066,7 +1075,7 @@ mod tests {
         let merged = promoted(
             &[],
             &sources,
-            vec![Box::new(removed(2, "    fn dropped() {}", false, false))],
+            listed([removed(2, "    fn dropped() {}", false, false)]),
         );
 
         assert_eq!(merged[0].kind(), "named-block-removed");
@@ -1090,7 +1099,7 @@ mod tests {
         let inner = promoted(
             &[],
             &nested,
-            vec![Box::new(removed(2, "    fn dropped() {}", false, false))],
+            listed([removed(2, "    fn dropped() {}", false, false)]),
         );
         assert_eq!(inner[0].kind(), "named-block-removed");
         assert_eq!(inner[0].scope(), "src/main.rs");
@@ -1104,24 +1113,24 @@ mod tests {
         let unclosed = promoted(
             &[],
             &[],
-            vec![Box::new(removed(
+            listed([removed(
                 2,
                 "fn dropped() {\n    let value = 1;",
                 false,
                 false,
-            ))],
+            )]),
         );
         assert_eq!(unclosed[0].kind(), "line-removed");
 
         let pair = promoted(
             &[],
             &[],
-            vec![Box::new(removed(
+            listed([removed(
                 2,
                 "fn one() {}\nfn two() {}",
                 false,
                 false,
-            ))],
+            )]),
         );
         assert_eq!(pair[0].kind(), "line-removed");
     }
@@ -1131,32 +1140,32 @@ mod tests {
         let continued = promoted(
             &[],
             &[],
-            vec![
-                Box::new(LineRemoved::new(
+            listed([
+                LineRemoved::new(
                     "calc.py".to_string(),
                     1,
                     1,
                     "def dropped():\n    return 1".to_string(),
                     false,
                     false,
-                )),
-                Box::new(LineRemoved::new(
+                ),
+                LineRemoved::new(
                     "calc.py".to_string(),
                     3,
                     1,
                     "".to_string(),
                     false,
                     true,
-                )),
-                Box::new(LineRemoved::new(
+                ),
+                LineRemoved::new(
                     "calc.py".to_string(),
                     4,
                     1,
                     "    return 2".to_string(),
                     false,
                     false,
-                )),
-            ],
+                ),
+            ]),
         );
         assert_eq!(continued[0].kind(), "line-removed");
         assert!(continued[1].line_edit().expect("blank").is_whitespace());
@@ -1168,19 +1177,19 @@ mod tests {
         let unclosed = promoted(
             &[],
             &[],
-            vec![Box::new(added(
+            listed([added(
                 2,
                 "fn added() {\n    let value = 1;",
                 false,
                 false,
-            ))],
+            )]),
         );
         assert_eq!(unclosed[0].kind(), "line-added");
 
         let pair = promoted(
             &[],
             &[],
-            vec![Box::new(added(2, "fn one() {}\nfn two() {}", false, false))],
+            listed([added(2, "fn one() {}\nfn two() {}", false, false)]),
         );
         assert_eq!(pair[0].kind(), "line-added");
     }
@@ -1190,32 +1199,32 @@ mod tests {
         let continued = promoted(
             &[],
             &[],
-            vec![
-                Box::new(LineAdded::new(
+            listed([
+                LineAdded::new(
                     "calc.py".to_string(),
                     1,
                     1,
                     "def added():\n    return 1".to_string(),
                     false,
                     false,
-                )),
-                Box::new(LineAdded::new(
+                ),
+                LineAdded::new(
                     "calc.py".to_string(),
                     1,
                     3,
                     "".to_string(),
                     false,
                     true,
-                )),
-                Box::new(LineAdded::new(
+                ),
+                LineAdded::new(
                     "calc.py".to_string(),
                     1,
                     4,
                     "    return 2".to_string(),
                     false,
                     false,
-                )),
-            ],
+                ),
+            ]),
         );
         assert_eq!(continued[0].kind(), "line-added");
         assert!(continued[1].line_edit().expect("blank").is_whitespace());
@@ -1224,24 +1233,24 @@ mod tests {
         let commented = promoted(
             &[],
             &[],
-            vec![
-                Box::new(LineAdded::new(
+            listed([
+                LineAdded::new(
                     "calc.py".to_string(),
                     1,
                     1,
                     "def added():\n    return 1".to_string(),
                     false,
                     false,
-                )),
-                Box::new(LineAdded::new(
+                ),
+                LineAdded::new(
                     "calc.py".to_string(),
                     1,
                     3,
                     "    # note".to_string(),
                     true,
                     false,
-                )),
-            ],
+                ),
+            ]),
         );
         assert_eq!(commented[0].kind(), "line-added");
         assert_eq!(commented[1].kind(), "line-added");
@@ -1252,32 +1261,32 @@ mod tests {
         let merged = promoted(
             &[],
             &[],
-            vec![
-                Box::new(LineAdded::new(
+            listed([
+                LineAdded::new(
                     "calc.py".to_string(),
                     1,
                     1,
                     "def one():\n    return 1".to_string(),
                     false,
                     false,
-                )),
-                Box::new(LineAdded::new(
+                ),
+                LineAdded::new(
                     "calc.py".to_string(),
                     1,
                     3,
                     "".to_string(),
                     false,
                     true,
-                )),
-                Box::new(LineAdded::new(
+                ),
+                LineAdded::new(
                     "calc.py".to_string(),
                     1,
                     4,
                     "def two():\n    return 2".to_string(),
                     false,
                     false,
-                )),
-            ],
+                ),
+            ]),
         );
 
         assert_eq!(merged[0].kind(), "named-block-added");
@@ -1290,10 +1299,10 @@ mod tests {
         let merged = promoted(
             &[],
             &[],
-            vec![
-                Box::new(added(1, "// fn fake() {}", true, false)),
-                Box::new(added(2, "let value = 1;", false, false)),
-            ],
+            listed([
+                added(1, "// fn fake() {}", true, false),
+                added(2, "let value = 1;", false, false),
+            ]),
         );
 
         assert_eq!(merged.len(), 2);
