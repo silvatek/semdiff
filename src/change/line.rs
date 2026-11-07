@@ -144,21 +144,21 @@ fn line_start(body: &LineBody) -> LineStart {
 /// A comment stays apart from a neighboring line that is not a comment. A
 /// whitespace edit stays apart from a line that is not whitespace. A span
 /// change stays its own change.
-pub(crate) fn merge_adjacent(changes: Vec<Box<dyn super::Change>>) -> Vec<Box<dyn super::Change>> {
-    let mut merged: Vec<Box<dyn super::Change>> = Vec::new();
-    for change in changes {
-        let extended = match merged
-            .last_mut()
-            .and_then(|previous| previous.line_edit_mut())
-        {
-            Some(line) => line.extend(change.as_ref()),
-            None => false,
-        };
-        if !extended {
-            merged.push(change);
+pub(crate) fn merge_adjacent(changes: &mut super::ChangeList) {
+    let mut index = 0;
+    while index < changes.len() {
+        let absorbed = changes
+            .with_next(index, |current, next| match current.line_edit_mut() {
+                Some(line) => line.extend(next),
+                None => false,
+            })
+            .unwrap_or(false);
+        if absorbed {
+            changes.remove(index + 1);
+        } else {
+            index += 1;
         }
     }
-    merged
 }
 
 /// Records a line addition or removal as a named block when it is one complete block.
@@ -176,21 +176,22 @@ pub(crate) fn merge_adjacent(changes: Vec<Box<dyn super::Change>>) -> Vec<Box<dy
 pub(crate) fn promote_named_blocks(
     new_sources: &[super::SourceText],
     old_sources: &[super::SourceText],
-    mut changes: Vec<Box<dyn super::Change>>,
-) -> Vec<Box<dyn super::Change>> {
+    changes: &mut super::ChangeList,
+) {
     for index in 0..changes.len() {
-        if followed_by_more_of_the_block(&changes, index) {
+        if followed_by_more_of_the_block(changes, index) {
             continue;
         }
-        if let Some(promoted) = named_block_from_addition(new_sources, changes[index].as_ref()) {
-            changes[index] = Box::new(promoted);
+        let added = named_block_from_addition(new_sources, &changes[index]);
+        if let Some(promoted) = added {
+            changes.replace(index, Box::new(promoted));
             continue;
         }
-        if let Some(promoted) = named_block_from_removal(old_sources, changes[index].as_ref()) {
-            changes[index] = Box::new(promoted);
+        let removed = named_block_from_removal(old_sources, &changes[index]);
+        if let Some(promoted) = removed {
+            changes.replace(index, Box::new(promoted));
         }
     }
-    changes
 }
 
 /// Whether a later record is still inside the block opened by `changes[index]`.
@@ -200,8 +201,8 @@ pub(crate) fn promote_named_blocks(
 /// blank answers. An addition continues on the new side. A removal continues
 /// on the old side. Braces do not use this: an unclosed brace block is
 /// already left as a line addition or removal.
-fn followed_by_more_of_the_block(changes: &[Box<dyn super::Change>], index: usize) -> bool {
-    let current = changes[index].as_ref();
+fn followed_by_more_of_the_block(changes: &super::ChangeList, index: usize) -> bool {
+    let current = &changes[index];
     let removal = match current.kind() {
         "line-added" => false,
         "line-removed" => true,
@@ -230,7 +231,7 @@ fn followed_by_more_of_the_block(changes: &[Box<dyn super::Change>], index: usiz
     };
     let mut cursor = index + 1;
     while cursor < changes.len() {
-        let next = changes[cursor].as_ref();
+        let next = &changes[cursor];
         if next.kind() != current.kind() || next.scope() != current.scope() {
             return false;
         }
@@ -907,6 +908,24 @@ impl LineEdit for LineModified {
 mod tests {
     use super::{merge_adjacent, promote_named_blocks, LineAdded, LineRemoved};
 
+    /// The list after adjacent line edits have been merged.
+    fn adjacent(records: Vec<Box<dyn super::Change>>) -> crate::change::ChangeList {
+        let mut changes = crate::change::ChangeList::of(records);
+        merge_adjacent(&mut changes);
+        changes
+    }
+
+    /// The list after line additions and removals have been promoted.
+    fn promoted(
+        new_sources: &[crate::change::SourceText],
+        old_sources: &[crate::change::SourceText],
+        records: Vec<Box<dyn super::Change>>,
+    ) -> crate::change::ChangeList {
+        let mut changes = crate::change::ChangeList::of(records);
+        promote_named_blocks(new_sources, old_sources, &mut changes);
+        changes
+    }
+
     /// An added line at one insertion point. `new` is its line in the new file.
     fn added(new: usize, text: &str, is_comment: bool, is_whitespace: bool) -> LineAdded {
         LineAdded::new(
@@ -933,7 +952,7 @@ mod tests {
 
     #[test]
     fn a_whitespace_line_stays_apart_from_a_line_that_is_not_whitespace() {
-        let merged = merge_adjacent(vec![
+        let merged = adjacent(vec![
             Box::new(added(1, "    ", false, true)),
             Box::new(added(2, "fn main() {}", false, false)),
         ]);
@@ -949,7 +968,7 @@ mod tests {
 
     #[test]
     fn adjacent_whitespace_lines_merge_and_keep_the_flag() {
-        let merged = merge_adjacent(vec![
+        let merged = adjacent(vec![
             Box::new(added(1, "    ", false, true)),
             Box::new(added(2, "\t", false, true)),
         ]);
@@ -963,7 +982,7 @@ mod tests {
 
     #[test]
     fn a_function_addition_becomes_a_named_block() {
-        let merged = promote_named_blocks(
+        let merged = promoted(
             &[],
             &[],
             vec![Box::new(added(
@@ -996,7 +1015,7 @@ mod tests {
                 "}".to_string(),
             ],
         }];
-        let merged = promote_named_blocks(
+        let merged = promoted(
             &sources,
             &[],
             vec![Box::new(added(2, "    fn added() {}", false, false))],
@@ -1013,7 +1032,7 @@ mod tests {
 
     #[test]
     fn a_function_removal_becomes_a_named_block() {
-        let merged = promote_named_blocks(
+        let merged = promoted(
             &[],
             &[],
             vec![Box::new(removed(
@@ -1044,7 +1063,7 @@ mod tests {
                 "}".to_string(),
             ],
         }];
-        let merged = promote_named_blocks(
+        let merged = promoted(
             &[],
             &sources,
             vec![Box::new(removed(2, "    fn dropped() {}", false, false))],
@@ -1068,7 +1087,7 @@ mod tests {
                 "}".to_string(),
             ],
         }];
-        let inner = promote_named_blocks(
+        let inner = promoted(
             &[],
             &nested,
             vec![Box::new(removed(2, "    fn dropped() {}", false, false))],
@@ -1082,7 +1101,7 @@ mod tests {
 
     #[test]
     fn an_unclosed_or_paired_function_stays_a_line_removal() {
-        let unclosed = promote_named_blocks(
+        let unclosed = promoted(
             &[],
             &[],
             vec![Box::new(removed(
@@ -1094,7 +1113,7 @@ mod tests {
         );
         assert_eq!(unclosed[0].kind(), "line-removed");
 
-        let pair = promote_named_blocks(
+        let pair = promoted(
             &[],
             &[],
             vec![Box::new(removed(
@@ -1109,7 +1128,7 @@ mod tests {
 
     #[test]
     fn a_python_block_that_continues_after_the_removal_stays_a_line_removal() {
-        let continued = promote_named_blocks(
+        let continued = promoted(
             &[],
             &[],
             vec![
@@ -1146,7 +1165,7 @@ mod tests {
 
     #[test]
     fn an_unclosed_or_paired_function_stays_a_line_addition() {
-        let unclosed = promote_named_blocks(
+        let unclosed = promoted(
             &[],
             &[],
             vec![Box::new(added(
@@ -1158,7 +1177,7 @@ mod tests {
         );
         assert_eq!(unclosed[0].kind(), "line-added");
 
-        let pair = promote_named_blocks(
+        let pair = promoted(
             &[],
             &[],
             vec![Box::new(added(2, "fn one() {}\nfn two() {}", false, false))],
@@ -1168,7 +1187,7 @@ mod tests {
 
     #[test]
     fn a_python_block_that_continues_after_the_addition_stays_a_line_addition() {
-        let continued = promote_named_blocks(
+        let continued = promoted(
             &[],
             &[],
             vec![
@@ -1202,7 +1221,7 @@ mod tests {
         assert!(continued[1].line_edit().expect("blank").is_whitespace());
         assert_eq!(continued[2].kind(), "line-added");
 
-        let commented = promote_named_blocks(
+        let commented = promoted(
             &[],
             &[],
             vec![
@@ -1230,7 +1249,7 @@ mod tests {
 
     #[test]
     fn a_blank_line_between_python_functions_leaves_each_one() {
-        let merged = promote_named_blocks(
+        let merged = promoted(
             &[],
             &[],
             vec![
@@ -1268,7 +1287,7 @@ mod tests {
 
     #[test]
     fn a_comment_or_plain_addition_stays_a_line_addition() {
-        let merged = promote_named_blocks(
+        let merged = promoted(
             &[],
             &[],
             vec![
