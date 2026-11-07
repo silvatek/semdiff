@@ -414,10 +414,10 @@ pub(super) fn applied_with_its_file(kind: &str) -> Result<(), String> {
 
 /// The changes gathered while one comparison runs.
 ///
-/// The changes stay inside the list. A pass reads one by its index. Moving,
-/// replacing, merging, or removing a change goes through this list. A pass
-/// also asks the list for a moved file, the new paths those moves add, or
-/// the paths of the old text.
+/// The changes stay inside the list. A pass reads one by its index. Adding,
+/// sorting, moving, replacing, merging, or removing a change goes through
+/// this list. A pass also asks the list for a moved file, the new paths those
+/// moves add, or the paths of the old text.
 pub(crate) struct ChangeList {
     changes: Vec<Box<dyn Change>>,
 }
@@ -431,6 +431,17 @@ impl ChangeList {
     /// Appends the changes from a later stage of the comparison.
     pub(crate) fn append(&mut self, more: ChangeList) {
         self.changes.extend(more.changes);
+    }
+
+    /// Adds one change at the end of the list.
+    pub(crate) fn add(&mut self, change: Box<dyn Change>) {
+        self.changes.push(change);
+    }
+
+    /// Orders the changes by the pair each change uses to sort.
+    pub(crate) fn sort(&mut self) {
+        self.changes
+            .sort_by(|left, right| left.sort_key().cmp(&right.sort_key()));
     }
 
     /// How many changes this list holds.

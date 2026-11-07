@@ -59,21 +59,16 @@ pub(crate) fn find_differences(
     let left_dirs = fs.collect_directories(Path::new(&sources.left))?;
     let right_dirs = fs.collect_directories(Path::new(&sources.right))?;
     let (left_only, right_only, mut paired_files) = partition_files(&left_files, &right_files);
-    let mut changes = ChangeList::of(file_change::file_changes(
-        fs,
-        sources,
-        &left_only,
-        &right_only,
-    )?);
+    let mut changes = file_change::file_changes(fs, sources, &left_only, &right_only)?;
     paired_files.extend(changes.moved_destinations());
     paired_files.sort();
     let content = file_change::paired_changes(fs, sources, &paired_files, &changes)?;
     changes.append(content);
-    changes.append(ChangeList::of(directory_changes::directory_changes(
+    changes.append(directory_changes::directory_changes(
         &left_dirs,
         &right_dirs,
         &right_files,
-    )));
+    ));
     directory_changes::place_replacement_files(&mut changes);
     crate::change::merge_adjacent(&mut changes);
     let right_root = fs.source_base(Path::new(&sources.right));

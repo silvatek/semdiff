@@ -2,7 +2,7 @@
 
 use std::collections::BTreeSet;
 
-use crate::change::{Change, ChangeList};
+use crate::change::ChangeList;
 
 /// Directories added or removed between the two sources.
 ///
@@ -15,7 +15,7 @@ pub(crate) fn directory_changes(
     left_dirs: &[String],
     right_dirs: &[String],
     right_files: &[String],
-) -> Vec<Box<dyn Change>> {
+) -> ChangeList {
     let left_names: BTreeSet<_> = left_dirs.iter().collect();
     let right_names: BTreeSet<_> = right_dirs.iter().collect();
     let mut removed: Vec<_> = left_dirs
@@ -39,15 +39,15 @@ pub(crate) fn directory_changes(
             .then(left.cmp(right))
     });
 
-    let mut changes: Vec<Box<dyn Change>> = Vec::new();
+    let mut changes = ChangeList::of(Vec::new());
     for path in removed {
-        changes.push(Box::new(crate::change::DirectoryDeleted {
+        changes.add(Box::new(crate::change::DirectoryDeleted {
             scope: crate::change::TREE_SCOPE.to_string(),
             path,
         }));
     }
     for path in added {
-        changes.push(Box::new(crate::change::DirectoryAdded {
+        changes.add(Box::new(crate::change::DirectoryAdded {
             scope: crate::change::TREE_SCOPE.to_string(),
             path,
         }));
