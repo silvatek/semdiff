@@ -96,8 +96,9 @@ Exit status
 
 What a comparison records
 
-  Files present at the same path on both sides are paired. Matching bytes are
-  left out of the semdif. The listing still names each paired path.
+  Files present at the same path on both sides are paired. A moved file is
+  paired at its new path. Matching bytes are left out of the semdif. The
+  listing still names each paired path.
 
   A changed text file is recorded as line-added, line-removed, and
   line-modified edits. The file-changed record keeps the old and new SHA-256
@@ -140,12 +141,14 @@ What a comparison records
   with the same SHA-256 is file-renamed. One deleted file and one added file
   that share a filename are file-moved when more than half the lines of the
   longer copy stay in order. The filename is the final path component. The
-  record names both paths and keeps the new bytes. Several files with that
-  name, a file that is not text, or a copy that shares half or fewer of those
-  lines stay file-deleted and file-added. Each record includes the SHA-256 of
-  the bytes it removes or writes. An empty directory that appears or disappears is
-  directory-added or directory-deleted, including a directory left empty
-  because its files moved. Nested removals come before their parents, and
+  record names both paths and the hash of the bytes at the old path. The new
+  path is compared with the paired files, and the edit is recorded there.
+  Several files with that name, a file that is not text, or a copy that shares
+  half or fewer of those lines stay file-deleted and file-added. Each record
+  includes the SHA-256 of the bytes it removes, renames, or writes. An empty
+  directory that appears or disappears is directory-added or directory-deleted,
+  including a directory left empty because its files moved. Nested removals
+  come before their parents, and
   additions come parents first.
 
   A directory replaced by a file whose bytes match none of the files inside
@@ -174,12 +177,11 @@ What apply checks
   unchanged and is reported as \"cannot apply PATH: contents do not match the
   old hash\" or \"the new hash\". --ignore-hash leaves those checks in place.
 
-  A file-deleted or file-renamed change checks the hash of the file in the
-  tree. A file-added change checks the hash of the bytes about to be written.
-  A file-moved change checks the file it removes and the bytes it writes.
-  A mismatch is reported as \"cannot apply PATH: contents do not match the
-  hash\" and leaves the tree unchanged. --ignore-hash applies those changes
-  anyway.
+  A file-deleted, file-renamed, or file-moved change checks the hash of the
+  file in the tree. A file-moved change renames that file. A file-added change
+  checks the hash of the bytes about to be written. A mismatch is reported as
+  \"cannot apply PATH: contents do not match the hash\" and leaves the tree
+  unchanged. --ignore-hash applies those changes anyway.
 
 Limitations
 

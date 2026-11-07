@@ -15,10 +15,12 @@ use crate::filesystem::FileSystem;
 /// the same hash are a rename, so identical copies are not paired by guesswork.
 /// One deleted file and one added file that share a filename are a move when
 /// more than half the lines of the longer copy stay in order. The filename is
-/// the final component of the path. A file that remains only on the left was
+/// the final component of the path. The move names both paths and the hash of
+/// the bytes at the old path. The new path is compared with the paired files,
+/// so the edit is recorded there. A file that remains only on the left was
 /// removed. A file that remains only on the right was added, and its contents
 /// are kept so the file can be recreated. Each record includes the SHA-256 of
-/// the bytes it removes or writes, so apply can check them.
+/// the bytes it removes, renames, or writes, so apply can check them.
 pub(crate) fn file_changes(
     fs: &dyn FileSystem,
     sources: &crate::Sources,
@@ -96,9 +98,7 @@ pub(crate) fn file_changes(
             scope: crate::change::TREE_SCOPE.to_string(),
             from: (*from).clone(),
             to: (*to).clone(),
-            old: digest_hex(&left_by_path[from.as_str()]),
-            new: digest_hex(&right_by_path[to.as_str()]),
-            contents: after,
+            hash: digest_hex(&left_by_path[from.as_str()]),
         }));
     }
     for path in left_only {
@@ -135,12 +135,13 @@ pub(crate) fn paired_changes(
     fs: &dyn FileSystem,
     sources: &crate::Sources,
     paired_files: &[String],
+    recorded: &[Box<dyn Change>],
 ) -> Result<Vec<Box<dyn Change>>, String> {
     let left_root = fs.source_base(Path::new(&sources.left));
     let right_root = fs.source_base(Path::new(&sources.right));
     let mut changes = Vec::new();
     for path in paired_files {
-        changes.extend(paired_change(fs, left_root, right_root, path)?);
+        changes.extend(paired_change(fs, left_root, right_root, path, recorded)?);
     }
     Ok(changes)
 }
@@ -151,9 +152,10 @@ fn paired_change(
     left_root: &Path,
     right_root: &Path,
     path: &str,
+    recorded: &[Box<dyn Change>],
 ) -> Result<Vec<Box<dyn Change>>, String> {
-    let before = read_file(fs, left_root, path)?;
-    let after = read_file(fs, right_root, path)?;
+    let before = read_compared(fs, left_root, path, recorded, ComparedSide::Left)?;
+    let after = read_compared(fs, right_root, path, recorded, ComparedSide::Right)?;
     if before == after {
         return Ok(Vec::new());
     }
@@ -189,6 +191,40 @@ fn file_name(path: &str) -> &str {
 /// keep, so it is not a move.
 fn keeps_enough_lines(left: &[u8], right: &[u8]) -> bool {
     common_line_proportion(left, right).is_some_and(|proportion| proportion > 0.5)
+}
+
+/// Which tree a paired path is read from.
+#[derive(Clone, Copy)]
+pub(super) enum ComparedSide {
+    /// The bytes before the change. A moved file is read at its old path.
+    Left,
+    /// The bytes after the change, at the paired path.
+    Right,
+}
+
+/// The bytes compared at a paired path.
+///
+/// `path` is the scope of the content records. On the right, those bytes are
+/// the file at that path. On the left, a file-moved record whose new path is
+/// this one means the old bytes are still at `from`.
+pub(super) fn read_compared(
+    fs: &dyn FileSystem,
+    root: &Path,
+    path: &str,
+    changes: &[Box<dyn Change>],
+    side: ComparedSide,
+) -> Result<Vec<u8>, String> {
+    let relative = match side {
+        ComparedSide::Right => path,
+        ComparedSide::Left => changes
+            .iter()
+            .find_map(|change| {
+                let (from, to) = change.file_move()?;
+                (to == path).then_some(from)
+            })
+            .unwrap_or(path),
+    };
+    read_file(fs, root, relative)
 }
 
 fn read_file(fs: &dyn FileSystem, root: &Path, relative: &str) -> Result<Vec<u8>, String> {

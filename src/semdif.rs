@@ -302,9 +302,7 @@ fn parse_file_moved(
         scope,
         from: required(&fields, "from", "file-moved")?,
         to: required(&fields, "to", "file-moved")?,
-        old: required_hash(&fields, "old", "file-moved")?,
-        new: required_hash(&fields, "new", "file-moved")?,
-        contents: stored_bytes(&fields, "file-moved")?,
+        hash: required_hash(&fields, "hash", "file-moved")?,
     }))
 }
 

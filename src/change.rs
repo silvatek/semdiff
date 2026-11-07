@@ -124,6 +124,14 @@ pub(crate) trait Change {
         None
     }
 
+    /// The old path and the new path, when this change moves a file.
+    ///
+    /// The content comparison reads the old bytes at the old path and records
+    /// the edit at the new path.
+    fn file_move(&self) -> Option<(&str, &str)> {
+        None
+    }
+
     /// This change renames an identifier, when it does.
     fn identifier_rename(&self) -> Option<IdentifierRename<'_>> {
         None

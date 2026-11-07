@@ -27,8 +27,8 @@ use crate::filesystem::FileSystem;
 
 /// The shared paths and the change records for one comparison.
 ///
-/// `paths` are the files present on both sides. `changes` are the records
-/// written into the semdif.
+/// `paths` are the files whose contents were compared. A moved file is listed
+/// at its new path. `changes` are the records written into the semdif.
 pub(crate) struct Differences {
     pub(crate) paths: Vec<String>,
     pub(crate) changes: Vec<Box<dyn Change>>,
@@ -39,7 +39,8 @@ pub(crate) struct Differences {
 /// The two file lists are split once, so a later step does not search the trees again.
 /// Files that exist on only one side may be a rename, a move, a deletion, or an
 /// addition. A move is one deleted file and one added file that share a filename
-/// and keep more than half their lines in order.
+/// and keep more than half their lines in order. Its new path joins the paired
+/// files before their contents are compared.
 /// Files that exist on both sides are paired and compared in place.
 /// Empty directories that appear or disappear are recorded too, including one
 /// left empty because its files moved. Adjacent removed, added, or modified
@@ -57,9 +58,12 @@ pub(crate) fn find_differences(
     let right_files = fs.collect_files(Path::new(&sources.right))?;
     let left_dirs = fs.collect_directories(Path::new(&sources.left))?;
     let right_dirs = fs.collect_directories(Path::new(&sources.right))?;
-    let (left_only, right_only, paired_files) = partition_files(&left_files, &right_files);
+    let (left_only, right_only, mut paired_files) = partition_files(&left_files, &right_files);
     let mut changes = file_change::file_changes(fs, sources, &left_only, &right_only)?;
-    changes.extend(file_change::paired_changes(fs, sources, &paired_files)?);
+    paired_files.extend(moved_destinations(&changes));
+    paired_files.sort();
+    let content = file_change::paired_changes(fs, sources, &paired_files, &changes)?;
+    changes.extend(content);
     changes.extend(directory_changes::directory_changes(
         &left_dirs,
         &right_dirs,
@@ -68,9 +72,22 @@ pub(crate) fn find_differences(
     let changes = directory_changes::place_replacement_files(changes);
     let changes = crate::change::merge_adjacent(changes);
     let right_root = fs.source_base(Path::new(&sources.right));
-    let right_texts = source_texts(fs, right_root, &paired_files)?;
+    let right_texts = source_texts(
+        fs,
+        right_root,
+        &paired_files,
+        &changes,
+        file_change::ComparedSide::Right,
+    )?;
     let left_root = fs.source_base(Path::new(&sources.left));
-    let texts = source_texts(fs, left_root, &left_files)?;
+    let old_paths = old_text_paths(&left_files, &changes);
+    let texts = source_texts(
+        fs,
+        left_root,
+        &old_paths,
+        &changes,
+        file_change::ComparedSide::Left,
+    )?;
     let changes = crate::change::promote_named_blocks(&right_texts, &texts, changes);
     let changes = crate::change::merge_identifier_files(&texts, changes);
     Ok(Differences {
@@ -81,17 +98,19 @@ pub(crate) fn find_differences(
 
 /// The old text of each file, so a rename can see every occurrence of a name.
 ///
-/// A file that is not text has no lines. It holds no identifiers.
+/// A file that is not text has no lines. It holds no identifiers. A moved file
+/// is stored under its new path, which is the scope of its content records.
+/// The bytes are read from the old path.
 fn source_texts(
     fs: &dyn FileSystem,
     root: &Path,
     files: &[String],
+    changes: &[Box<dyn Change>],
+    side: file_change::ComparedSide,
 ) -> Result<Vec<crate::change::SourceText>, String> {
     let mut texts = Vec::new();
     for path in files {
-        let bytes = fs
-            .read(&root.join(path))
-            .map_err(|error| format!("cannot read {}: {error}", root.join(path).display()))?;
+        let bytes = file_change::read_compared(fs, root, path, changes, side)?;
         let lines = match std::str::from_utf8(&bytes) {
             Ok(text) => line_changes::split_text(text).lines,
             Err(_) => Vec::new(),
@@ -102,6 +121,36 @@ fn source_texts(
         });
     }
     Ok(texts)
+}
+
+/// The new path of each moved file.
+///
+/// A move is compared with the files that share a path. The path in that list
+/// is the new path, and the content records are scoped to it.
+fn moved_destinations(changes: &[Box<dyn Change>]) -> Vec<String> {
+    changes
+        .iter()
+        .filter_map(|change| change.file_move().map(|(_, to)| to.to_string()))
+        .collect()
+}
+
+/// The paths whose old text a later pass looks up.
+///
+/// Each left-hand file is stored under its own path. A moved file is stored
+/// under its new path. The bytes are still read from the old path.
+fn old_text_paths(left_files: &[String], changes: &[Box<dyn Change>]) -> Vec<String> {
+    let moved_from: BTreeSet<&str> = changes
+        .iter()
+        .filter_map(|change| change.file_move().map(|(from, _)| from))
+        .collect();
+    let mut paths: Vec<String> = left_files
+        .iter()
+        .filter(|path| !moved_from.contains(path.as_str()))
+        .cloned()
+        .collect();
+    paths.extend(moved_destinations(changes));
+    paths.sort();
+    paths
 }
 
 /// Files only on the left, only on the right, and present under the same path on both sides.

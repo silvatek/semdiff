@@ -49,19 +49,17 @@ impl Change for FileRenamed {
     }
 }
 
-/// A file moved to a new path with edited contents.
+/// A file moved to a new path, with its contents compared afterwards.
 ///
-/// `from` is the old path and `to` is the new path. `old` is the SHA-256 of
-/// the bytes still at `from`. `new` is the SHA-256 of `contents`, the bytes
-/// written at `to`. Apply deletes `from` and writes `to` only when both hashes
-/// match. `--ignore-hash` does both anyway.
+/// `from` is the old path and `to` is the new path. `hash` is the SHA-256 of
+/// the bytes still at `from`. Apply renames the file only when those bytes
+/// have that hash. The content comparison then edits the file at `to`.
+/// `--ignore-hash` renames it anyway.
 pub(crate) struct FileMoved {
     pub(crate) scope: String,
     pub(crate) from: String,
     pub(crate) to: String,
-    pub(crate) old: String,
-    pub(crate) new: String,
-    pub(crate) contents: Vec<u8>,
+    pub(crate) hash: String,
 }
 
 impl Change for FileMoved {
@@ -77,37 +75,26 @@ impl Change for FileMoved {
         (&self.from, &self.to)
     }
 
-    fn added_file(&self) -> Option<&dyn AddedFile> {
-        Some(self)
+    fn file_move(&self) -> Option<(&str, &str)> {
+        Some((&self.from, &self.to))
     }
 
     fn write_details(&self, document: &mut String) {
         crate::semdif::write_detail(document, "from", &self.from);
         crate::semdif::write_detail(document, "to", &self.to);
-        crate::semdif::write_detail(document, "old", &self.old);
-        crate::semdif::write_detail(document, "new", &self.new);
-        crate::semdif::write_file_contents(document, &self.contents);
+        crate::semdif::write_detail(document, "hash", &self.hash);
     }
 
     fn check_recorded_hash(&self, fs: &dyn FileSystem, source: &Path) -> Result<(), String> {
-        let from = crate::filesystem::path_inside(source, &self.from)?;
+        let path = crate::filesystem::path_inside(source, &self.from)?;
         let bytes = fs
-            .read(&from)
-            .map_err(|error| format!("cannot read {}: {error}", from.display()))?;
-        require_recorded_hash(&from, &bytes, &self.old)?;
-        let to = crate::filesystem::path_inside(source, &self.to)?;
-        require_recorded_hash(&to, &self.contents, &self.new)
+            .read(&path)
+            .map_err(|error| format!("cannot read {}: {error}", path.display()))?;
+        require_recorded_hash(&path, &bytes, &self.hash)
     }
 
     fn apply(&self, fs: &dyn FileSystem, source: &Path) -> Result<(), String> {
-        fs.delete_file(source, &self.from)?;
-        fs.write_file(source, &self.to, &self.contents)
-    }
-}
-
-impl AddedFile for FileMoved {
-    fn path(&self) -> &str {
-        &self.to
+        fs.rename_file(source, &self.from, &self.to)
     }
 }
 
@@ -204,9 +191,9 @@ impl AddedFile for FileAdded {
 
 /// Rejects a tree edit whose bytes are not the recorded SHA-256.
 ///
-/// A deletion and a rename check the file still in the tree. An addition
-/// checks the bytes about to be written. A move checks both. A mismatch leaves
-/// the tree unchanged.
+/// A deletion, a rename, and a move check the file still in the tree. An
+/// addition checks the bytes about to be written. A mismatch leaves the tree
+/// unchanged.
 fn require_recorded_hash(path: &Path, bytes: &[u8], expected: &str) -> Result<(), String> {
     let actual = crate::diff::sha256_hex(bytes);
     if actual == expected {

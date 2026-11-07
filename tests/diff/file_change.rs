@@ -250,7 +250,7 @@ fn records_a_file_moved_when_one_name_keeps_most_lines_in_order() {
     let changes = document.split_once("changes:\n").expect("changes list").1;
     assert_eq!(
         changes,
-        "  - scope: \".\"\n    type: file-moved\n    details:\n      from: \"old/note.txt\"\n      to: \"new/note.txt\"\n      old: \"cf2c7f63055d2e84af6e3f01ac1bb7fce598d20cf213fab2b56b8e8047b46ced\"\n      new: \"db9c74e32785df4e1904ce1dc35bbc5e18d3c8375e95fc8185e9e6d497c618c3\"\n      contents: \"a\\nb\\nc\\ny\\n\"\n  - scope: \".\"\n    type: directory-deleted\n    details:\n      path: \"old\"\n"
+        "  - scope: \".\"\n    type: file-moved\n    details:\n      from: \"old/note.txt\"\n      to: \"new/note.txt\"\n      hash: \"cf2c7f63055d2e84af6e3f01ac1bb7fce598d20cf213fab2b56b8e8047b46ced\"\n  - scope: \"new/note.txt\"\n    type: file-changed\n    details:\n      old: \"cf2c7f63055d2e84af6e3f01ac1bb7fce598d20cf213fab2b56b8e8047b46ced\"\n      new: \"db9c74e32785df4e1904ce1dc35bbc5e18d3c8375e95fc8185e9e6d497c618c3\"\n  - scope: \"new/note.txt\"\n    type: line-modified\n    details:\n      old: 4\n      lines: +0\n      new: 4\n      text: \"y\"\n  - scope: \".\"\n    type: directory-deleted\n    details:\n      path: \"old\"\n"
     );
 
     tree.apply("edited", &document).unwrap();
@@ -377,9 +377,7 @@ changes:
     details:
       from: \"old/note.txt\"
       to: \"new/note.txt\"
-      old: \"0000000000000000000000000000000000000000000000000000000000000000\"
-      new: \"db9c74e32785df4e1904ce1dc35bbc5e18d3c8375e95fc8185e9e6d497c618c3\"
-      contents: \"a\\nb\\nc\\ny\\n\"
+      hash: \"0000000000000000000000000000000000000000000000000000000000000000\"
 ",
         )
         .unwrap_err();
@@ -390,7 +388,7 @@ changes:
 }
 
 #[test]
-fn rejects_a_move_whose_new_hash_does_not_match() {
+fn rejects_a_moved_files_new_hash_when_the_edit_is_written() {
     let tree = Tree::new();
     tree.write("source/old/note.txt", "a\nb\nc\nd\n");
     let message = tree
@@ -406,20 +404,30 @@ changes:
     details:
       from: \"old/note.txt\"
       to: \"new/note.txt\"
+      hash: \"cf2c7f63055d2e84af6e3f01ac1bb7fce598d20cf213fab2b56b8e8047b46ced\"
+  - scope: \"new/note.txt\"
+    type: file-changed
+    details:
       old: \"cf2c7f63055d2e84af6e3f01ac1bb7fce598d20cf213fab2b56b8e8047b46ced\"
       new: \"0000000000000000000000000000000000000000000000000000000000000000\"
-      contents: \"a\\nb\\nc\\ny\\n\"
+  - scope: \"new/note.txt\"
+    type: line-modified
+    details:
+      old: 4
+      lines: +0
+      new: 4
+      text: \"y\"
 ",
         )
         .unwrap_err();
 
-    assert!(message.contains("do not match the hash"), "{message}");
-    assert_eq!(tree.read("source/old/note.txt"), b"a\nb\nc\nd\n");
-    assert!(!tree.exists("source/new/note.txt"));
+    assert!(message.contains("do not match the new hash"), "{message}");
+    assert!(!tree.exists("source/old/note.txt"));
+    assert_eq!(tree.read("source/new/note.txt"), b"a\nb\nc\nd\n");
 }
 
 #[test]
-fn rejects_a_move_that_omits_its_old_hash() {
+fn rejects_a_move_that_omits_its_hash() {
     let tree = Tree::new();
     tree.write("source/old/note.txt", "a\nb\nc\nd\n");
     let message = tree
@@ -435,13 +443,80 @@ changes:
     details:
       from: \"old/note.txt\"
       to: \"new/note.txt\"
-      new: \"db9c74e32785df4e1904ce1dc35bbc5e18d3c8375e95fc8185e9e6d497c618c3\"
-      contents: \"a\\nb\\nc\\ny\\n\"
 ",
         )
         .unwrap_err();
 
-    assert_eq!(message, "file-moved is missing old");
+    assert_eq!(message, "file-moved is missing hash");
     assert_eq!(tree.read("source/old/note.txt"), b"a\nb\nc\nd\n");
     assert!(!tree.exists("source/new/note.txt"));
+}
+
+#[test]
+fn records_a_method_removed_from_a_moved_file() {
+    let tree = Tree::new();
+    let before = "impl Foo {\n    fn dropped() {}\n}\n";
+    let after = "impl Foo {\n}\n";
+    tree.write("left/old/types.rs", before);
+    tree.write("right/new/types.rs", after);
+    tree.write("edited/old/types.rs", before);
+
+    let document = tree.compare("left", "right");
+
+    assert!(document.contains(
+        "  - scope: \"new/types.rs[Foo]\"\n    type: named-block-removed\n    details:\n      old: 2\n      lines: -1\n      new: 2\n      text: \"    fn dropped() {}\"\n      category: \"method\"\n      name: \"dropped\"\n"
+    ), "{document}");
+    assert!(!document.contains("scope: \"old/types.rs"), "{document}");
+
+    tree.apply("edited", &document).unwrap();
+    assert!(!tree.exists("edited/old"));
+    assert_eq!(tree.read("edited/new/types.rs"), after.as_bytes());
+}
+
+#[test]
+fn joins_identifier_renames_across_moved_files() {
+    let tree = Tree::new();
+    let before = "fn foo() {}\nfn kept() {}\nfn also() {}\n";
+    let after = "fn bar() {}\nfn kept() {}\nfn also() {}\n";
+    tree.write("left/old/a.rs", before);
+    tree.write("left/old/b.rs", before);
+    tree.write("right/new/a.rs", after);
+    tree.write("right/other/b.rs", after);
+    tree.write("edited/old/a.rs", before);
+    tree.write("edited/old/b.rs", before);
+
+    let document = tree.compare("left", "right");
+
+    assert!(document.contains(
+        "  - scope: \".\"\n    type: identifier-renamed\n    details:\n      oldname: \"foo\"\n      newname: \"bar\"\n"
+    ), "{document}");
+    assert!(!document.contains("scope: \"new/a.rs:"), "{document}");
+    assert!(!document.contains("scope: \"other/b.rs:"), "{document}");
+    assert!(!document.contains("scope: \"old/"), "{document}");
+
+    tree.apply("edited", &document).unwrap();
+    assert_eq!(tree.read("edited/new/a.rs"), after.as_bytes());
+    assert_eq!(tree.read("edited/other/b.rs"), after.as_bytes());
+    assert!(!tree.exists("edited/old"));
+}
+
+#[test]
+fn records_a_whole_file_when_a_move_only_changes_the_final_newline() {
+    let tree = Tree::new();
+    tree.write("left/old/note.txt", "a\nb\nc\nd");
+    tree.write("right/new/note.txt", "a\nb\nc\nd\n");
+    tree.write("edited/old/note.txt", "a\nb\nc\nd");
+
+    let document = tree.compare("left", "right");
+
+    assert!(document.contains("type: file-moved\n"), "{document}");
+    assert!(
+        document.contains("scope: \"new/note.txt\"\n    type: file-changed\n    details:\n      contents: \"a\\nb\\nc\\nd\\n\"\n"),
+        "{document}"
+    );
+    assert!(!document.contains("line-modified"), "{document}");
+
+    tree.apply("edited", &document).unwrap();
+    assert_eq!(tree.read("edited/new/note.txt"), b"a\nb\nc\nd\n");
+    assert!(!tree.exists("edited/old"));
 }
