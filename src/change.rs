@@ -3,8 +3,8 @@
 //!
 //! Each kind of change is its own type and implements [`Change`]. That trait is
 //! what every kind has: its semdif type, how widely it applies, the details it
-//! writes, and how it is replayed on its own. A list holds `Box<dyn Change>` so
-//! every kind can sit together. A kind that also edits lines, replaces a file,
+//! writes, and how it is replayed on its own. [`ChangeList`] holds those
+//! records. A kind that also edits lines, replaces a file,
 //! or removes a directory implements that narrower trait and reveals it from
 //! [`Change`].
 //!
@@ -410,4 +410,81 @@ impl LinePlan {
 
 pub(super) fn applied_with_its_file(kind: &str) -> Result<(), String> {
     Err(format!("{kind} is applied with its file"))
+}
+
+/// The records gathered while one comparison runs.
+///
+/// The records stay private. A pass asks this list for a moved file, the new
+/// paths those moves add, or the paths of the old text, instead of walking
+/// the records itself.
+pub(crate) struct ChangeList {
+    records: Vec<Box<dyn Change>>,
+}
+
+impl ChangeList {
+    /// A list holding these records.
+    pub(crate) fn from_records(records: Vec<Box<dyn Change>>) -> Self {
+        Self { records }
+    }
+
+    /// Adds the records from a later stage of the comparison.
+    pub(crate) fn extend(&mut self, more: Vec<Box<dyn Change>>) {
+        self.records.extend(more);
+    }
+
+    /// The records, for a pass that rewrites the whole list.
+    pub(crate) fn into_records(self) -> Vec<Box<dyn Change>> {
+        self.records
+    }
+
+    /// The file-moved record whose new path is `path`.
+    ///
+    /// A comparison pass uses this when it has the file's new scope and needs
+    /// the record that still names the old path.
+    pub(crate) fn file_move_for(&self, path: &str) -> Option<&FileMoved> {
+        for change in &self.records {
+            if let Some(moved) = change.file_move() {
+                if moved.to == path {
+                    return Some(moved);
+                }
+            }
+        }
+        None
+    }
+
+    /// The new path of each moved file.
+    ///
+    /// A move is compared with the files that share a path. The path in that
+    /// list is the new path, and the content records are scoped to it.
+    pub(crate) fn moved_destinations(&self) -> Vec<String> {
+        let mut paths = Vec::new();
+        for change in &self.records {
+            if let Some(moved) = change.file_move() {
+                paths.push(moved.to.clone());
+            }
+        }
+        paths
+    }
+
+    /// The paths whose old text a later pass looks up.
+    ///
+    /// Each left-hand file is stored under its own path. A moved file is
+    /// stored under its new path. The bytes are still read from the old path.
+    pub(crate) fn old_text_paths(&self, left_files: &[String]) -> Vec<String> {
+        let mut moved_from = BTreeSet::new();
+        for change in &self.records {
+            if let Some(moved) = change.file_move() {
+                moved_from.insert(moved.from.as_str());
+            }
+        }
+        let mut paths = Vec::new();
+        for path in left_files {
+            if !moved_from.contains(path.as_str()) {
+                paths.push(path.clone());
+            }
+        }
+        paths.extend(self.moved_destinations());
+        paths.sort();
+        paths
+    }
 }
