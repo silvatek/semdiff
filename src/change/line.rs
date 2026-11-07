@@ -1,4 +1,5 @@
-//! Line additions, removals, and modifications.
+//! The record of a line-level change, including how such records combine and how
+//! apply carries one out.
 //!
 //! A line change's scope is the file. A method's scope also names the enclosing
 //! block, as `src/main.rs[Count]`. Apply still edits the file. A span change

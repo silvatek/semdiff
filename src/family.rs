@@ -1,4 +1,5 @@
-//! How a named block is read once a dialect has been selected.
+//! Reading named blocks in source, including where one opens, closes, and
+//! continues.
 //!
 //! Brace-delimited languages share the C-family reader. Python has its own.
 //! A function or procedure inside one of the dialect's method scopes is a method.

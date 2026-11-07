@@ -1,4 +1,4 @@
-//! An integer whose text changed on one line.
+//! Identifying and classifying a changed constant.
 //!
 //! The edit is a constant change when the two lines differ only inside one
 //! integer. An integer is a maximal ASCII digit sequence. A leading `-` is

@@ -1,4 +1,4 @@
-//! Changes to a file in the tree, and to the bytes of a file that stayed put.
+//! The record of a file-level change, including how apply carries it out.
 
 use std::path::Path;
 

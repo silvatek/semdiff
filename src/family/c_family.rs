@@ -1,4 +1,4 @@
-//! The reader for brace-delimited languages.
+//! How a brace-delimited language opens, closes, and indents a named block.
 //!
 //! C, C++, Rust, Java, and JavaScript share this reader. A dialect supplies
 //! the comment mark, the identifier characters, the keywords that open a

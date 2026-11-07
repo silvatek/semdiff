@@ -1,3 +1,5 @@
+//! Identifying and classifying changes at the line level.
+
 use crate::change::Change;
 
 /// Line records for two copies of one file, when both copies are text.

@@ -1,4 +1,4 @@
-//! The changed stretches of one line, and the record for one of them.
+//! Identifying and classifying changes at the span level.
 //!
 //! `line_changes` calls `find_spans` once it has two copies of a line, and
 //! keeps the rule that the line has exactly one. A span is text that differs,

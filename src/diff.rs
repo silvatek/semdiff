@@ -1,4 +1,5 @@
-//! The comparison of two source trees.
+//! Comparing two trees, including the order of the stages and the passes that
+//! combine records.
 //!
 //! One pass collects the files and directories, splits the paths, and records
 //! file, content, and directory changes. Later passes merge adjacent lines,

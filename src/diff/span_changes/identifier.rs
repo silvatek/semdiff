@@ -1,4 +1,4 @@
-//! A line edit that only renames one identifier.
+//! Identifying and classifying a renamed name.
 //!
 //! The two lines are split into names and the text between them. The edit is
 //! a rename when those pieces have the same shape, exactly one name differs,

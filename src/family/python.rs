@@ -1,4 +1,4 @@
-//! The reader for Python.
+//! How Python opens, closes, and indents a named block.
 //!
 //! Python blocks are indentation, not braces. A dialect supplies the comment
 //! mark, the identifier characters, and the keywords that open a named block.
