@@ -765,15 +765,30 @@ pub(crate) fn merge_identifier_files(sources: &[SourceText], changes: &mut super
 
 /// Writes each merged change and removes the changes it folded in.
 ///
-/// Later indexes are merged first, so removing them leaves the earlier
-/// indexes where the next merge expects them.
+/// The indexes name changes in the list before any of these merges. The merge
+/// whose first change is furthest down the list runs first. Removing the
+/// changes it folded in shifts every remaining index that followed one of
+/// those removals.
 fn apply_merges(
     changes: &mut super::ChangeList,
     mut pending: Vec<(usize, Vec<usize>, Box<dyn Change>)>,
 ) {
-    pending.sort_by(|left, right| right.0.cmp(&left.0));
-    for (index, folded, change) in pending {
+    pending.sort_by_key(|merge| merge.0);
+    while let Some((index, folded, change)) = pending.pop() {
+        let removed = folded.clone();
         changes.merge(index, &folded, change);
+        for (later_index, later_folded, _) in &mut pending {
+            for position in &removed {
+                if *later_index > *position {
+                    *later_index -= 1;
+                }
+                for slot in later_folded.iter_mut() {
+                    if *slot > *position {
+                        *slot -= 1;
+                    }
+                }
+            }
+        }
     }
 }
 
@@ -958,6 +973,35 @@ mod tests {
         let merged = spans("src/main.rs", &lines, changes);
         assert_eq!(merged.len(), 1);
         assert_eq!(merged[0].scope(), "src/main.rs:1-5");
+    }
+
+    /// A different rename between two lines of one name does not leave the later line.
+    ///
+    /// Merging the inner name removes changes that sit between the outer pair.
+    /// The outer pair is still one span. A rename after that pair stays.
+    #[test]
+    fn a_different_rename_between_a_pair_does_not_keep_the_later_line() {
+        let lines = vec![
+            "foo".to_string(),
+            "old".to_string(),
+            "old".to_string(),
+            "plain".to_string(),
+            "foo".to_string(),
+            "baz".to_string(),
+        ];
+        let changes = vec![
+            rename(1, "foo", "bar"),
+            rename(2, "old", "new"),
+            rename(3, "old", "new"),
+            rename(5, "foo", "bar"),
+            rename(6, "baz", "qux"),
+        ];
+        let merged = spans("src/main.rs", &lines, changes);
+
+        assert_eq!(merged.len(), 3);
+        assert_eq!(merged[0].scope(), "src/main.rs:1-5");
+        assert_eq!(merged[1].scope(), "src/main.rs:2-3");
+        assert_eq!(merged[2].scope(), "src/main.rs:6");
     }
 
     #[test]
