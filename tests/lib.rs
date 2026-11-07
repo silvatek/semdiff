@@ -10,4 +10,5 @@ mod diff;
 mod family;
 mod filesystem;
 mod main;
+mod round_trip;
 mod semdif;
