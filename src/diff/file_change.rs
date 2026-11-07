@@ -1,3 +1,5 @@
+//! Identifying and classifying changes at the file level.
+
 use std::collections::{HashMap, HashSet};
 use std::path::Path;
 
