@@ -3,8 +3,8 @@
 //!
 //! Each kind of change is its own type and implements [`Change`]. That trait is
 //! what every kind has: its semdif type, how widely it applies, the details it
-//! writes, and how it is replayed on its own. [`ChangeList`] holds those
-//! records. A kind that also edits lines, replaces a file,
+//! writes, and how it is replayed on its own. [`ChangeList`] holds the
+//! changes from one comparison. A kind that also edits lines, replaces a file,
 //! or removes a directory implements that narrower trait and reveals it from
 //! [`Change`].
 //!
@@ -412,87 +412,87 @@ pub(super) fn applied_with_its_file(kind: &str) -> Result<(), String> {
     Err(format!("{kind} is applied with its file"))
 }
 
-/// The records gathered while one comparison runs.
+/// The changes gathered while one comparison runs.
 ///
-/// The records stay private. A pass reads one by its index. Moving, replacing,
-/// merging, or removing a record goes through this list. A pass also asks the
-/// list for a moved file, the new paths those moves add, or the paths of the
-/// old text.
+/// The changes stay inside the list. A pass reads one by its index. Moving,
+/// replacing, merging, or removing a change goes through this list. A pass
+/// also asks the list for a moved file, the new paths those moves add, or
+/// the paths of the old text.
 pub(crate) struct ChangeList {
-    records: Vec<Box<dyn Change>>,
+    changes: Vec<Box<dyn Change>>,
 }
 
 impl ChangeList {
-    /// A list holding these records.
-    pub(crate) fn of(records: Vec<Box<dyn Change>>) -> Self {
-        Self { records }
+    /// A list holding these changes.
+    pub(crate) fn of(changes: Vec<Box<dyn Change>>) -> Self {
+        Self { changes }
     }
 
-    /// Appends the records from a later stage of the comparison.
+    /// Appends the changes from a later stage of the comparison.
     pub(crate) fn append(&mut self, more: Vec<Box<dyn Change>>) {
-        self.records.extend(more);
+        self.changes.extend(more);
     }
 
-    /// The records, in their current order.
+    /// The changes, in their current order.
     ///
     /// The comparison hands these to its result once the passes have finished.
     pub(crate) fn to_vec(self) -> Vec<Box<dyn Change>> {
-        self.records
+        self.changes
     }
 
-    /// How many records this list holds.
+    /// How many changes this list holds.
     pub(crate) fn len(&self) -> usize {
-        self.records.len()
+        self.changes.len()
     }
 
-    /// Lends the record at `index` and the record after it.
+    /// Lends the change at `index` and the change after it.
     ///
-    /// `decide` can ask the first record whether it absorbs the second. The
+    /// `decide` can ask the first change whether it absorbs the second. The
     /// borrows end when `decide` returns, so the caller can then remove the
-    /// second record. There is no following record when `index` is the last.
+    /// second change. There is no following change when `index` is the last.
     pub(crate) fn with_next<R>(
         &mut self,
         index: usize,
         decide: impl FnOnce(&mut dyn Change, &dyn Change) -> R,
     ) -> Option<R> {
-        if index + 1 >= self.records.len() {
+        if index + 1 >= self.changes.len() {
             return None;
         }
-        let (earlier, later) = self.records.split_at_mut(index + 1);
+        let (earlier, later) = self.changes.split_at_mut(index + 1);
         Some(decide(earlier[index].as_mut(), later[0].as_ref()))
     }
 
-    /// Moves the record at `from` so it sits at `to`.
+    /// Moves the change at `from` so it sits at `to`.
     ///
-    /// The record itself is unchanged. The records between the two indexes
+    /// That change keeps its contents. The changes between the two indexes
     /// shift to close the gap.
-    pub(crate) fn move_record(&mut self, from: usize, to: usize) {
+    pub(crate) fn r#move(&mut self, from: usize, to: usize) {
         if from == to {
             return;
         }
         if from < to {
-            self.records[from..=to].rotate_left(1);
+            self.changes[from..=to].rotate_left(1);
         } else {
-            self.records[to..=from].rotate_right(1);
+            self.changes[to..=from].rotate_right(1);
         }
     }
 
-    /// Puts `record` at `index` in place of the record already there.
-    pub(crate) fn replace(&mut self, index: usize, record: Box<dyn Change>) {
-        self.records[index] = record;
+    /// Puts `change` at `index` in place of the change already there.
+    pub(crate) fn replace(&mut self, index: usize, change: Box<dyn Change>) {
+        self.changes[index] = change;
     }
 
-    /// Removes the record at `index` and returns it.
+    /// Removes the change at `index` and returns it.
     pub(crate) fn remove(&mut self, index: usize) -> Box<dyn Change> {
-        self.records.remove(index)
+        self.changes.remove(index)
     }
 
-    /// Puts `record` at `index` and removes every index in `drop`.
+    /// Puts `change` at `index` and removes every index in `drop`.
     ///
-    /// `record` is the merged change. `drop` lists the other records folded
+    /// `change` is the merged change. `drop` lists the other changes folded
     /// into it. Each of those indexes is later in the list than `index`.
-    pub(crate) fn merge(&mut self, index: usize, drop: &[usize], record: Box<dyn Change>) {
-        self.replace(index, record);
+    pub(crate) fn merge(&mut self, index: usize, drop: &[usize], change: Box<dyn Change>) {
+        self.replace(index, change);
         let mut later = drop.to_vec();
         later.sort_unstable();
         for position in later.into_iter().rev() {
@@ -500,12 +500,12 @@ impl ChangeList {
         }
     }
 
-    /// The file-moved record whose new path is `path`.
+    /// The file-moved change whose new path is `path`.
     ///
     /// A comparison pass uses this when it has the file's new scope and needs
-    /// the record that still names the old path.
+    /// the change that still names the old path.
     pub(crate) fn file_move_for(&self, path: &str) -> Option<&FileMoved> {
-        for change in &self.records {
+        for change in &self.changes {
             if let Some(moved) = change.file_move() {
                 if moved.to == path {
                     return Some(moved);
@@ -518,10 +518,10 @@ impl ChangeList {
     /// The new path of each moved file.
     ///
     /// A move is compared with the files that share a path. The path in that
-    /// list is the new path, and the content records are scoped to it.
+    /// list is the new path, and the changes to its contents are scoped to it.
     pub(crate) fn moved_destinations(&self) -> Vec<String> {
         let mut paths = Vec::new();
-        for change in &self.records {
+        for change in &self.changes {
             if let Some(moved) = change.file_move() {
                 paths.push(moved.to.clone());
             }
@@ -535,7 +535,7 @@ impl ChangeList {
     /// stored under its new path. The bytes are still read from the old path.
     pub(crate) fn old_text_paths(&self, left_files: &[String]) -> Vec<String> {
         let mut moved_from = BTreeSet::new();
-        for change in &self.records {
+        for change in &self.changes {
             if let Some(moved) = change.file_move() {
                 moved_from.insert(moved.from.as_str());
             }
@@ -556,6 +556,6 @@ impl std::ops::Index<usize> for ChangeList {
     type Output = dyn Change;
 
     fn index(&self, index: usize) -> &Self::Output {
-        self.records[index].as_ref()
+        self.changes[index].as_ref()
     }
 }

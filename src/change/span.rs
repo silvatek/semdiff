@@ -763,7 +763,7 @@ pub(crate) fn merge_identifier_files(sources: &[SourceText], changes: &mut super
     apply_merges(changes, pending);
 }
 
-/// Writes each merged record and removes the records it folded in.
+/// Writes each merged change and removes the changes it folded in.
 ///
 /// Later indexes are merged first, so removing them leaves the earlier
 /// indexes where the next merge expects them.
@@ -772,8 +772,8 @@ fn apply_merges(
     mut pending: Vec<(usize, Vec<usize>, Box<dyn Change>)>,
 ) {
     pending.sort_by(|left, right| right.0.cmp(&left.0));
-    for (index, folded, record) in pending {
-        changes.merge(index, &folded, record);
+    for (index, folded, change) in pending {
+        changes.merge(index, &folded, change);
     }
 }
 
