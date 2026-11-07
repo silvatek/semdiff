@@ -423,7 +423,7 @@ pub(crate) struct ChangeList {
 
 impl ChangeList {
     /// A list holding these records.
-    pub(crate) fn from_records(records: Vec<Box<dyn Change>>) -> Self {
+    pub(crate) fn of(records: Vec<Box<dyn Change>>) -> Self {
         Self { records }
     }
 
@@ -432,8 +432,8 @@ impl ChangeList {
         self.records.extend(more);
     }
 
-    /// The records, for a pass that rewrites the whole list.
-    pub(crate) fn into_records(self) -> Vec<Box<dyn Change>> {
+    /// The records as a vector, for a pass that rewrites the whole list.
+    pub(crate) fn to_vec(self) -> Vec<Box<dyn Change>> {
         self.records
     }
 
