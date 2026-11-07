@@ -145,7 +145,7 @@ impl AddedFile for FileAdded {
 /// A deletion and a rename check the file still in the tree. An addition
 /// checks the bytes about to be written. A mismatch leaves the tree unchanged.
 fn require_recorded_hash(path: &Path, bytes: &[u8], expected: &str) -> Result<(), String> {
-    let actual = crate::file_change::sha256_hex(bytes);
+    let actual = crate::diff::sha256_hex(bytes);
     if actual == expected {
         Ok(())
     } else {

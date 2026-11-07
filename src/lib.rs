@@ -5,15 +5,11 @@ mod args;
 mod change;
 mod classify;
 mod constant;
-mod content_changes;
 mod dialect;
 mod diff;
-mod directory_changes;
-mod file_change;
 mod filesystem;
 mod help;
 mod identifier;
-mod line_changes;
 mod semdif;
 mod span;
 

@@ -39,12 +39,12 @@ fn content_change(
     }
     let mut changes = vec![Box::new(crate::change::FileChanged::hashes(
         path.to_string(),
-        crate::file_change::sha256_hex(&before),
-        crate::file_change::sha256_hex(&after),
+        super::file_change::sha256_hex(&before),
+        super::file_change::sha256_hex(&after),
     )) as Box<dyn Change>];
     match (std::str::from_utf8(&before), std::str::from_utf8(&after)) {
         (Ok(before_text), Ok(after_text)) => {
-            let line_edits = crate::line_changes::line_changes(path, before_text, after_text);
+            let line_edits = super::line_changes::line_changes(path, before_text, after_text);
             // The line lists match, and the bytes still differ. That difference is
             // the final newline, which is not itself a line.
             if line_edits.is_empty() {

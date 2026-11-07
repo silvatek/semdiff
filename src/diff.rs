@@ -3,6 +3,17 @@
 //! One pass collects the files and directories, splits the paths, and records
 //! file, content, and directory changes. Later passes merge adjacent lines,
 //! name a complete block, and join identifier renames that cover one directory.
+//!
+//! A file that exists on only one side, a paired file, an empty directory, and
+//! the lines of a text file each live in their own module.
+
+mod content_changes;
+mod directory_changes;
+mod file_change;
+mod line_changes;
+
+pub(crate) use file_change::sha256_hex;
+pub(crate) use line_changes::{join_text, split_text, Text};
 
 use std::collections::BTreeSet;
 use std::path::Path;
@@ -41,18 +52,18 @@ pub(crate) fn find_differences(
     let left_dirs = fs.collect_directories(Path::new(&sources.left))?;
     let right_dirs = fs.collect_directories(Path::new(&sources.right))?;
     let (left_only, right_only, paired_files) = partition_files(&left_files, &right_files);
-    let mut changes = crate::file_change::file_changes(fs, sources, &left_only, &right_only)?;
-    changes.extend(crate::content_changes::content_changes(
+    let mut changes = file_change::file_changes(fs, sources, &left_only, &right_only)?;
+    changes.extend(content_changes::content_changes(
         fs,
         sources,
         &paired_files,
     )?);
-    changes.extend(crate::directory_changes::directory_changes(
+    changes.extend(directory_changes::directory_changes(
         &left_dirs,
         &right_dirs,
         &right_files,
     ));
-    let changes = crate::directory_changes::place_replacement_files(changes);
+    let changes = directory_changes::place_replacement_files(changes);
     let changes = crate::change::merge_adjacent(changes);
     let right_root = fs.source_base(Path::new(&sources.right));
     let right_texts = source_texts(fs, right_root, &paired_files)?;
@@ -80,7 +91,7 @@ fn source_texts(
             .read(&root.join(path))
             .map_err(|error| format!("cannot read {}: {error}", root.join(path).display()))?;
         let lines = match std::str::from_utf8(&bytes) {
-            Ok(text) => crate::line_changes::split_text(text).lines,
+            Ok(text) => line_changes::split_text(text).lines,
             Err(_) => Vec::new(),
         };
         texts.push(crate::change::SourceText {

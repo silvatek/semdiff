@@ -160,7 +160,7 @@ fn file_digest(batch: &[&dyn Change]) -> Result<Option<(String, String)>, String
 }
 
 fn check_hash(path: &Path, bytes: &[u8], expected: &str, side: &str) -> Result<(), String> {
-    let actual = crate::file_change::sha256_hex(bytes);
+    let actual = crate::diff::sha256_hex(bytes);
     if actual != expected {
         return Err(format!(
             "cannot apply {}: contents do not match the {side} hash",
@@ -218,7 +218,7 @@ fn new_contents(path: &Path, bytes: &[u8], batch: &[&dyn Change]) -> Result<Vec<
             ));
         }
     };
-    let source_lines = crate::line_changes::split_text(&text);
+    let source_lines = crate::diff::split_text(&text);
     // The only place a LinePlan is built. Each line edit adds the lines it
     // changes, then `rebuild` produces the new lines of this file. A
     // whole-file replacement returned above and never reaches here.
@@ -230,7 +230,7 @@ fn new_contents(path: &Path, bytes: &[u8], batch: &[&dyn Change]) -> Result<Vec<
         line.rebuild(path, &source_lines.lines, &mut plan)?;
     }
     let rebuilt = plan.rebuild(path, &source_lines.lines)?;
-    Ok(crate::line_changes::join_text(&crate::line_changes::Text {
+    Ok(crate::diff::join_text(&crate::diff::Text {
         lines: rebuilt,
         trailing_newline: source_lines.trailing_newline,
     })
