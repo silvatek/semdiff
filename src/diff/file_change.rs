@@ -157,3 +157,123 @@ fn digest_hex(digest: &[u8]) -> String {
     }
     hex
 }
+
+/// The proportion of lines two files have in common.
+///
+/// A later move check uses this to tell a renamed file with edited contents
+/// from an unrelated deletion and addition. `None` means a file is not UTF-8
+/// text, so it has no lines to compare.
+///
+/// Lines are split the same way as a line diff. A trailing newline is not a
+/// line, and a carriage return stays on its line. Each occurrence of a line
+/// is common when the other file has that same line left to match, wherever
+/// it sits. The proportion is that count divided by the number of lines in
+/// the longer file. Two empty files share every line, so the proportion is 1.
+/// A file with lines and an empty file share none, so the proportion is 0.
+#[allow(dead_code)]
+pub(crate) fn common_line_proportion(left: &[u8], right: &[u8]) -> Option<f64> {
+    let (Ok(left_text), Ok(right_text)) = (std::str::from_utf8(left), std::str::from_utf8(right))
+    else {
+        return None;
+    };
+    let left_lines = super::line_changes::split_text(left_text).lines;
+    let right_lines = super::line_changes::split_text(right_text).lines;
+    let longer = left_lines.len().max(right_lines.len());
+    if longer == 0 {
+        return Some(1.0);
+    }
+    Some(shared_lines(&left_lines, &right_lines) as f64 / longer as f64)
+}
+
+/// Occurrences of a line that both files still have left to match.
+///
+/// A line that occurs three times in one file and once in the other contributes
+/// one. The match is the line's text.
+fn shared_lines(left: &[String], right: &[String]) -> usize {
+    let mut remaining = HashMap::<&str, usize>::new();
+    for line in left {
+        *remaining.entry(line.as_str()).or_default() += 1;
+    }
+    let mut shared = 0;
+    for line in right {
+        let Some(count) = remaining.get_mut(line.as_str()) else {
+            continue;
+        };
+        if *count == 0 {
+            continue;
+        }
+        *count -= 1;
+        shared += 1;
+    }
+    shared
+}
+
+#[cfg(test)]
+mod tests {
+    use super::common_line_proportion;
+
+    #[test]
+    fn identical_text_shares_every_line() {
+        assert_eq!(common_line_proportion(b"a\nb\n", b"a\nb\n"), Some(1.0));
+        assert_eq!(common_line_proportion(b"\n", b"\n"), Some(1.0));
+        assert_eq!(common_line_proportion(b"", b""), Some(1.0));
+        assert_eq!(
+            common_line_proportion("héllo\n".as_bytes(), "héllo\n".as_bytes()),
+            Some(1.0)
+        );
+    }
+
+    #[test]
+    fn a_trailing_newline_is_not_an_extra_line() {
+        assert_eq!(common_line_proportion(b"a\nb\n", b"a\nb"), Some(1.0));
+        assert_eq!(common_line_proportion(b"a\nb", b"a\nb\n"), Some(1.0));
+    }
+
+    #[test]
+    fn the_same_lines_match_in_either_order() {
+        assert_eq!(common_line_proportion(b"b\na\n", b"a\nb\n"), Some(1.0));
+        assert_eq!(
+            common_line_proportion(b"c\nb\na\n", b"a\nb\nc\n"),
+            Some(1.0)
+        );
+    }
+
+    #[test]
+    fn the_proportion_is_shared_lines_over_the_longer_file() {
+        assert_eq!(
+            common_line_proportion(b"a\nb\n", b"a\nb\nc\nd\n"),
+            Some(0.5)
+        );
+        assert_eq!(
+            common_line_proportion(b"a\nb\nc\nd\n", b"a\nb\n"),
+            Some(0.5)
+        );
+        assert_eq!(
+            common_line_proportion(b"a\nx\nc\ny\n", b"a\nb\nc\nd\n"),
+            Some(0.5)
+        );
+        assert_eq!(common_line_proportion(b"a\n", b"b\n"), Some(0.0));
+        assert_eq!(common_line_proportion(b"", b"a\n"), Some(0.0));
+        assert_eq!(common_line_proportion(b"a\n", b""), Some(0.0));
+        assert_eq!(common_line_proportion(b"\n", b""), Some(0.0));
+    }
+
+    #[test]
+    fn each_occurrence_and_each_blank_line_counts() {
+        assert_eq!(common_line_proportion(b"a\na\na\na\n", b"a\n"), Some(0.25));
+        assert_eq!(common_line_proportion(b"a\na\n", b"a\nb\n"), Some(0.5));
+        assert_eq!(common_line_proportion(b"a\n\n\n\n", b"a\n"), Some(0.25));
+        assert_eq!(
+            common_line_proportion(b"a\n\n\n\n", b"\n\n\n\n"),
+            Some(0.75)
+        );
+        assert_eq!(common_line_proportion(b"a\r\nb\n", b"a\nb\n"), Some(0.5));
+    }
+
+    #[test]
+    fn a_non_text_file_has_no_line_proportion() {
+        assert_eq!(common_line_proportion(b"a\n", b"\xff"), None);
+        assert_eq!(common_line_proportion(b"\xff", b"a\n"), None);
+        assert_eq!(common_line_proportion(b"\xff", b"\xfe"), None);
+    }
+}
