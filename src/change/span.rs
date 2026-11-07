@@ -895,15 +895,13 @@ mod tests {
     use crate::change::{Change, ChangeList};
 
     /// The list after renames in one file have been merged.
-    fn spans(path: &str, lines: &[String], records: Vec<Box<dyn Change>>) -> ChangeList {
-        let mut changes = ChangeList::of(records);
+    fn spans(path: &str, lines: &[String], mut changes: ChangeList) -> ChangeList {
         merge_identifier_spans(path, lines, &mut changes);
         changes
     }
 
     /// The list after renames across files have been merged.
-    fn files(sources: &[SourceText], records: Vec<Box<dyn Change>>) -> ChangeList {
-        let mut changes = ChangeList::of(records);
+    fn files(sources: &[SourceText], mut changes: ChangeList) -> ChangeList {
         merge_identifier_files(sources, &mut changes);
         changes
     }
@@ -965,11 +963,11 @@ mod tests {
             "keep".to_string(),
             "foo".to_string(),
         ];
-        let changes = vec![
+        let changes = ChangeList::of(vec![
             rename(1, "foo", "bar"),
             rename(3, "foo", "bar"),
             rename(5, "foo", "bar"),
-        ];
+        ]);
         let merged = spans("src/main.rs", &lines, changes);
         assert_eq!(merged.len(), 1);
         assert_eq!(merged[0].scope(), "src/main.rs:1-5");
@@ -989,13 +987,13 @@ mod tests {
             "foo".to_string(),
             "baz".to_string(),
         ];
-        let changes = vec![
+        let changes = ChangeList::of(vec![
             rename(1, "foo", "bar"),
             rename(2, "old", "new"),
             rename(3, "old", "new"),
             rename(5, "foo", "bar"),
             rename(6, "baz", "qux"),
-        ];
+        ]);
         let merged = spans("src/main.rs", &lines, changes);
 
         assert_eq!(merged.len(), 3);
@@ -1007,7 +1005,7 @@ mod tests {
     #[test]
     fn an_uncovered_name_between_renames_keeps_them_apart() {
         let lines = vec!["foo".to_string(), "foo".to_string(), "foo".to_string()];
-        let changes = vec![rename(1, "foo", "bar"), rename(3, "foo", "bar")];
+        let changes = ChangeList::of(vec![rename(1, "foo", "bar"), rename(3, "foo", "bar")]);
         let merged = spans("src/main.rs", &lines, changes);
         assert_eq!(merged.len(), 2);
         assert_eq!(merged[0].scope(), "src/main.rs:1");
@@ -1017,7 +1015,7 @@ mod tests {
     #[test]
     fn a_different_new_name_stays_apart() {
         let lines = vec!["foo".to_string(), "foo".to_string()];
-        let changes = vec![rename(1, "foo", "bar"), rename(2, "foo", "baz")];
+        let changes = ChangeList::of(vec![rename(1, "foo", "bar"), rename(2, "foo", "baz")]);
         let merged = spans("src/main.rs", &lines, changes);
         assert_eq!(merged.len(), 2);
         assert_eq!(merged[0].scope(), "src/main.rs:1");
@@ -1048,10 +1046,10 @@ mod tests {
             source("src/b.rs", "foo\n"),
             source("tests/c.rs", "foo\n"),
         ];
-        let changes = vec![
+        let changes = ChangeList::of(vec![
             rename_at("src/a.rs", 1, "foo", "bar"),
             rename_at("src/b.rs", 1, "foo", "bar"),
-        ];
+        ]);
         let merged = files(&sources, changes);
         assert_eq!(merged.len(), 1);
         assert_eq!(merged[0].scope(), "src");
@@ -1064,10 +1062,10 @@ mod tests {
             source("src/b.rs", "foo\n"),
             source("src/c.rs", "foo\n"),
         ];
-        let changes = vec![
+        let changes = ChangeList::of(vec![
             rename_at("src/a.rs", 1, "foo", "bar"),
             rename_at("src/b.rs", 1, "foo", "bar"),
-        ];
+        ]);
         let merged = files(&sources, changes);
         assert_eq!(merged.len(), 2);
         assert_eq!(merged[0].scope(), "src/a.rs:1");
@@ -1082,11 +1080,11 @@ mod tests {
             source("src/a.rs", "foo\n"),
             source("src/b.rs", "foo\n"),
         ];
-        let changes = vec![
+        let changes = ChangeList::of(vec![
             rename_at("other/c.rs", 1, "foo", "bar"),
             rename_at("src/a.rs", 1, "foo", "bar"),
             rename_at("src/b.rs", 1, "foo", "bar"),
-        ];
+        ]);
         let merged = files(&sources, changes);
         assert_eq!(merged.len(), 2);
         assert_eq!(merged[0].scope(), "other/c.rs:1");
