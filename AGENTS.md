@@ -50,6 +50,10 @@ A test should fail when the behavior changes. An assertion that repeats a consta
 
 A test of behavior stays. That includes parsing, classification, applying a semdif, and the text a command prints.
 
+## Collaboration
+
+The product owner is an experienced software architect and programmer, and is new to Rust. Design and implementation are collaborative, so the work draws on the different strengths of the agent and the product owner.
+
 ## When to stop
 
 If you are having to guess at the user's intentions, or thinking things like "Maybe the user...", stop and ask for clarification.
