@@ -6,11 +6,7 @@ use crate::change::{Change, ChangeList};
 ///
 /// `None` means a copy is not text, so the caller records the file as a whole.
 /// An empty list means the lines match.
-pub(crate) fn text_line_changes(
-    path: &str,
-    before: &[u8],
-    after: &[u8],
-) -> Option<Vec<Box<dyn Change>>> {
+pub(crate) fn text_line_changes(path: &str, before: &[u8], after: &[u8]) -> Option<ChangeList> {
     let (Ok(before_text), Ok(after_text)) =
         (std::str::from_utf8(before), std::str::from_utf8(after))
     else {
@@ -51,7 +47,7 @@ pub(crate) fn text_line_changes(
 /// The records are ordered by
 /// `old`, then `new`, which walks the file from the top. Apply rebuilds the
 /// file from the old positions, so that order is for reading.
-pub(crate) fn line_changes(path: &str, before: &str, after: &str) -> Vec<Box<dyn Change>> {
+pub(crate) fn line_changes(path: &str, before: &str, after: &str) -> ChangeList {
     let old_lines = split_text(before);
     let new_lines = split_text(after);
     let matches = longest_common_subsequence(&old_lines.lines, &new_lines.lines);
@@ -62,7 +58,7 @@ pub(crate) fn line_changes(path: &str, before: &str, after: &str) -> Vec<Box<dyn
     changes.sort_by_key(|change| line_position(change.as_ref()));
     let mut changes = ChangeList::of(changes);
     crate::change::merge_identifier_spans(path, &old_lines.lines, &mut changes);
-    changes.to_vec()
+    changes
 }
 
 /// The lines of a text file, without their separating newlines.

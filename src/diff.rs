@@ -22,16 +22,16 @@ pub(crate) use line_changes::{join_text, split_text, Text};
 use std::collections::BTreeSet;
 use std::path::Path;
 
-use crate::change::{Change, ChangeList};
+use crate::change::ChangeList;
 use crate::filesystem::FileSystem;
 
 /// The shared paths and the change records for one comparison.
 ///
 /// `paths` are the files whose contents were compared. A moved file is listed
-/// at its new path. `changes` are the records written into the semdif.
+/// at its new path. `changes` are written into the semdif.
 pub(crate) struct Differences {
     pub(crate) paths: Vec<String>,
-    pub(crate) changes: Vec<Box<dyn Change>>,
+    pub(crate) changes: ChangeList,
 }
 
 /// The shared files and file changes between the two sources.
@@ -69,11 +69,11 @@ pub(crate) fn find_differences(
     paired_files.sort();
     let content = file_change::paired_changes(fs, sources, &paired_files, &changes)?;
     changes.append(content);
-    changes.append(directory_changes::directory_changes(
+    changes.append(ChangeList::of(directory_changes::directory_changes(
         &left_dirs,
         &right_dirs,
         &right_files,
-    ));
+    )));
     directory_changes::place_replacement_files(&mut changes);
     crate::change::merge_adjacent(&mut changes);
     let right_root = fs.source_base(Path::new(&sources.right));
@@ -85,7 +85,7 @@ pub(crate) fn find_differences(
     crate::change::merge_identifier_files(&texts, &mut changes);
     Ok(Differences {
         paths: paired_files,
-        changes: changes.to_vec(),
+        changes,
     })
 }
 

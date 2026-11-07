@@ -429,20 +429,18 @@ impl ChangeList {
     }
 
     /// Appends the changes from a later stage of the comparison.
-    pub(crate) fn append(&mut self, more: Vec<Box<dyn Change>>) {
-        self.changes.extend(more);
-    }
-
-    /// The changes, in their current order.
-    ///
-    /// The comparison hands these to its result once the passes have finished.
-    pub(crate) fn to_vec(self) -> Vec<Box<dyn Change>> {
-        self.changes
+    pub(crate) fn append(&mut self, more: ChangeList) {
+        self.changes.extend(more.changes);
     }
 
     /// How many changes this list holds.
     pub(crate) fn len(&self) -> usize {
         self.changes.len()
+    }
+
+    /// Whether this list holds no changes.
+    pub(crate) fn is_empty(&self) -> bool {
+        self.changes.is_empty()
     }
 
     /// Lends the change at `index` and the change after it.
