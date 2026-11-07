@@ -57,16 +57,16 @@ pub(crate) fn apply_document(
 ) -> Result<(), String> {
     let changes = crate::semdif::parse_changes(document)?;
     let mut applied_content = BTreeSet::new();
-    for index in 0..changes.len() {
-        if let Some(content) = changes[index].content() {
+    for change in &changes {
+        if let Some(content) = change.content() {
             let path = content.file();
             if !applied_content.insert(path.to_string()) {
                 continue;
             }
             apply_file(fs, source, path, &changes)?;
-        } else if changes[index].directory_scope().is_some() {
+        } else if change.directory_scope().is_some() {
             for path in fs.collect_files(source)? {
-                if !changes[index].edits_file(&path) {
+                if !change.edits_file(&path) {
                     continue;
                 }
                 if !applied_content.insert(path.clone()) {
@@ -75,7 +75,7 @@ pub(crate) fn apply_document(
                 apply_file(fs, source, &path, &changes)?;
             }
         } else {
-            apply_change(fs, source, &changes[index], ignore_hash)?;
+            apply_change(fs, source, change, ignore_hash)?;
         }
     }
     Ok(())
@@ -89,9 +89,9 @@ fn apply_file(
     changes: &ChangeList,
 ) -> Result<(), String> {
     let mut batch = Vec::new();
-    for index in 0..changes.len() {
-        if changes[index].edits_file(path) {
-            batch.push(&changes[index]);
+    for change in changes {
+        if change.edits_file(path) {
+            batch.push(change);
         }
     }
     apply_content(fs, source, path, &batch)

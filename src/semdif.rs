@@ -76,8 +76,8 @@ fn semdif_document(version: &str, timestamp: &str, changes: &ChangeList) -> Stri
         return document;
     }
     document.push_str("changes:\n");
-    for index in 0..changes.len() {
-        write_change(&mut document, &changes[index]);
+    for change in changes {
+        write_change(&mut document, change);
     }
     document
 }
