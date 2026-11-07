@@ -12,8 +12,8 @@ use crate::filesystem::FileSystem;
 ///
 /// The semdif file is the record of what changed, so the same edits can be replayed
 /// on another copy of that directory. A semdif path of `-` is read from standard
-/// input. `ignore_hash` still applies an added, deleted, or renamed file when its
-/// recorded hash does not match. A problem is reported on stderr.
+/// input. `ignore_hash` still applies an added, deleted, renamed, or moved file
+/// when its recorded hash does not match. A problem is reported on stderr.
 pub(crate) fn apply(
     fs: &dyn FileSystem,
     semdif: &str,
@@ -99,8 +99,8 @@ fn apply_file(
 /// Performs one structural change in the source directory.
 ///
 /// A content edit is applied with the other edits of its file, in `apply_content`.
-/// `ignore_hash` still applies an added, deleted, or renamed file when its
-/// recorded hash does not match.
+/// `ignore_hash` still applies an added, deleted, renamed, or moved file when
+/// its recorded hash does not match.
 fn apply_change(
     fs: &dyn FileSystem,
     source: &Path,

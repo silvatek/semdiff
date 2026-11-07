@@ -8,14 +8,19 @@ use sha2::{Digest, Sha256};
 use crate::change::Change;
 use crate::filesystem::FileSystem;
 
-/// Renames, deletions, and additions among the files that exist on only one side,
-/// and content changes for a path that exists on both sides.
+/// Renames, moves, deletions, and additions among the files that exist on only
+/// one side, and content changes for a path that exists on both sides.
 ///
 /// A hash identifies the content. One file on the left and one file on the right with
-/// the same hash are a rename, so identical copies are not paired by guesswork. A file
-/// that remains only on the left was removed. A file that remains only on the right
-/// was added, and its contents are kept so the file can be recreated. Each record
-/// includes that SHA-256, so apply can check the bytes it moves, removes, or writes.
+/// the same hash are a rename, so identical copies are not paired by guesswork.
+/// One deleted file and one added file that share a filename are a move when
+/// more than half the lines of the longer copy stay in order. The filename is
+/// the final component of the path. The move names both paths and the hash of
+/// the bytes at the old path. The new path is compared with the paired files,
+/// so the edit is recorded there. A file that remains only on the left was
+/// removed. A file that remains only on the right was added, and its contents
+/// are kept so the file can be recreated. Each record includes the SHA-256 of
+/// the bytes it removes, renames, or writes, so apply can check them.
 pub(crate) fn file_changes(
     fs: &dyn FileSystem,
     sources: &crate::Sources,
@@ -57,8 +62,47 @@ pub(crate) fn file_changes(
             }));
         }
     }
+    let mut moved_from = HashSet::new();
+    let mut moved_to = HashSet::new();
+    let mut left_names = HashMap::<&str, Vec<&String>>::new();
     for path in left_only {
-        if !renamed_from.contains(path.as_str()) {
+        if renamed_from.contains(path.as_str()) {
+            continue;
+        }
+        left_names.entry(file_name(path)).or_default().push(path);
+    }
+    let mut right_names = HashMap::<&str, Vec<&String>>::new();
+    for path in right_only {
+        if renamed_to.contains(path.as_str()) {
+            continue;
+        }
+        right_names.entry(file_name(path)).or_default().push(path);
+    }
+    for (name, from_paths) in &left_names {
+        let Some(to_paths) = right_names.get(name) else {
+            continue;
+        };
+        if from_paths.len() != 1 || to_paths.len() != 1 {
+            continue;
+        }
+        let from = from_paths[0];
+        let to = to_paths[0];
+        let before = read_file(fs, left_root, from)?;
+        let after = read_file(fs, right_root, to)?;
+        if !keeps_enough_lines(&before, &after) {
+            continue;
+        }
+        moved_from.insert(from.as_str());
+        moved_to.insert(to.as_str());
+        changes.push(Box::new(crate::change::FileMoved {
+            scope: crate::change::TREE_SCOPE.to_string(),
+            from: (*from).clone(),
+            to: (*to).clone(),
+            hash: digest_hex(&left_by_path[from.as_str()]),
+        }));
+    }
+    for path in left_only {
+        if !renamed_from.contains(path.as_str()) && !moved_from.contains(path.as_str()) {
             changes.push(Box::new(crate::change::FileDeleted {
                 scope: crate::change::TREE_SCOPE.to_string(),
                 path: path.clone(),
@@ -67,7 +111,7 @@ pub(crate) fn file_changes(
         }
     }
     for path in right_only {
-        if !renamed_to.contains(path.as_str()) {
+        if !renamed_to.contains(path.as_str()) && !moved_to.contains(path.as_str()) {
             changes.push(Box::new(crate::change::FileAdded {
                 scope: crate::change::TREE_SCOPE.to_string(),
                 path: path.clone(),
@@ -91,12 +135,13 @@ pub(crate) fn paired_changes(
     fs: &dyn FileSystem,
     sources: &crate::Sources,
     paired_files: &[String],
+    recorded: &[Box<dyn Change>],
 ) -> Result<Vec<Box<dyn Change>>, String> {
     let left_root = fs.source_base(Path::new(&sources.left));
     let right_root = fs.source_base(Path::new(&sources.right));
     let mut changes = Vec::new();
     for path in paired_files {
-        changes.extend(paired_change(fs, left_root, right_root, path)?);
+        changes.extend(paired_change(fs, left_root, right_root, path, recorded)?);
     }
     Ok(changes)
 }
@@ -107,9 +152,10 @@ fn paired_change(
     left_root: &Path,
     right_root: &Path,
     path: &str,
+    recorded: &[Box<dyn Change>],
 ) -> Result<Vec<Box<dyn Change>>, String> {
-    let before = read_file(fs, left_root, path)?;
-    let after = read_file(fs, right_root, path)?;
+    let before = super::read_content(path, super::ComparedSide::Left, left_root, fs, recorded)?;
+    let after = super::read_content(path, super::ComparedSide::Right, right_root, fs, recorded)?;
     if before == after {
         return Ok(Vec::new());
     }
@@ -126,6 +172,25 @@ fn paired_change(
         ))),
     }
     Ok(changes)
+}
+
+/// The final component of a relative path.
+///
+/// `old/note.txt` and `new/note.txt` share the name `note.txt`.
+fn file_name(path: &str) -> &str {
+    match path.rfind('/') {
+        Some(slash) => &path[slash + 1..],
+        None => path,
+    }
+}
+
+/// Whether a change list for these copies is smaller than the new file.
+///
+/// More than half the lines of the longer copy have to stay in order. Half
+/// stores as much as the new file. A copy that is not text has no lines to
+/// keep, so it is not a move.
+fn keeps_enough_lines(left: &[u8], right: &[u8]) -> bool {
+    common_line_proportion(left, right).is_some_and(|proportion| proportion > 0.5)
 }
 
 fn read_file(fs: &dyn FileSystem, root: &Path, relative: &str) -> Result<Vec<u8>, String> {
@@ -160,9 +225,9 @@ fn digest_hex(digest: &[u8]) -> String {
 
 /// The proportion of lines two files have in common.
 ///
-/// A later move check uses this to tell whether a list of changes to the
-/// existing file is a smaller record than the new file's contents. `None`
-/// means a file is not UTF-8 text, so it has no lines to compare.
+/// The move check uses this to tell whether a list of changes to the existing
+/// file is a smaller record than the new file's contents. `None` means a file
+/// is not UTF-8 text, so it has no lines to compare.
 ///
 /// Lines are split the same way as a line diff. A trailing newline is not a
 /// line, and a carriage return stays on its line. The common lines are one
@@ -171,7 +236,6 @@ fn digest_hex(digest: &[u8]) -> String {
 /// that count divided by the number of lines in the longer file. Two empty
 /// files share every line, so the proportion is 1. A file with lines and an
 /// empty file share none, so the proportion is 0.
-#[allow(dead_code)]
 pub(crate) fn common_line_proportion(left: &[u8], right: &[u8]) -> Option<f64> {
     let (Ok(left_text), Ok(right_text)) = (std::str::from_utf8(left), std::str::from_utf8(right))
     else {

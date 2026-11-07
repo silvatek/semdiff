@@ -49,6 +49,55 @@ impl Change for FileRenamed {
     }
 }
 
+/// A file moved to a new path, with its contents compared afterwards.
+///
+/// `from` is the old path and `to` is the new path. `hash` is the SHA-256 of
+/// the bytes still at `from`. Apply renames the file only when those bytes
+/// have that hash. The content comparison then edits the file at `to`.
+/// `--ignore-hash` renames it anyway.
+pub(crate) struct FileMoved {
+    pub(crate) scope: String,
+    pub(crate) from: String,
+    pub(crate) to: String,
+    pub(crate) hash: String,
+}
+
+impl Change for FileMoved {
+    fn kind(&self) -> &'static str {
+        "file-moved"
+    }
+
+    fn scope(&self) -> &str {
+        &self.scope
+    }
+
+    fn sort_key(&self) -> (&str, &str) {
+        (&self.from, &self.to)
+    }
+
+    fn file_move(&self) -> Option<&FileMoved> {
+        Some(self)
+    }
+
+    fn write_details(&self, document: &mut String) {
+        crate::semdif::write_detail(document, "from", &self.from);
+        crate::semdif::write_detail(document, "to", &self.to);
+        crate::semdif::write_detail(document, "hash", &self.hash);
+    }
+
+    fn check_recorded_hash(&self, fs: &dyn FileSystem, source: &Path) -> Result<(), String> {
+        let path = crate::filesystem::path_inside(source, &self.from)?;
+        let bytes = fs
+            .read(&path)
+            .map_err(|error| format!("cannot read {}: {error}", path.display()))?;
+        require_recorded_hash(&path, &bytes, &self.hash)
+    }
+
+    fn apply(&self, fs: &dyn FileSystem, source: &Path) -> Result<(), String> {
+        fs.rename_file(source, &self.from, &self.to)
+    }
+}
+
 /// A file removed from the tree.
 ///
 /// `hash` is the SHA-256 of the removed bytes. Apply deletes the file only
@@ -142,8 +191,9 @@ impl AddedFile for FileAdded {
 
 /// Rejects a tree edit whose bytes are not the recorded SHA-256.
 ///
-/// A deletion and a rename check the file still in the tree. An addition
-/// checks the bytes about to be written. A mismatch leaves the tree unchanged.
+/// A deletion, a rename, and a move check the file still in the tree. An
+/// addition checks the bytes about to be written. A mismatch leaves the tree
+/// unchanged.
 fn require_recorded_hash(path: &Path, bytes: &[u8], expected: &str) -> Result<(), String> {
     let actual = crate::diff::sha256_hex(bytes);
     if actual == expected {
