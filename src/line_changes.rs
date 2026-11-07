@@ -8,7 +8,10 @@ use crate::change::Change;
 /// only change is one identifier, occurring once on the old line, is an
 /// identifier rename. A modification whose only change is one integer, on a
 /// line that is not a comment and outside a string, is a constant change.
-/// A leading `-` is part of the integer when it starts the number.
+/// A leading `-` is part of the integer when it starts the number. A
+/// modification whose only change is one boolean constant listed by the
+/// dialect is a constant change too. The spelling is the whole name. ANSI C
+/// lists none, so those words stay names.
 /// An added or removed line is a full-line comment when that line opens with
 /// the dialect's line comment. A modification is one when
 /// both the old line and the new line do. A file with no dialect is never a
@@ -251,10 +254,11 @@ fn changes_in_hunk(path: &str, hunk: &Hunk) -> Vec<Box<dyn Change>> {
     changes
 }
 
-/// A paired line, recorded as an identifier rename when that is the whole edit.
+/// A paired line, recorded as a boolean constant, an identifier rename, or an
+/// integer constant when that is the whole edit.
 ///
-/// The rename's scope is `path:line`, with the old line. Anything else is a
-/// line modification. It is a full-line comment when both lines open with the
+/// The scope of those records is `path:line`, with the old line. Anything else
+/// is a line modification. It is a full-line comment when both lines open with the
 /// dialect's line comment. It is whitespace when the edit is a blank line or
 /// only an insignificant margin.
 fn modified_line(
@@ -264,6 +268,15 @@ fn modified_line(
     old_text: &str,
     new_text: &str,
 ) -> Box<dyn Change> {
+    if let Some(constant) = crate::constant::boolean_constant(path, old_text, new_text) {
+        return Box::new(crate::change::ConstantChanged::new(
+            crate::change::SpanScope::new(path, old),
+            new,
+            constant.old_value,
+            constant.new_value,
+            constant.occurrence,
+        ));
+    }
     if let Some(rename) = crate::identifier::identifier_rename(path, old_text, new_text) {
         return Box::new(crate::change::IdentifierRenamed::new(
             crate::change::SpanScope::new(path, old),

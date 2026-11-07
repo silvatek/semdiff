@@ -9,6 +9,11 @@
 //! an operator. The line is not a line comment, the digits are not inside a
 //! string, and they do not continue an identifier. A file with no dialect is
 //! not read for constants.
+//!
+//! A boolean constant is a spelling the dialect lists. The edit is a constant
+//! change when the lines differ only by one such spelling changing to another,
+//! and that spelling is a whole name. A spelling inside a string or a comment
+//! stays an identifier rename. ANSI C lists none.
 
 use crate::classify::{introduces_line_comment, span_in_string};
 use crate::dialect::Dialect;
@@ -134,6 +139,166 @@ pub(crate) fn is_integer(text: &str) -> bool {
         None => text,
     };
     !digits.is_empty() && digits.chars().all(|character| character.is_ascii_digit())
+}
+
+/// The old spelling, the new spelling, and which boolean on the old line changed.
+///
+/// `occurrence` counts spellings of the dialect's boolean constants on the old
+/// line, starting at 1. A spelling inside a string still counts, so the index
+/// stays put when that one is not the constant that changed.
+pub(crate) struct BooleanConstant {
+    pub(crate) old_value: String,
+    pub(crate) new_value: String,
+    pub(crate) occurrence: usize,
+}
+
+/// The boolean constant changed between these two lines, when that is the whole edit.
+///
+/// `None` leaves the edit to the other classifiers. The spelling has to be a
+/// whole name, one of the dialect's boolean constants, and the only difference
+/// on the line. The line is not a comment, and the spelling is not inside a
+/// string. A file with no dialect, and a dialect that lists none, is not read
+/// for boolean constants.
+pub(crate) fn boolean_constant(
+    path: &str,
+    old_line: &str,
+    new_line: &str,
+) -> Option<BooleanConstant> {
+    let dialect = crate::dialect::for_path(path)?;
+    if dialect.boolean_constants.is_empty() {
+        return None;
+    }
+    if introduces_line_comment(dialect, old_line) || introduces_line_comment(dialect, new_line) {
+        return None;
+    }
+    let old_tokens = boolean_tokens(dialect, old_line);
+    let new_tokens = boolean_tokens(dialect, new_line);
+    if old_tokens.len() != new_tokens.len() {
+        return None;
+    }
+    let mut changed = None;
+    let mut old_from = 0;
+    let mut new_from = 0;
+    for (index, (old_token, new_token)) in old_tokens.iter().zip(new_tokens.iter()).enumerate() {
+        if old_line[old_from..old_token.0] != new_line[new_from..new_token.0] {
+            return None;
+        }
+        let old_text = &old_line[old_token.0..old_token.1];
+        let new_text = &new_line[new_token.0..new_token.1];
+        if old_text != new_text {
+            if changed.is_some()
+                || span_in_string(dialect, old_line, old_token.0, old_token.1)
+                || span_in_string(dialect, new_line, new_token.0, new_token.1)
+            {
+                return None;
+            }
+            changed = Some(BooleanConstant {
+                old_value: old_text.to_string(),
+                new_value: new_text.to_string(),
+                occurrence: index + 1,
+            });
+        }
+        old_from = old_token.1;
+        new_from = new_token.1;
+    }
+    if old_line[old_from..] != new_line[new_from..] {
+        return None;
+    }
+    changed
+}
+
+/// Replaces one boolean constant on `line`.
+///
+/// `occurrence` is the 1-based index among the dialect's boolean spellings.
+/// The text of that spelling has to be `old_value`. A missing spelling is an
+/// error, so apply does not write a different edit.
+pub(crate) fn replace_boolean(
+    path: &str,
+    line: &str,
+    old_value: &str,
+    new_value: &str,
+    occurrence: usize,
+) -> Result<String, String> {
+    let Some(dialect) = crate::dialect::for_path(path) else {
+        return Err(format!("{path} has no dialect"));
+    };
+    let Some((start, end)) = boolean_tokens(dialect, line)
+        .get(occurrence.wrapping_sub(1))
+        .copied()
+    else {
+        return Err(format!("boolean {old_value} does not occur"));
+    };
+    if occurrence == 0 || &line[start..end] != old_value {
+        return Err(format!("boolean {old_value} does not occur"));
+    }
+    let mut replaced = String::new();
+    replaced.push_str(&line[..start]);
+    replaced.push_str(new_value);
+    replaced.push_str(&line[end..]);
+    Ok(replaced)
+}
+
+/// Whether `text` is a boolean spelling for the file at `path`.
+///
+/// The dialect lists the spellings. A file with no dialect, and a dialect
+/// that lists none, has no boolean constants.
+pub(crate) fn is_boolean(path: &str, text: &str) -> bool {
+    let Some(dialect) = crate::dialect::for_path(path) else {
+        return false;
+    };
+    dialect
+        .boolean_constants
+        .iter()
+        .any(|spelling| *spelling == text)
+}
+
+/// Boolean spellings on `line`, as byte offsets of the whole name.
+///
+/// A spelling is a whole identifier. `true_flag` is a name, not the boolean
+/// `true`. A spelling inside a string is still listed, so `occurrence` stays
+/// put.
+fn boolean_tokens(dialect: &Dialect, line: &str) -> Vec<(usize, usize)> {
+    let characters = &dialect.identifier_characters;
+    let mut tokens = Vec::new();
+    let mut index = 0;
+    while index < line.len() {
+        let Some(character) = line[index..].chars().next() else {
+            break;
+        };
+        if characters.starts(character) {
+            let end = end_of_name(characters, line, index + character.len_utf8());
+            let text = &line[index..end];
+            if dialect
+                .boolean_constants
+                .iter()
+                .any(|spelling| *spelling == text)
+            {
+                tokens.push((index, end));
+            }
+            index = end;
+            continue;
+        }
+        index += character.len_utf8();
+    }
+    tokens
+}
+
+/// The byte index just after the identifier that starts before `index`.
+fn end_of_name(
+    characters: &crate::dialect::IdentifierCharacters,
+    line: &str,
+    mut index: usize,
+) -> usize {
+    while index < line.len() {
+        let Some(character) = line[index..].chars().next() else {
+            break;
+        };
+        if !characters.continues(character) {
+            break;
+        }
+        index += character.len_utf8();
+    }
+    index
 }
 
 /// Integers on `line`, in order.
@@ -289,7 +454,10 @@ fn digit_runs(line: &str) -> Vec<(usize, usize)> {
 
 #[cfg(test)]
 mod tests {
-    use super::{integer_constant, is_integer, replace_integer};
+    use super::{
+        boolean_constant, integer_constant, is_boolean, is_integer, replace_boolean,
+        replace_integer,
+    };
 
     fn changed(path: &str, old_line: &str, new_line: &str) -> Option<(String, String, usize)> {
         integer_constant(path, old_line, new_line)
@@ -508,5 +676,113 @@ mod tests {
         assert!(replace_integer("src/main.rs", "let n = a-1;", "-1", "-2", 1).is_err());
         assert!(replace_integer("src/main.rs", "let n = 1;", "1", "2", 2).is_err());
         assert!(replace_integer("src/main.rs", "let n = 1;", "9", "2", 1).is_err());
+    }
+
+    fn flipped(path: &str, old_line: &str, new_line: &str) -> Option<(String, String, usize)> {
+        boolean_constant(path, old_line, new_line)
+            .map(|constant| (constant.old_value, constant.new_value, constant.occurrence))
+    }
+
+    #[test]
+    fn one_boolean_on_the_line_is_a_constant() {
+        assert_eq!(
+            flipped("src/main.rs", "let n = true;", "let n = false;"),
+            Some(("true".to_string(), "false".to_string(), 1))
+        );
+        assert_eq!(
+            flipped("src/main.rs", "let n = false;", "let n = true;"),
+            Some(("false".to_string(), "true".to_string(), 1))
+        );
+        assert_eq!(
+            flipped(
+                "src/main.rs",
+                "let a = true; let b = true;",
+                "let a = true; let b = false;"
+            ),
+            Some(("true".to_string(), "false".to_string(), 2))
+        );
+        assert_eq!(
+            flipped("src/main.js", "const n = true;", "const n = false;"),
+            Some(("true".to_string(), "false".to_string(), 1))
+        );
+        assert_eq!(
+            flipped("calc.py", "n = True", "n = False"),
+            Some(("True".to_string(), "False".to_string(), 1))
+        );
+        assert_eq!(
+            flipped("calc.py", "n = False", "n = True"),
+            Some(("False".to_string(), "True".to_string(), 1))
+        );
+        assert!(is_boolean("src/main.rs", "true"));
+        assert!(is_boolean("calc.py", "True"));
+        assert!(!is_boolean("src/main.rs", "True"));
+        assert!(!is_boolean("src/main.c", "true"));
+        assert!(!is_boolean("notes.txt", "true"));
+    }
+
+    #[test]
+    fn a_boolean_inside_a_name_string_or_comment_stays_put() {
+        assert_eq!(
+            flipped("src/main.rs", "let n = true_flag;", "let n = false_flag;"),
+            None
+        );
+        assert_eq!(
+            flipped("src/main.rs", "let s = \"true\";", "let s = \"false\";"),
+            None
+        );
+        assert_eq!(
+            flipped(
+                "src/main.rs",
+                "let s = \"true\"; let n = true;",
+                "let s = \"true\"; let n = false;"
+            ),
+            Some(("true".to_string(), "false".to_string(), 2))
+        );
+        assert_eq!(
+            flipped("src/main.js", "const s = 'true';", "const s = 'false';"),
+            None
+        );
+        assert_eq!(
+            flipped("calc.py", "s = '''True'''", "s = '''False'''"),
+            None
+        );
+        assert_eq!(flipped("src/main.rs", "// true", "// false"), None);
+        assert_eq!(flipped("calc.py", "# True", "# False"), None);
+        assert_eq!(
+            flipped(
+                "src/main.rs",
+                "let a = true; let b = false;",
+                "let a = false; let b = true;"
+            ),
+            None
+        );
+        assert_eq!(
+            flipped("src/main.c", "int n = true;", "int n = false;"),
+            None
+        );
+        assert_eq!(flipped("calc.py", "n = true", "n = false"), None);
+        assert_eq!(flipped("notes.txt", "n = true", "n = false"), None);
+    }
+
+    #[test]
+    fn replace_writes_the_one_boolean() {
+        assert_eq!(
+            replace_boolean(
+                "src/main.rs",
+                "let a = true; let b = true;",
+                "true",
+                "false",
+                2
+            )
+            .unwrap(),
+            "let a = true; let b = false;"
+        );
+        assert_eq!(
+            replace_boolean("src/main.rs", "let n = a-true;", "true", "false", 1).unwrap(),
+            "let n = a-false;"
+        );
+        assert!(replace_boolean("src/main.rs", "let n = true;", "true", "false", 2).is_err());
+        assert!(replace_boolean("src/main.rs", "let n = true;", "false", "true", 1).is_err());
+        assert!(replace_boolean("src/main.c", "int n = true;", "true", "false", 1).is_err());
     }
 }

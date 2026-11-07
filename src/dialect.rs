@@ -116,6 +116,13 @@ pub(crate) struct Dialect {
     /// `count` is not listed. `baseline` lists `return`. A language with more
     /// such words replaces the list.
     pub unary_minus_keywords: &'static [&'static str],
+    /// Spellings of the boolean constants.
+    ///
+    /// A change from one spelling to another is a constant change when that
+    /// spelling is the whole name. `baseline` lists none. Rust and JavaScript
+    /// list `true` and `false`. Python lists `True` and `False`. ANSI C lists
+    /// none, so those words stay names.
+    pub boolean_constants: &'static [&'static str],
 }
 
 impl Dialect {
@@ -125,7 +132,8 @@ impl Dialect {
     /// a `"` string escaped by `\`, and the shared identifier characters.
     /// Extensions are empty. Prefixes, named-block keywords, method scopes,
     /// and c-style functions are off. `return` can precede a negative integer.
-    /// A language static replaces the fields that differ.
+    /// Boolean constants are unlisted. A language static replaces the fields
+    /// that differ.
     pub(crate) const fn baseline() -> Self {
         Self {
             family: Family::CFamily,
@@ -153,6 +161,7 @@ impl Dialect {
             c_fun_type_prefix: false,
             statement_keywords: &[],
             unary_minus_keywords: &["return"],
+            boolean_constants: &[],
         }
     }
 }

@@ -11,7 +11,8 @@ use super::{BlockCategory, BlockEdge, Dialect, Family, NamedBlockKeyword, String
 /// and ends when the indentation returns. An identifier starts with a letter
 /// or `_` and continues with letters, digits, or `_`. A named block is opened
 /// by `def` or `class`, which are a function and a class. A `def` inside
-/// `class` is a method. A `def` inside another `def` is a function.
+/// `class` is a method. A `def` inside another `def` is a function. The
+/// boolean constants are `True` and `False`.
 pub(crate) static PYTHON: Dialect = Dialect {
     family: Family::Python,
     extensions: &[".py"],
@@ -51,5 +52,6 @@ pub(crate) static PYTHON: Dialect = Dialect {
     unary_minus_keywords: &[
         "return", "yield", "await", "not", "and", "or", "assert", "if", "elif", "while", "in",
     ],
+    boolean_constants: &["True", "False"],
     ..Dialect::baseline()
 };

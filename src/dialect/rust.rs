@@ -14,7 +14,7 @@ use super::{BlockCategory, Dialect, NamedBlockKeyword};
 /// `pub(crate)`, `pub(super)`, `pub(self)`, `async`, `unsafe`, or `const`.
 /// Those keywords are function, structure, enumeration, union, interface, and
 /// implementation. A `fn` inside `impl` or `trait` is a method. A `fn` inside
-/// another `fn` is a function.
+/// another `fn` is a function. The boolean constants are `true` and `false`.
 pub(crate) static RUST: Dialect = Dialect {
     extensions: &[".rs"],
     block_prefixes: &[
@@ -54,5 +54,6 @@ pub(crate) static RUST: Dialect = Dialect {
     ],
     method_scopes: &["impl", "trait"],
     unary_minus_keywords: &["return", "break", "if", "while", "match", "in"],
+    boolean_constants: &["true", "false"],
     ..Dialect::baseline()
 };

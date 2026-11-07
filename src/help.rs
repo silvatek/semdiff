@@ -127,6 +127,13 @@ What a comparison records
   changed. A sequence that continues an identifier stays an identifier rename.
   A file with no dialect stays a line modification.
 
+  A line edit whose only change is one boolean constant is constant-changed
+  on the same terms. The dialect lists the spellings. Rust and JavaScript
+  list true and false. Python lists True and False. ANSI C lists none, so
+  those words stay identifiers. The spelling has to be the whole name, and
+  the change is from one listed spelling to another. A spelling inside a
+  string or a comment stays an identifier rename.
+
   A file only on the left is file-deleted. A file only on the right is
   file-added, and the semdif keeps its bytes. One unpaired file on each side
   with the same SHA-256 is file-renamed. Each of those records includes the

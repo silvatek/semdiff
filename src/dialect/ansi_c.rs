@@ -12,7 +12,8 @@ use super::Dialect;
 /// `}`. An identifier starts with a letter or `_` and continues with letters,
 /// digits, or `_`. A c-style function has a type before its name, as in
 /// `int fib(int n) {`, optionally after `static` or `extern`. `step() {` stays
-/// a line edit. `if`, `while`, `for`, and `switch` stay line edits.
+/// a line edit. `if`, `while`, `for`, and `switch` stay line edits. ANSI C
+/// lists no boolean constants, so `true` and `false` stay names.
 pub(crate) static ANSI_C: Dialect = Dialect {
     extensions: &[".c", ".h"],
     block_prefixes: &["static", "extern"],
