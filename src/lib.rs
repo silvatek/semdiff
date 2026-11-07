@@ -11,7 +11,6 @@ mod filesystem;
 mod help;
 mod identifier;
 mod semdif;
-mod span;
 
 pub use filesystem::{FileSystem, MemoryFileSystem, NodeKind, StdFileSystem};
 

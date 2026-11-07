@@ -13,7 +13,7 @@
 //! A boolean constant is a spelling the dialect lists. The edit is a constant
 //! change when the lines differ only by one such spelling changing to another,
 //! and that spelling is a whole name. A spelling inside a string or a comment
-//! stays an identifier rename. ANSI C lists none. `span::classify` makes that
+//! stays an identifier rename. ANSI C lists none. `span_changes` makes that
 //! decision from the one changed span.
 
 use crate::dialect::Dialect;
@@ -49,15 +49,15 @@ pub(crate) fn integer_constant(
     old_line: &str,
     new_line: &str,
 ) -> Option<IntegerConstant> {
-    let found = crate::span::find_spans(path, old_line, new_line);
+    let found = crate::diff::span::find_spans(path, old_line, new_line);
     let [span] = found.as_slice() else {
         return None;
     };
-    let crate::span::Classification::Constant {
+    let crate::diff::span_changes::Classification::Constant {
         old_value,
         new_value,
         occurrence,
-    } = crate::span::classify(path, span)?
+    } = crate::diff::span_changes::classify(path, span)?
     else {
         return None;
     };
@@ -142,15 +142,15 @@ pub(crate) fn boolean_constant(
     old_line: &str,
     new_line: &str,
 ) -> Option<BooleanConstant> {
-    let found = crate::span::find_spans(path, old_line, new_line);
+    let found = crate::diff::span::find_spans(path, old_line, new_line);
     let [span] = found.as_slice() else {
         return None;
     };
-    let crate::span::Classification::Constant {
+    let crate::diff::span_changes::Classification::Constant {
         old_value,
         new_value,
         occurrence,
-    } = crate::span::classify(path, span)?
+    } = crate::diff::span_changes::classify(path, span)?
     else {
         return None;
     };

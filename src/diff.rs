@@ -5,12 +5,15 @@
 //! name a complete block, and join identifier renames that cover one directory.
 //!
 //! A file that exists on only one side, a paired file, an empty directory, and
-//! the lines of a text file each live in their own module.
+//! the lines of a text file each live in their own module. A changed line is
+//! split into spans, and one classified span becomes its own record.
 
 mod content_changes;
 mod directory_changes;
 mod file_change;
 mod line_changes;
+pub(crate) mod span;
+pub(crate) mod span_changes;
 
 pub(crate) use file_change::sha256_hex;
 pub(crate) use line_changes::{join_text, split_text, Text};

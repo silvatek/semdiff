@@ -1,11 +1,9 @@
 //! The changed stretches of one line.
 //!
-//! A span is text that differs between the two copies of a line, widened to
-//! the token that contains the edit. Characters that are the same on both
-//! lines are not a span. `find_spans` lists those stretches. `classify` reads
-//! one span: a boolean spelling outside a string and a comment, then an
-//! integer outside a string and a comment, then one identifier whose old name
-//! occurs once.
+//! `line_changes` calls `find_spans` once it has two copies of a line. A span
+//! is text that differs, widened to the token that contains the edit.
+//! Characters that are the same on both lines are not a span. String and
+//! comment flags are set here, before a span is classified.
 
 use crate::classify::{span_in_comment, span_in_string};
 use crate::constant::IntegerToken;
@@ -29,18 +27,6 @@ pub(crate) struct Span<'a> {
     pub(crate) in_string: bool,
     /// Whether either side of the span lies inside a comment.
     pub(crate) in_comment: bool,
-}
-
-/// The record for one classified span.
-pub(crate) enum Classification {
-    /// A boolean spelling or an integer changed.
-    Constant {
-        old_value: String,
-        new_value: String,
-        occurrence: usize,
-    },
-    /// One identifier changed, and the old name occurs once on the line.
-    Rename { oldname: String, newname: String },
 }
 
 /// The changed spans between the two copies of a line, from left to right.
@@ -73,100 +59,20 @@ pub(crate) fn find_spans<'a>(path: &str, old_line: &'a str, new_line: &'a str) -
         .collect()
 }
 
-/// The change recorded for `span`.
-///
-/// A boolean spelling outside a string and a comment is a constant. An integer
-/// outside a string and a comment is a constant. One identifier whose old name
-/// occurs once on `span.line` is a rename. Anything else is `None`.
-pub(crate) fn classify(path: &str, span: &Span<'_>) -> Option<Classification> {
-    let dialect = crate::dialect::for_path(path)?;
-    let shielded = span.in_string || span.in_comment;
-    if !shielded
-        && crate::constant::is_boolean(path, span.old_text)
-        && crate::constant::is_boolean(path, span.new_text)
-    {
-        let occurrence = boolean_occurrence(dialect, span.line, span.start)?;
-        return Some(Classification::Constant {
-            old_value: span.old_text.to_string(),
-            new_value: span.new_text.to_string(),
-            occurrence,
-        });
-    }
-    if !shielded
-        && crate::constant::is_integer(span.old_text)
-        && crate::constant::is_integer(span.new_text)
-    {
-        let digits = first_digit(span)?;
-        let occurrence = crate::constant::digit_run_index(span.line, digits)? + 1;
-        return Some(Classification::Constant {
-            old_value: span.old_text.to_string(),
-            new_value: span.new_text.to_string(),
-            occurrence,
-        });
-    }
-    if is_one_identifier(dialect, span.old_text)
-        && is_one_identifier(dialect, span.new_text)
-        && crate::identifier::occurrence_count(path, span.line, span.old_text) == Some(1)
-    {
-        return Some(Classification::Rename {
-            oldname: span.old_text.to_string(),
-            newname: span.new_text.to_string(),
-        });
-    }
-    None
-}
-
-/// The byte offset of the first digit in `span` on the old line.
-fn first_digit(span: &Span<'_>) -> Option<usize> {
-    let relative = span
-        .old_text
-        .char_indices()
-        .find(|(_, character)| character.is_ascii_digit())?
-        .0;
-    Some(span.start + relative)
-}
-
-/// Whether `text` is one identifier and nothing else.
-fn is_one_identifier(dialect: &Dialect, text: &str) -> bool {
-    let mut characters = text.chars();
-    let Some(first) = characters.next() else {
-        return false;
-    };
-    dialect.identifier_characters.starts(first)
-        && characters.all(|character| dialect.identifier_characters.continues(character))
-}
-
-/// The 1-based index of the boolean spelling that starts at `start`.
-///
-/// Spellings inside strings and comments count.
-fn boolean_occurrence(dialect: &Dialect, line: &str, start: usize) -> Option<usize> {
-    atoms(dialect, line)
-        .iter()
-        .filter(|atom| {
-            atom.kind == AtomKind::Identifier
-                && dialect
-                    .boolean_constants
-                    .iter()
-                    .any(|spelling| *spelling == atom.text)
-        })
-        .position(|atom| atom.start == start)
-        .map(|index| index + 1)
-}
-
 /// A token or a run of other characters on one line.
 ///
 /// These pieces cover the line so the two copies can be aligned. Only a
 /// piece whose text differs becomes a span.
-struct Atom<'a> {
-    kind: AtomKind,
-    start: usize,
+pub(super) struct Atom<'a> {
+    pub(super) kind: AtomKind,
+    pub(super) start: usize,
     end: usize,
-    text: &'a str,
+    pub(super) text: &'a str,
 }
 
 /// What an atom is for alignment.
 #[derive(Clone, Copy, PartialEq, Eq)]
-enum AtomKind {
+pub(super) enum AtomKind {
     Text,
     Identifier,
     Integer,
@@ -254,7 +160,7 @@ fn longest_common_subsequence(old_atoms: &[Atom<'_>], new_atoms: &[Atom<'_>]) ->
 ///
 /// An integer includes a leading `-` when that minus starts the number.
 /// Digits that continue a name stay inside that name.
-fn atoms<'a>(dialect: &Dialect, line: &'a str) -> Vec<Atom<'a>> {
+pub(super) fn atoms<'a>(dialect: &Dialect, line: &'a str) -> Vec<Atom<'a>> {
     let integers = crate::constant::integer_tokens(dialect, line);
     let mut next_integer = 0;
     let mut found = Vec::new();
@@ -331,45 +237,4 @@ fn end_of_name(dialect: &Dialect, line: &str, mut index: usize) -> usize {
         index += character.len_utf8();
     }
     index
-}
-
-#[cfg(test)]
-mod tests {
-    use super::{classify, find_spans};
-    use crate::constant::{boolean_constant, integer_constant};
-    use crate::identifier::identifier_rename;
-
-    #[test]
-    fn an_integer_inside_a_comment_stays_a_modification() {
-        assert!(integer_constant("src/main.rs", "let n = 1; // 2", "let n = 1; // 3").is_none());
-        assert!(integer_constant("src/main.rs", "/* 1 */", "/* 2 */").is_none());
-        assert_eq!(
-            integer_constant("src/main.rs", "let n = 1; // 9", "let n = 2; // 9")
-                .map(|constant| constant.occurrence),
-            Some(1)
-        );
-        assert_eq!(
-            integer_constant("src/main.rs", "/* 9 */ let n = 1;", "/* 9 */ let n = 2;")
-                .map(|constant| constant.occurrence),
-            Some(2)
-        );
-    }
-
-    #[test]
-    fn a_boolean_inside_a_comment_stays_a_rename() {
-        assert!(
-            boolean_constant("src/main.rs", "let n = 1; // true", "let n = 1; // false").is_none()
-        );
-        assert_eq!(
-            identifier_rename("src/main.rs", "let n = 1; // true", "let n = 1; // false")
-                .map(|rename| (rename.oldname, rename.newname)),
-            Some(("true".to_string(), "false".to_string()))
-        );
-        let old_line = "let n = true; // true";
-        let new_line = "let n = true; // false";
-        let found = find_spans("src/main.rs", old_line, new_line);
-        assert_eq!(found.len(), 1);
-        assert!(found[0].in_comment);
-        assert!(classify("src/main.rs", &found[0]).is_none());
-    }
 }

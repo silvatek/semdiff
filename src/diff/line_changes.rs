@@ -268,30 +268,10 @@ fn modified_line(
     old_text: &str,
     new_text: &str,
 ) -> Box<dyn Change> {
-    let found = crate::span::find_spans(path, old_text, new_text);
+    let found = super::span::find_spans(path, old_text, new_text);
     if let [span] = found.as_slice() {
-        if let Some(edit) = crate::span::classify(path, span) {
-            return match edit {
-                crate::span::Classification::Constant {
-                    old_value,
-                    new_value,
-                    occurrence,
-                } => Box::new(crate::change::ConstantChanged::new(
-                    crate::change::SpanScope::new(path, old),
-                    new,
-                    old_value,
-                    new_value,
-                    occurrence,
-                )),
-                crate::span::Classification::Rename { oldname, newname } => {
-                    Box::new(crate::change::IdentifierRenamed::new(
-                        crate::change::SpanScope::new(path, old),
-                        new,
-                        oldname,
-                        newname,
-                    ))
-                }
-            };
+        if let Some(change) = super::span_changes::record(path, old, new, span) {
+            return change;
         }
     }
     Box::new(crate::change::LineModified::new(
