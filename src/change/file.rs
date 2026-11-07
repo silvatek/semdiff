@@ -75,8 +75,8 @@ impl Change for FileMoved {
         (&self.from, &self.to)
     }
 
-    fn file_move(&self) -> Option<(&str, &str)> {
-        Some((&self.from, &self.to))
+    fn file_move(&self) -> Option<&FileMoved> {
+        Some(self)
     }
 
     fn write_details(&self, document: &mut String) {

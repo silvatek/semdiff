@@ -97,11 +97,14 @@ enum ComparedSide {
 ///
 /// A comparison pass uses this when it has the file's new scope and needs the
 /// record that still names the old path.
-fn file_move_for<'a>(path: &str, changes: &'a [Box<dyn Change>]) -> Option<&'a dyn Change> {
+fn file_move_for<'a>(
+    path: &str,
+    changes: &'a [Box<dyn Change>],
+) -> Option<&'a crate::change::FileMoved> {
     for change in changes {
-        if let Some((_, to)) = change.file_move() {
-            if to == path {
-                return Some(change.as_ref());
+        if let Some(moved) = change.file_move() {
+            if moved.to == path {
+                return Some(moved);
             }
         }
     }
@@ -125,9 +128,7 @@ fn read_compared(
     let mut relative = path;
     if let ComparedSide::Left = side {
         if let Some(moved) = file_move_for(path, changes) {
-            if let Some((from, _)) = moved.file_move() {
-                relative = from;
-            }
+            relative = &moved.from;
         }
     }
     let full = root.join(relative);
@@ -169,7 +170,7 @@ fn source_texts(
 fn moved_destinations(changes: &[Box<dyn Change>]) -> Vec<String> {
     changes
         .iter()
-        .filter_map(|change| change.file_move().map(|(_, to)| to.to_string()))
+        .filter_map(|change| change.file_move().map(|moved| moved.to.clone()))
         .collect()
 }
 
@@ -180,7 +181,7 @@ fn moved_destinations(changes: &[Box<dyn Change>]) -> Vec<String> {
 fn old_text_paths(left_files: &[String], changes: &[Box<dyn Change>]) -> Vec<String> {
     let moved_from: BTreeSet<&str> = changes
         .iter()
-        .filter_map(|change| change.file_move().map(|(from, _)| from))
+        .filter_map(|change| change.file_move().map(|moved| moved.from.as_str()))
         .collect();
     let mut paths: Vec<String> = left_files
         .iter()

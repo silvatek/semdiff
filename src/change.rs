@@ -124,11 +124,11 @@ pub(crate) trait Change {
         None
     }
 
-    /// The old path and the new path, when this change moves a file.
+    /// This change moves a file, when it does.
     ///
-    /// The content comparison reads the old bytes at the old path and records
-    /// the edit at the new path.
-    fn file_move(&self) -> Option<(&str, &str)> {
+    /// The content comparison reads the old bytes at [`FileMoved::from`] and
+    /// records the edit at [`FileMoved::to`].
+    fn file_move(&self) -> Option<&FileMoved> {
         None
     }
 
