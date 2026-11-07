@@ -10,8 +10,8 @@
 //!
 //! Directory changes, file changes, line changes, and span changes live in
 //! their own modules. The list that holds them does too. A span is a portion
-//! of one line. Its scope is `path:line` or `path:start-end`. A rename that
-//! covers several files names the directory instead.
+//! of one line. Its scope is `path:line` or `path:start-end`. A rename or an
+//! import move that covers several files names the directory instead.
 
 mod changelist;
 mod directory;
@@ -27,8 +27,9 @@ pub(crate) use line::{
     NamedBlockRemoved,
 };
 pub(crate) use span::{
-    merge_identifier_files, merge_identifier_spans, parse_rename_scope, parse_span_scope,
-    ConstantChanged, IdentifierRenamed, RenameScope, SourceText, SpanScope,
+    merge_identifier_files, merge_identifier_spans, merge_import_files, merge_import_spans,
+    parse_rename_scope, parse_span_scope, ConstantChanged, IdentifierRenamed, ImportMoved,
+    RenameScope, SourceText, SpanScope,
 };
 
 use std::collections::{BTreeMap, BTreeSet};
@@ -139,6 +140,11 @@ pub(crate) trait Change {
         None
     }
 
+    /// This change moves an import, when it does.
+    fn import_move(&self) -> Option<ImportMove<'_>> {
+        None
+    }
+
     /// This change edits `path` when its file batch is applied.
     ///
     /// A content change edits the file it names. A directory-scoped rename
@@ -158,6 +164,19 @@ pub(crate) trait Change {
 /// `file` is the file the rename already covers. `start` and `end` are the old
 /// lines in that file. A rename of one line has the same start and end.
 pub(crate) struct IdentifierRename<'a> {
+    pub(crate) file: &'a str,
+    pub(crate) oldname: &'a str,
+    pub(crate) newname: &'a str,
+    pub(crate) start: usize,
+    pub(crate) end: usize,
+}
+
+/// The names and old lines of one import move.
+///
+/// The fields match an identifier rename so the two kinds merge the same way.
+/// `file` is the file the move already covers. `start` and `end` are the old
+/// lines in that file. A move of one line has the same start and end.
+pub(crate) struct ImportMove<'a> {
     pub(crate) file: &'a str,
     pub(crate) oldname: &'a str,
     pub(crate) newname: &'a str,

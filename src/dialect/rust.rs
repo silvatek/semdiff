@@ -1,4 +1,4 @@
-//! Rust's extensions, comments, strings, names, keywords, and boolean spellings.
+//! Rust's extensions, comments, strings, names, keywords, imports, and boolean spellings.
 
 use super::{BlockCategory, Dialect, NamedBlockKeyword};
 
@@ -15,6 +15,7 @@ use super::{BlockCategory, Dialect, NamedBlockKeyword};
 /// Those keywords are function, structure, enumeration, union, interface, and
 /// implementation. A `fn` inside `impl` or `trait` is a method. A `fn` inside
 /// another `fn` is a function. The boolean constants are `true` and `false`.
+/// `use` introduces an import.
 pub(crate) static RUST: Dialect = Dialect {
     extensions: &[".rs"],
     block_prefixes: &[
@@ -55,5 +56,6 @@ pub(crate) static RUST: Dialect = Dialect {
     method_scopes: &["impl", "trait"],
     unary_minus_keywords: &["return", "break", "if", "while", "match", "in"],
     boolean_constants: &["true", "false"],
+    import_keywords: &["use"],
     ..Dialect::baseline()
 };

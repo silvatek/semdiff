@@ -166,6 +166,57 @@ changes:
 }
 
 #[test]
+fn rejects_an_import_move_whose_line_is_zero() {
+    let tree = Tree::new();
+    tree.write("edited/src/main.rs", "use old::path::Item;\n");
+    let message = tree
+        .apply(
+            "edited",
+            "\
+header:
+  semdiff: \"0.1.0\"
+  timestamp: \"2020-01-01T00:00:00Z\"
+changes:
+  - scope: \"src/main.rs:0\"
+    type: import-moved
+    details:
+      new: 1
+      oldname: \"old::path::Item\"
+      newname: \"new::place::Item\"
+",
+        )
+        .unwrap_err();
+
+    assert!(message.contains("path:line"), "{message}");
+    assert_eq!(tree.read("edited/src/main.rs"), b"use old::path::Item;\n");
+}
+
+#[test]
+fn rejects_an_import_move_that_is_missing_its_old_name() {
+    let tree = Tree::new();
+    tree.write("edited/src/main.rs", "use old::path::Item;\n");
+    let message = tree
+        .apply(
+            "edited",
+            "\
+header:
+  semdiff: \"0.1.0\"
+  timestamp: \"2020-01-01T00:00:00Z\"
+changes:
+  - scope: \"src/main.rs:1\"
+    type: import-moved
+    details:
+      new: 1
+      newname: \"new::place::Item\"
+",
+        )
+        .unwrap_err();
+
+    assert!(message.contains("missing oldname"), "{message}");
+    assert_eq!(tree.read("edited/src/main.rs"), b"use old::path::Item;\n");
+}
+
+#[test]
 fn rejects_a_line_change_with_an_invalid_comment_flag() {
     let tree = Tree::new();
     tree.write("edited/src/main.rs", "fn main() {}\n");

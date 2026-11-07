@@ -1,4 +1,4 @@
-//! Python's extensions, comments, strings, names, keywords, and boolean spellings.
+//! Python's extensions, comments, strings, names, keywords, imports, and boolean spellings.
 
 use super::{BlockCategory, BlockEdge, Dialect, Family, NamedBlockKeyword, StringDelimiter};
 
@@ -12,7 +12,8 @@ use super::{BlockCategory, BlockEdge, Dialect, Family, NamedBlockKeyword, String
 /// or `_` and continues with letters, digits, or `_`. A named block is opened
 /// by `def` or `class`, which are a function and a class. A `def` inside
 /// `class` is a method. A `def` inside another `def` is a function. The
-/// boolean constants are `True` and `False`.
+/// boolean constants are `True` and `False`. `import` and `from` introduce
+/// an import.
 pub(crate) static PYTHON: Dialect = Dialect {
     family: Family::Python,
     extensions: &[".py"],
@@ -53,5 +54,6 @@ pub(crate) static PYTHON: Dialect = Dialect {
         "return", "yield", "await", "not", "and", "or", "assert", "if", "elif", "while", "in",
     ],
     boolean_constants: &["True", "False"],
+    import_keywords: &["import", "from"],
     ..Dialect::baseline()
 };

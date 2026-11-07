@@ -250,6 +250,32 @@ fn line_regions(dialect: &Dialect, line: &str) -> LineRegions {
     regions
 }
 
+/// The byte index of a line-comment marker outside a string.
+///
+/// The marker runs to the end of the line. A marker inside a string is not a
+/// comment, so `//` inside `"http://..."` stays part of the string. A block
+/// comment is not this marker. A line with no line comment returns `None`.
+pub(crate) fn line_comment_marker(dialect: &Dialect, line: &str) -> Option<usize> {
+    let marker = dialect.line_comment;
+    if marker.is_empty() {
+        return None;
+    }
+    line_regions(dialect, line)
+        .comments
+        .iter()
+        .find_map(|&(from, to)| {
+            if to != line.len() {
+                return None;
+            }
+            let at = from.checked_sub(marker.len())?;
+            if line.get(at..from) == Some(marker) {
+                Some(at)
+            } else {
+                None
+            }
+        })
+}
+
 /// The longest string delimiter that `rest` starts with.
 fn opening_string<'a>(dialect: &'a Dialect, rest: &str) -> Option<&'a StringDelimiter> {
     dialect

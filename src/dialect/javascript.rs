@@ -1,4 +1,4 @@
-//! JavaScript's extensions, comments, strings, names, keywords, and boolean spellings.
+//! JavaScript's extensions, comments, strings, names, keywords, imports, and boolean spellings.
 
 use super::{BlockCategory, Dialect, IdentifierCharacters, NamedBlockKeyword, StringDelimiter};
 
@@ -21,7 +21,7 @@ const IDENTIFIER_CONTINUE: &str =
 /// method. Outside `class` it is a function. `if`, `while`, `for`, `switch`,
 /// and `catch` stay line edits. A generator written `function*`, and text
 /// above the keyword, stay line edits. The boolean constants are `true` and
-/// `false`.
+/// `false`. `import` introduces an import.
 pub(crate) static JAVASCRIPT: Dialect = Dialect {
     extensions: &[".js"],
     identifier_characters: IdentifierCharacters {
@@ -61,5 +61,6 @@ pub(crate) static JAVASCRIPT: Dialect = Dialect {
         "in",
     ],
     boolean_constants: &["true", "false"],
+    import_keywords: &["import"],
     ..Dialect::baseline()
 };
