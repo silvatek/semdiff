@@ -1,4 +1,5 @@
-//! A change to a portion of one line.
+//! The record of a span-level change, including how such records combine and how
+//! apply carries one out. A span is a changed sequence within a line.
 //!
 //! Directory, file, and line changes each have their own scope rules. A span
 //! change names one old line, written `path:line`, or a run of old lines,
