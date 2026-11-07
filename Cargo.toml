@@ -4,6 +4,11 @@ version = "0.1.0"
 edition = "2021"
 license = "Apache-2.0"
 description = "Semantic diff command-line utility"
+autotests = false
+
+[[test]]
+name = "semdiff"
+path = "tests/lib.rs"
 
 [dependencies]
 base64 = "0.22"

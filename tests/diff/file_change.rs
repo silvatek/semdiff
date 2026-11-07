@@ -1,4 +1,6 @@
-use super::tree::Tree;
+//! Identifying and classifying changes at the file level.
+
+use crate::filesystem::Tree;
 
 #[test]
 fn writes_a_file_renamed_change() {
@@ -215,4 +217,21 @@ changes:
 
     assert_eq!(message, "file-deleted is missing hash");
     assert_eq!(tree.read("source/notes.txt"), b"left only\n");
+}
+
+#[test]
+fn records_a_whole_file_when_only_the_final_newline_differs() {
+    let tree = Tree::new();
+    tree.write("left/note.txt", "hello");
+    tree.write("right/note.txt", "hello\n");
+    tree.write("edited/note.txt", "hello");
+
+    let document = tree.compare("left", "right");
+
+    assert!(document.contains(
+        "  - scope: \"note.txt\"\n    type: file-changed\n    details:\n      old: \"2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824\"\n      new: \"5891b5b522d5df086d0ff0b110fbd9d21bb4fc7163af34d08286a2e846f6be03\"\n  - scope: \"note.txt\"\n    type: file-changed\n    details:\n      contents: \"hello\\n\"\n"
+    ));
+
+    tree.apply("edited", &document).unwrap();
+    assert_eq!(tree.read("edited/note.txt"), b"hello\n");
 }

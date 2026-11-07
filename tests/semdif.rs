@@ -1,5 +1,8 @@
-use super::{run, run_with_stdin};
+//! Code that reads or writes semdif files, including serialising and deserialising
+//! change records.
 
+use crate::filesystem::Tree;
+use crate::main::{run, run_with_stdin};
 use std::fs;
 
 #[test]
@@ -89,7 +92,7 @@ fn a_dash_writes_the_semdif_to_stdout_and_reads_it_from_stdin() {
 
 #[test]
 fn rejects_a_change_that_is_not_a_rename() {
-    let tree = super::tree::Tree::new();
+    let tree = Tree::new();
     tree.dir("source");
     let message = tree
         .apply(
@@ -109,4 +112,114 @@ changes:
         .unwrap_err();
 
     assert_eq!(message, "unknown change type line-comment-added");
+}
+
+#[test]
+fn rejects_a_line_removal_whose_line_count_is_positive() {
+    let tree = Tree::new();
+    tree.write("edited/note.txt", "keep\ngone\n");
+    let message = tree
+        .apply(
+            "edited",
+            "\
+header:
+  semdiff: \"0.1.0\"
+  timestamp: \"2020-01-01T00:00:00Z\"
+changes:
+  - scope: \"note.txt\"
+    type: line-removed
+    details:
+      old: 2
+      lines: 2
+      new: 2
+      text: \"gone\"
+",
+        )
+        .unwrap_err();
+
+    assert!(message.contains("invalid lines 2"), "{message}");
+    assert_eq!(tree.read("edited/note.txt"), b"keep\ngone\n");
+}
+
+#[test]
+fn rejects_an_identifier_rename_whose_line_is_zero() {
+    let tree = Tree::new();
+    tree.write("edited/src/main.rs", "fn fibonacci() {}\n");
+    let message = tree
+        .apply(
+            "edited",
+            "\
+header:
+  semdiff: \"0.1.0\"
+  timestamp: \"2020-01-01T00:00:00Z\"
+changes:
+  - scope: \"src/main.rs:0\"
+    type: identifier-renamed
+    details:
+      new: 1
+      oldname: \"fibonacci\"\n      newname: \"fib\"
+",
+        )
+        .unwrap_err();
+
+    assert!(message.contains("path:line"), "{message}");
+    assert_eq!(tree.read("edited/src/main.rs"), b"fn fibonacci() {}\n");
+}
+
+#[test]
+fn rejects_a_line_change_with_an_invalid_comment_flag() {
+    let tree = Tree::new();
+    tree.write("edited/src/main.rs", "fn main() {}\n");
+
+    let message = tree
+        .apply(
+            "edited",
+            "\
+header:
+  semdiff: \"0.1.0\"
+  timestamp: \"2020-01-01T00:00:00Z\"
+changes:
+  - scope: \"src/main.rs\"
+    type: line-added
+    details:
+      old: 1
+      lines: +1
+      new: 1
+      text: \"// note\"
+      isComment: yes
+",
+        )
+        .unwrap_err();
+
+    assert!(message.contains("invalid isComment yes"), "{message}");
+    assert_eq!(tree.read("edited/src/main.rs"), b"fn main() {}\n");
+}
+
+#[test]
+fn rejects_a_line_change_with_an_invalid_whitespace_flag() {
+    let tree = Tree::new();
+    tree.write("edited/src/main.rs", "fn main() {}\n");
+
+    let message = tree
+        .apply(
+            "edited",
+            "\
+header:
+  semdiff: \"0.1.0\"
+  timestamp: \"2020-01-01T00:00:00Z\"
+changes:
+  - scope: \"src/main.rs\"
+    type: line-added
+    details:
+      old: 1
+      lines: +1
+      new: 1
+      text: \"    \"
+      isWhitespace: yes
+",
+        )
+        .unwrap_err();
+
+    assert!(message.contains("invalid isWhitespace yes"), "{message}");
+    assert_eq!(tree.read("edited/src/main.rs"), b"fn main() {}\n");
 }
