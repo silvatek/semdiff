@@ -15,7 +15,9 @@ use std::path::Path;
 
 use super::{applied_with_its_file, Change, Content, LineEdit, LinePlan, LineStart};
 
+use crate::dialect::BlockCategory;
 use crate::filesystem::FileSystem;
+use crate::semdif::{write_detail, write_plain};
 
 /// The line numbers and text shared by a line addition, removal, and modification.
 ///
@@ -103,15 +105,15 @@ fn append_line(body: &mut LineBody, text: &str) {
 }
 
 fn write_line(document: &mut String, body: &LineBody, lines: isize) {
-    crate::semdif::write_plain(document, "old", &body.old.to_string());
-    crate::semdif::write_plain(document, "lines", &format_lines(lines));
-    crate::semdif::write_plain(document, "new", &body.new.to_string());
-    crate::semdif::write_detail(document, "text", &body.text);
+    write_plain(document, "old", &body.old.to_string());
+    write_plain(document, "lines", &format_lines(lines));
+    write_plain(document, "new", &body.new.to_string());
+    write_detail(document, "text", &body.text);
     if body.is_comment {
-        crate::semdif::write_plain(document, "isComment", "true");
+        write_plain(document, "isComment", "true");
     }
     if body.is_whitespace {
-        crate::semdif::write_plain(document, "isWhitespace", "true");
+        write_plain(document, "isWhitespace", "true");
     }
 }
 
@@ -471,7 +473,7 @@ impl LineEdit for LineAdded {
 pub(crate) struct NamedBlockAdded {
     scope: String,
     body: LineBody,
-    category: crate::dialect::BlockCategory,
+    category: BlockCategory,
     name: String,
 }
 
@@ -481,7 +483,7 @@ impl NamedBlockAdded {
         old: usize,
         new: usize,
         text: String,
-        category: crate::dialect::BlockCategory,
+        category: BlockCategory,
         name: String,
     ) -> Self {
         Self {
@@ -522,8 +524,8 @@ impl Change for NamedBlockAdded {
 
     fn write_details(&self, document: &mut String) {
         write_line(document, &self.body, line_count(&self.body.text) as isize);
-        crate::semdif::write_detail(document, "category", self.category.as_str());
-        crate::semdif::write_detail(document, "name", &self.name);
+        write_detail(document, "category", self.category.as_str());
+        write_detail(document, "name", &self.name);
     }
 
     fn apply(&self, _fs: &dyn FileSystem, _source: &Path) -> Result<(), String> {
@@ -578,7 +580,7 @@ impl LineEdit for NamedBlockAdded {
 pub(crate) struct NamedBlockRemoved {
     scope: String,
     body: LineBody,
-    category: crate::dialect::BlockCategory,
+    category: BlockCategory,
     name: String,
 }
 
@@ -588,7 +590,7 @@ impl NamedBlockRemoved {
         old: usize,
         new: usize,
         text: String,
-        category: crate::dialect::BlockCategory,
+        category: BlockCategory,
         name: String,
     ) -> Self {
         Self {
@@ -630,8 +632,8 @@ impl Change for NamedBlockRemoved {
     fn write_details(&self, document: &mut String) {
         let count = line_count(&self.body.text) as isize;
         write_line(document, &self.body, -count);
-        crate::semdif::write_detail(document, "category", self.category.as_str());
-        crate::semdif::write_detail(document, "name", &self.name);
+        write_detail(document, "category", self.category.as_str());
+        write_detail(document, "name", &self.name);
     }
 
     fn apply(&self, _fs: &dyn FileSystem, _source: &Path) -> Result<(), String> {
@@ -906,13 +908,14 @@ impl LineEdit for LineModified {
 
 #[cfg(test)]
 mod tests {
+    use super::super::{ChangeList, SourceText};
     use super::{merge_adjacent, promote_named_blocks, LineAdded, LineRemoved};
 
     /// A change list holding these changes, in order.
     fn listed<T: super::Change + 'static>(
         items: impl IntoIterator<Item = T>,
-    ) -> crate::change::ChangeList {
-        let mut changes = crate::change::ChangeList::new();
+    ) -> ChangeList {
+        let mut changes = ChangeList::new();
         for item in items {
             changes.add(item);
         }
@@ -920,17 +923,17 @@ mod tests {
     }
 
     /// The list after adjacent line edits have been merged.
-    fn adjacent(mut changes: crate::change::ChangeList) -> crate::change::ChangeList {
+    fn adjacent(mut changes: ChangeList) -> ChangeList {
         merge_adjacent(&mut changes);
         changes
     }
 
     /// The list after line additions and removals have been promoted.
     fn promoted(
-        new_sources: &[crate::change::SourceText],
-        old_sources: &[crate::change::SourceText],
-        mut changes: crate::change::ChangeList,
-    ) -> crate::change::ChangeList {
+        new_sources: &[SourceText],
+        old_sources: &[SourceText],
+        mut changes: ChangeList,
+    ) -> ChangeList {
         promote_named_blocks(new_sources, old_sources, &mut changes);
         changes
     }
@@ -1016,7 +1019,7 @@ mod tests {
 
     #[test]
     fn a_function_inside_the_new_file_type_becomes_a_method() {
-        let sources = [crate::change::SourceText {
+        let sources = [SourceText {
             path: "src/main.rs".to_string(),
             lines: vec![
                 "impl Foo {".to_string(),
@@ -1064,7 +1067,7 @@ mod tests {
 
     #[test]
     fn a_method_removal_inside_the_old_file_type_names_that_type() {
-        let sources = [crate::change::SourceText {
+        let sources = [SourceText {
             path: "src/main.rs".to_string(),
             lines: vec![
                 "impl Foo {".to_string(),
@@ -1087,7 +1090,7 @@ mod tests {
         assert!(details.contains("category: \"method\"\n"), "{details}");
         assert!(details.contains("name: \"dropped\"\n"), "{details}");
 
-        let nested = [crate::change::SourceText {
+        let nested = [SourceText {
             path: "src/main.rs".to_string(),
             lines: vec![
                 "fn outer() {".to_string(),

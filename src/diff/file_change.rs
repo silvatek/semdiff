@@ -5,7 +5,10 @@ use std::path::Path;
 
 use sha2::{Digest, Sha256};
 
-use crate::change::ChangeList;
+use super::line_changes::{common_lengths, split_text, text_line_changes};
+use crate::change::{
+    ChangeList, FileAdded, FileChanged, FileDeleted, FileMoved, FileRenamed, TREE_SCOPE,
+};
 use crate::filesystem::FileSystem;
 
 /// Renames, moves, deletions, and additions among the files that exist on only
@@ -54,8 +57,8 @@ pub(crate) fn file_changes(
         if from_paths.len() == 1 && to_paths.len() == 1 {
             renamed_from.insert(from_paths[0].as_str());
             renamed_to.insert(to_paths[0].as_str());
-            changes.add(crate::change::FileRenamed {
-                scope: crate::change::TREE_SCOPE.to_string(),
+            changes.add(FileRenamed {
+                scope: TREE_SCOPE.to_string(),
                 from: from_paths[0].clone(),
                 to: to_paths[0].clone(),
                 hash: digest_hex(&hash),
@@ -94,8 +97,8 @@ pub(crate) fn file_changes(
         }
         moved_from.insert(from.as_str());
         moved_to.insert(to.as_str());
-        changes.add(crate::change::FileMoved {
-            scope: crate::change::TREE_SCOPE.to_string(),
+        changes.add(FileMoved {
+            scope: TREE_SCOPE.to_string(),
             from: (*from).clone(),
             to: (*to).clone(),
             hash: digest_hex(&left_by_path[from.as_str()]),
@@ -103,8 +106,8 @@ pub(crate) fn file_changes(
     }
     for path in left_only {
         if !renamed_from.contains(path.as_str()) && !moved_from.contains(path.as_str()) {
-            changes.add(crate::change::FileDeleted {
-                scope: crate::change::TREE_SCOPE.to_string(),
+            changes.add(FileDeleted {
+                scope: TREE_SCOPE.to_string(),
                 path: path.clone(),
                 hash: digest_hex(&left_by_path[path.as_str()]),
             });
@@ -112,8 +115,8 @@ pub(crate) fn file_changes(
     }
     for path in right_only {
         if !renamed_to.contains(path.as_str()) && !moved_to.contains(path.as_str()) {
-            changes.add(crate::change::FileAdded {
-                scope: crate::change::TREE_SCOPE.to_string(),
+            changes.add(FileAdded {
+                scope: TREE_SCOPE.to_string(),
                 path: path.clone(),
                 hash: digest_hex(&right_by_path[path.as_str()]),
                 contents: read_file(fs, right_root, path)?,
@@ -135,7 +138,7 @@ pub(crate) fn paired_changes(
     fs: &dyn FileSystem,
     sources: &crate::Sources,
     paired_files: &[String],
-    recorded: &crate::change::ChangeList,
+    recorded: &ChangeList,
 ) -> Result<ChangeList, String> {
     let left_root = fs.source_base(Path::new(&sources.left));
     let right_root = fs.source_base(Path::new(&sources.right));
@@ -152,7 +155,7 @@ fn paired_change(
     left_root: &Path,
     right_root: &Path,
     path: &str,
-    recorded: &crate::change::ChangeList,
+    recorded: &ChangeList,
 ) -> Result<ChangeList, String> {
     let before = super::read_content(path, super::ComparedSide::Left, left_root, fs, recorded)?;
     let after = super::read_content(path, super::ComparedSide::Right, right_root, fs, recorded)?;
@@ -160,14 +163,14 @@ fn paired_change(
         return Ok(ChangeList::new());
     }
     let mut changes = ChangeList::new();
-    changes.add(crate::change::FileChanged::hashes(
+    changes.add(FileChanged::hashes(
         path.to_string(),
         sha256_hex(&before),
         sha256_hex(&after),
     ));
-    match super::line_changes::text_line_changes(path, &before, &after) {
+    match text_line_changes(path, &before, &after) {
         Some(line_edits) if !line_edits.is_empty() => changes.append(line_edits),
-        _ => changes.add(crate::change::FileChanged::contents(
+        _ => changes.add(FileChanged::contents(
             path.to_string(),
             after,
         )),
@@ -242,8 +245,8 @@ pub(crate) fn common_line_proportion(left: &[u8], right: &[u8]) -> Option<f64> {
     else {
         return None;
     };
-    let left_lines = super::line_changes::split_text(left_text).lines;
-    let right_lines = super::line_changes::split_text(right_text).lines;
+    let left_lines = split_text(left_text).lines;
+    let right_lines = split_text(right_text).lines;
     let longer = left_lines.len().max(right_lines.len());
     if longer == 0 {
         return Some(1.0);
@@ -257,7 +260,7 @@ pub(crate) fn common_line_proportion(left: &[u8], right: &[u8]) -> Option<f64> {
 /// The count is the length of one longest common subsequence of the two
 /// copies. A change list keeps those lines and stores the lines outside it.
 fn common_line_count(left: &[String], right: &[String]) -> usize {
-    let lengths = super::line_changes::common_lengths(left, right);
+    let lengths = common_lengths(left, right);
     lengths[left.len()][right.len()]
 }
 

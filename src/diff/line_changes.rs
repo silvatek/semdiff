@@ -1,6 +1,8 @@
 //! Identifying and classifying changes at the line level.
 
-use crate::change::ChangeList;
+use super::span_changes::{find_spans, record};
+use crate::change::{merge_identifier_spans, ChangeList, LineAdded, LineModified, LineRemoved};
+use crate::dialect::{for_path, Dialect, Family};
 
 /// Line records for two copies of one file, when both copies are text.
 ///
@@ -56,7 +58,7 @@ pub(crate) fn line_changes(path: &str, before: &str, after: &str) -> ChangeList 
         changes.append(changes_in_hunk(path, &hunk));
     }
     changes.sort_by_line();
-    crate::change::merge_identifier_spans(path, &old_lines.lines, &mut changes);
+    merge_identifier_spans(path, &old_lines.lines, &mut changes);
     changes
 }
 
@@ -259,7 +261,7 @@ fn changes_in_hunk(path: &str, hunk: &Hunk) -> ChangeList {
         );
     }
     for line in &hunk.old_lines[paired..] {
-        changes.add(crate::change::LineRemoved::new(
+        changes.add(LineRemoved::new(
             path.to_string(),
             line.index + 1,
             hunk.next_new_line,
@@ -269,7 +271,7 @@ fn changes_in_hunk(path: &str, hunk: &Hunk) -> ChangeList {
         ));
     }
     for line in &hunk.new_lines[paired..] {
-        changes.add(crate::change::LineAdded::new(
+        changes.add(LineAdded::new(
             path.to_string(),
             hunk.next_old_line,
             line.index + 1,
@@ -296,13 +298,13 @@ fn modified_line(
     old_text: &str,
     new_text: &str,
 ) {
-    let found = super::span_changes::find_spans(path, old_text, new_text);
+    let found = find_spans(path, old_text, new_text);
     if let [span] = found.as_slice() {
-        if super::span_changes::record(changes, path, old, new, span) {
+        if record(changes, path, old, new, span) {
             return;
         }
     }
-    changes.add(crate::change::LineModified::new(
+    changes.add(LineModified::new(
         path.to_string(),
         old,
         new,
@@ -316,7 +318,7 @@ fn modified_line(
 ///
 /// Leading whitespace is skipped. The line-comment marker then has to be the
 /// next characters. A block comment is not recognized here.
-fn introduces_line_comment(dialect: &crate::dialect::Dialect, line: &str) -> bool {
+fn introduces_line_comment(dialect: &Dialect, line: &str) -> bool {
     line.trim_start().starts_with(dialect.line_comment)
 }
 
@@ -325,7 +327,7 @@ fn introduces_line_comment(dialect: &crate::dialect::Dialect, line: &str) -> boo
 /// Every line has to introduce the dialect's line comment. A file with no
 /// dialect is not a comment. An empty line is not one either.
 fn full_line_comment(path: &str, text: &str) -> bool {
-    let Some(dialect) = crate::dialect::for_path(path) else {
+    let Some(dialect) = for_path(path) else {
         return false;
     };
     if text.is_empty() {
@@ -342,7 +344,7 @@ fn full_line_comment(path: &str, text: &str) -> bool {
 /// no dialect is not blank for this purpose. A comment, a carriage return, or
 /// any other character keeps the line unflagged.
 fn blank_line(path: &str, text: &str) -> bool {
-    if crate::dialect::for_path(path).is_none() {
+    if for_path(path).is_none() {
         return false;
     }
     text.split('\n').all(only_ascii_blank)
@@ -361,14 +363,14 @@ fn only_ascii_blank(line: &str) -> bool {
 /// boundary. Trailing space is insignificant in either reader. A file with no
 /// dialect is not whitespace. A carriage return stays part of the line.
 fn margin_whitespace(path: &str, old_line: &str, new_line: &str) -> bool {
-    let Some(dialect) = crate::dialect::for_path(path) else {
+    let Some(dialect) = for_path(path) else {
         return false;
     };
     match dialect.family {
-        crate::dialect::Family::CFamily => {
+        Family::CFamily => {
             crate::family::c_family::margin_whitespace(old_line, new_line)
         }
-        crate::dialect::Family::Python => {
+        Family::Python => {
             crate::family::python::margin_whitespace(dialect, old_line, new_line)
         }
     }

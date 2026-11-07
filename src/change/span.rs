@@ -13,7 +13,11 @@ use std::path::Path;
 
 use super::{applied_with_its_file, Change, Content, IdentifierRename, LineEdit, LinePlan};
 
+use crate::dialect::for_path;
+use crate::diff::span_changes::constant::{is_integer, replace_boolean, replace_integer};
+use crate::diff::span_changes::identifier::{occurrence_count, replace_every, replace_name};
 use crate::filesystem::FileSystem;
+use crate::semdif::{write_detail, write_plain};
 
 /// The old lines a span change names.
 ///
@@ -244,10 +248,10 @@ impl Change for IdentifierRenamed {
 
     fn write_details(&self, document: &mut String) {
         if let Extent::Lines { new: Some(new), .. } = &self.extent {
-            crate::semdif::write_plain(document, "new", &new.to_string());
+            write_plain(document, "new", &new.to_string());
         }
-        crate::semdif::write_detail(document, "oldname", &self.oldname);
-        crate::semdif::write_detail(document, "newname", &self.newname);
+        write_detail(document, "oldname", &self.oldname);
+        write_detail(document, "newname", &self.newname);
     }
 
     fn apply(&self, _fs: &dyn FileSystem, _source: &Path) -> Result<(), String> {
@@ -324,12 +328,12 @@ impl IdentifierRenamed {
         plan: &mut LinePlan,
     ) -> Result<(), String> {
         let path = file.to_string_lossy();
-        if crate::dialect::for_path(&path).is_none() {
+        if for_path(&path).is_none() {
             return Ok(());
         }
         for line_no in 1..=source_lines.len() {
             let current = &source_lines[line_no - 1];
-            let replaced = match crate::diff::span_changes::identifier::replace_every(
+            let replaced = match replace_every(
                 &path,
                 current,
                 &self.oldname,
@@ -369,7 +373,7 @@ impl IdentifierRenamed {
             ));
         }
         if span.is_single() {
-            let replaced = match crate::diff::span_changes::identifier::replace_name(
+            let replaced = match replace_name(
                 span.file(),
                 &source_lines[start - 1],
                 &self.oldname,
@@ -389,7 +393,7 @@ impl IdentifierRenamed {
         let mut found = false;
         for line_no in start..=end {
             let current = &source_lines[line_no - 1];
-            let replaced = match crate::diff::span_changes::identifier::replace_every(
+            let replaced = match replace_every(
                 span.file(),
                 current,
                 &self.oldname,
@@ -474,10 +478,10 @@ impl Change for ConstantChanged {
     }
 
     fn write_details(&self, document: &mut String) {
-        crate::semdif::write_plain(document, "new", &self.new_line.to_string());
-        crate::semdif::write_detail(document, "oldvalue", &self.old_value);
-        crate::semdif::write_detail(document, "newvalue", &self.new_value);
-        crate::semdif::write_plain(document, "occurrence", &self.occurrence.to_string());
+        write_plain(document, "new", &self.new_line.to_string());
+        write_detail(document, "oldvalue", &self.old_value);
+        write_detail(document, "newvalue", &self.new_value);
+        write_plain(document, "occurrence", &self.occurrence.to_string());
     }
 
     fn apply(&self, _fs: &dyn FileSystem, _source: &Path) -> Result<(), String> {
@@ -514,8 +518,8 @@ impl LineEdit for ConstantChanged {
                 source_lines.len()
             ));
         }
-        let replaced = if crate::diff::span_changes::constant::is_integer(&self.old_value) {
-            crate::diff::span_changes::constant::replace_integer(
+        let replaced = if is_integer(&self.old_value) {
+            replace_integer(
                 self.span.file(),
                 &source_lines[line_no - 1],
                 &self.old_value,
@@ -523,7 +527,7 @@ impl LineEdit for ConstantChanged {
                 self.occurrence,
             )
         } else {
-            crate::diff::span_changes::constant::replace_boolean(
+            replace_boolean(
                 self.span.file(),
                 &source_lines[line_no - 1],
                 &self.old_value,
@@ -534,7 +538,7 @@ impl LineEdit for ConstantChanged {
         let replaced = match replaced {
             Ok(text) => text,
             Err(message) => {
-                let kind = if crate::diff::span_changes::constant::is_integer(&self.old_value) {
+                let kind = if is_integer(&self.old_value) {
                     "integer"
                 } else {
                     "boolean"
@@ -664,7 +668,7 @@ fn occurrences_covered(
         return false;
     }
     for line_no in start..=end {
-        let Some(count) = crate::diff::span_changes::identifier::occurrence_count(
+        let Some(count) = occurrence_count(
             path,
             &old_lines[line_no - 1],
             oldname,
@@ -868,7 +872,7 @@ fn directory_occurrences_covered(
         }
         for (index, line) in source.lines.iter().enumerate() {
             let line_no = index + 1;
-            let Some(count) = crate::diff::span_changes::identifier::occurrence_count(
+            let Some(count) = occurrence_count(
                 &source.path,
                 line,
                 oldname,

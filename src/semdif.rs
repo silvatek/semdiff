@@ -6,9 +6,16 @@ use std::io::{self, Write};
 use std::path::Path;
 use std::process::ExitCode;
 
+use crate::change::{
+    parse_rename_scope, parse_span_scope, Change, ChangeList, ConstantChanged, DirectoryAdded,
+    DirectoryDeleted, FileAdded, FileChanged, FileDeleted, FileMoved, FileRenamed,
+    IdentifierRenamed, LineAdded, LineModified, LineRemoved, NamedBlockAdded, NamedBlockRemoved,
+    RenameScope,
+};
+use crate::dialect::BlockCategory;
+use crate::diff::span_changes::constant::{is_boolean, is_integer};
+use crate::diff::Differences;
 use crate::filesystem::FileSystem;
-
-use crate::change::{Change, ChangeList};
 
 use base64::engine::general_purpose::STANDARD;
 use base64::Engine;
@@ -27,7 +34,7 @@ pub(crate) fn write_output(
     fs: &dyn FileSystem,
     output: &str,
     sources: &crate::Sources,
-    differences: &crate::diff::Differences,
+    differences: &Differences,
 ) -> ExitCode {
     let document = document(&differences.changes);
     if output == crate::args::STANDARD_STREAM {
@@ -57,7 +64,7 @@ pub(crate) fn write_output(
 fn report_comparison(
     out: &mut dyn Write,
     sources: &crate::Sources,
-    differences: &crate::diff::Differences,
+    differences: &Differences,
 ) {
     let _ = writeln!(out, "Semdiff {}", env!("CARGO_PKG_VERSION"));
     let _ = writeln!(out, "Comparing {} and {}", sources.left, sources.right);
@@ -287,7 +294,7 @@ fn parse_file_renamed(
     scope: String,
     fields: BTreeMap<String, String>,
 ) -> Result<(), String> {
-    changes.add(crate::change::FileRenamed {
+    changes.add(FileRenamed {
         scope,
         from: required(&fields, "from", "file-renamed")?,
         to: required(&fields, "to", "file-renamed")?,
@@ -301,7 +308,7 @@ fn parse_file_moved(
     scope: String,
     fields: BTreeMap<String, String>,
 ) -> Result<(), String> {
-    changes.add(crate::change::FileMoved {
+    changes.add(FileMoved {
         scope,
         from: required(&fields, "from", "file-moved")?,
         to: required(&fields, "to", "file-moved")?,
@@ -315,7 +322,7 @@ fn parse_file_deleted(
     scope: String,
     fields: BTreeMap<String, String>,
 ) -> Result<(), String> {
-    changes.add(crate::change::FileDeleted {
+    changes.add(FileDeleted {
         scope,
         path: required(&fields, "path", "file-deleted")?,
         hash: required_hash(&fields, "hash", "file-deleted")?,
@@ -328,7 +335,7 @@ fn parse_file_added(
     scope: String,
     fields: BTreeMap<String, String>,
 ) -> Result<(), String> {
-    changes.add(crate::change::FileAdded {
+    changes.add(FileAdded {
         scope,
         path: required(&fields, "path", "file-added")?,
         hash: required_hash(&fields, "hash", "file-added")?,
@@ -344,7 +351,7 @@ fn parse_line_added(
 ) -> Result<(), String> {
     let text = required(&fields, "text", "line-added")?;
     expect_added_lines(&fields, &text, "line-added")?;
-    changes.add(crate::change::LineAdded::new(
+    changes.add(LineAdded::new(
         scope,
         required_line(&fields, "old", "line-added")?,
         required_line(&fields, "new", "line-added")?,
@@ -362,7 +369,7 @@ fn parse_named_block_added(
 ) -> Result<(), String> {
     let text = required(&fields, "text", "named-block-added")?;
     expect_added_lines(&fields, &text, "named-block-added")?;
-    changes.add(crate::change::NamedBlockAdded::new(
+    changes.add(NamedBlockAdded::new(
         scope,
         required_line(&fields, "old", "named-block-added")?,
         required_line(&fields, "new", "named-block-added")?,
@@ -381,7 +388,7 @@ fn parse_named_block_removed(
     let old = required_line(&fields, "old", "named-block-removed")?;
     let text = required(&fields, "text", "named-block-removed")?;
     expect_removed_lines(&fields, old, &text, "named-block-removed")?;
-    changes.add(crate::change::NamedBlockRemoved::new(
+    changes.add(NamedBlockRemoved::new(
         scope,
         old,
         required_line(&fields, "new", "named-block-removed")?,
@@ -399,9 +406,9 @@ fn parse_named_block_removed(
 fn required_category(
     fields: &BTreeMap<String, String>,
     kind: &str,
-) -> Result<crate::dialect::BlockCategory, String> {
+) -> Result<BlockCategory, String> {
     let text = required(fields, "category", kind)?;
-    crate::dialect::BlockCategory::parse(&text)
+    BlockCategory::parse(&text)
         .ok_or_else(|| format!("{kind} has invalid category {text}"))
 }
 
@@ -413,7 +420,7 @@ fn parse_line_removed(
     let old = required_line(&fields, "old", "line-removed")?;
     let text = required(&fields, "text", "line-removed")?;
     expect_removed_lines(&fields, old, &text, "line-removed")?;
-    changes.add(crate::change::LineRemoved::new(
+    changes.add(LineRemoved::new(
         scope,
         old,
         required_line(&fields, "new", "line-removed")?,
@@ -431,7 +438,7 @@ fn parse_line_modified(
 ) -> Result<(), String> {
     let text = required(&fields, "text", "line-modified")?;
     expect_modified_lines(&fields)?;
-    changes.add(crate::change::LineModified::new(
+    changes.add(LineModified::new(
         scope,
         required_line(&fields, "old", "line-modified")?,
         required_line(&fields, "new", "line-modified")?,
@@ -449,19 +456,19 @@ fn parse_identifier_renamed(
 ) -> Result<(), String> {
     let oldname = required(&fields, "oldname", "identifier-renamed")?;
     let newname = required(&fields, "newname", "identifier-renamed")?;
-    match crate::change::parse_rename_scope(&scope)? {
-        crate::change::RenameScope::Lines(span) => {
+    match parse_rename_scope(&scope)? {
+        RenameScope::Lines(span) => {
             let new = if span.is_single() {
                 Some(required_line(&fields, "new", "identifier-renamed")?)
             } else {
                 None
             };
-            changes.add(crate::change::IdentifierRenamed::recorded(
+            changes.add(IdentifierRenamed::recorded(
                 span, new, oldname, newname,
             ));
         }
-        crate::change::RenameScope::Directory(scope) => {
-            changes.add(crate::change::IdentifierRenamed::directory(
+        RenameScope::Directory(scope) => {
+            changes.add(IdentifierRenamed::directory(
                 scope, oldname, newname,
             ));
         }
@@ -474,7 +481,7 @@ fn parse_constant_changed(
     scope: String,
     fields: BTreeMap<String, String>,
 ) -> Result<(), String> {
-    let span = crate::change::parse_span_scope(&scope)?;
+    let span = parse_span_scope(&scope)?;
     if !span.is_single() {
         return Err(format!("constant-changed covers one line, not {scope}"));
     }
@@ -486,7 +493,7 @@ fn parse_constant_changed(
         }
         return Err(format!("constant-changed has invalid newvalue {new_value}"));
     }
-    changes.add(crate::change::ConstantChanged::new(
+    changes.add(ConstantChanged::new(
         span,
         required_line(&fields, "new", "constant-changed")?,
         old_value,
@@ -498,19 +505,19 @@ fn parse_constant_changed(
 
 /// Whether both values are integers, or both are boolean spellings for `path`.
 fn constant_pair(path: &str, old_value: &str, new_value: &str) -> bool {
-    if crate::diff::span_changes::constant::is_integer(old_value)
-        && crate::diff::span_changes::constant::is_integer(new_value)
+    if is_integer(old_value)
+        && is_integer(new_value)
     {
         return true;
     }
-    crate::diff::span_changes::constant::is_boolean(path, old_value)
-        && crate::diff::span_changes::constant::is_boolean(path, new_value)
+    is_boolean(path, old_value)
+        && is_boolean(path, new_value)
 }
 
 /// Whether `text` is an integer or a boolean spelling for `path`.
 fn constant_value(path: &str, text: &str) -> bool {
-    crate::diff::span_changes::constant::is_integer(text)
-        || crate::diff::span_changes::constant::is_boolean(path, text)
+    is_integer(text)
+        || is_boolean(path, text)
 }
 
 fn parse_directory_added(
@@ -518,7 +525,7 @@ fn parse_directory_added(
     scope: String,
     fields: BTreeMap<String, String>,
 ) -> Result<(), String> {
-    changes.add(crate::change::DirectoryAdded {
+    changes.add(DirectoryAdded {
         scope,
         path: required(&fields, "path", "directory-added")?,
     });
@@ -530,7 +537,7 @@ fn parse_directory_deleted(
     scope: String,
     fields: BTreeMap<String, String>,
 ) -> Result<(), String> {
-    changes.add(crate::change::DirectoryDeleted {
+    changes.add(DirectoryDeleted {
         scope,
         path: required(&fields, "path", "directory-deleted")?,
     });
@@ -547,13 +554,13 @@ fn file_changed(
     fields: BTreeMap<String, String>,
 ) -> Result<(), String> {
     if fields.contains_key("contents") {
-        changes.add(crate::change::FileChanged::contents(
+        changes.add(FileChanged::contents(
             scope,
             stored_bytes(&fields, "file-changed")?,
         ));
         return Ok(());
     }
-    changes.add(crate::change::FileChanged::hashes(
+    changes.add(FileChanged::hashes(
         scope,
         required_hash(&fields, "old", "file-changed")?,
         required_hash(&fields, "new", "file-changed")?,
