@@ -19,7 +19,7 @@ mod line;
 mod span;
 
 pub(crate) use directory::{DirectoryAdded, DirectoryDeleted};
-pub(crate) use file::{FileAdded, FileChanged, FileDeleted, FileRenamed};
+pub(crate) use file::{FileAdded, FileChanged, FileDeleted, FileMoved, FileRenamed};
 pub(crate) use line::{
     merge_adjacent, promote_named_blocks, LineAdded, LineModified, LineRemoved, NamedBlockAdded,
     NamedBlockRemoved,
@@ -36,8 +36,8 @@ use crate::filesystem::FileSystem;
 
 /// Scope written for a change that is not the contents of one file.
 ///
-/// A rename, an added or deleted file, and an added or deleted directory use
-/// this scope. A change to the lines or bytes of one file is scoped to that
+/// A rename, a move, an added or deleted file, and an added or deleted directory
+/// use this scope. A change to the lines or bytes of one file is scoped to that
 /// file. A span change is scoped to one old line of that file, written
 /// `path:line`, or to a run of old lines, written `path:start-end`. An
 /// identifier rename that covers several files names the directory that

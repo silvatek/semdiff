@@ -15,7 +15,7 @@ Skipped means apply does not reproduce the right-hand tree. Coarser means the tr
 | 7 | Identical copies | Coarser | Leave |
 | 8 | Directory rename | Coarser | Leave |
 | 9 | Edits inside a changed file | Coarser | Fix |
-| 10 | File moved under the same name | Coarser | Fix later |
+| 10 | File moved under the same name | Coarser | Fixed |
 
 **Fixed** means the change is in the code. **Fix** means we will change semdiff. **Fix later** means the change is deferred. **Leave** means the current behavior stays.
 
@@ -47,7 +47,7 @@ Fixed. A directory named `target` is compared like any other directory. The earl
 
 ## 6. Rename with edited contents
 
-Leave. A renamed file whose bytes also changed stays a `file-deleted` plus a `file-added` carrying the new bytes. Apply rebuilds the tree correctly. Recording that the two paths are the same file can wait. It is low priority.
+Leave. A renamed file whose name changed and whose bytes also changed stays a `file-deleted` plus a `file-added` carrying the new bytes. The same filename is item 10. Apply rebuilds the tree correctly. Recording that two differently named paths are the same file can wait. It is low priority.
 
 ## 7. Identical copies
 
@@ -65,4 +65,4 @@ That whole-file record is the starting point for the semantic difference engine.
 
 ## 10. File moved under the same name
 
-Fix later. This narrows item 6. A file that moves and also changes stays `file-deleted` plus `file-added`, because the hashes differ. The filename is the final component of the path. When exactly one deleted file and exactly one added file share that name, the two copies can be compared. If the contents are broadly similar, the pair is one `file-moved` record instead of the deletion and the addition. The record names both paths and carries the new bytes, so apply removes the old file and writes the new one. Several files with that name, or contents that are not similar, stay a deletion and an addition.
+Fixed. This narrows item 6. The filename is the final component of the path. When exactly one deleted file and exactly one added file share that name, the two copies are compared by their lines. More than half the lines of the longer copy have to stay in order, the same lines a change list can keep. The pair is then one `file-moved` record. The record names both paths and carries the new bytes, with the SHA-256 of the removed file and of those bytes. Apply removes the old file and writes the new one. Several files with that name, a file that is not text, or contents that share half or fewer of those lines stay a deletion and an addition.

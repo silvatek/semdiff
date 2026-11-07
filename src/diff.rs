@@ -37,7 +37,9 @@ pub(crate) struct Differences {
 /// The shared files and file changes between the two sources.
 ///
 /// The two file lists are split once, so a later step does not search the trees again.
-/// Files that exist on only one side may be a rename, a deletion, or an addition.
+/// Files that exist on only one side may be a rename, a move, a deletion, or an
+/// addition. A move is one deleted file and one added file that share a filename
+/// and keep more than half their lines in order.
 /// Files that exist on both sides are paired and compared in place.
 /// Empty directories that appear or disappear are recorded too, including one
 /// left empty because its files moved. Adjacent removed, added, or modified

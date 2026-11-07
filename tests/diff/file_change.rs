@@ -235,3 +235,213 @@ fn records_a_whole_file_when_only_the_final_newline_differs() {
     tree.apply("edited", &document).unwrap();
     assert_eq!(tree.read("edited/note.txt"), b"hello\n");
 }
+
+#[test]
+fn records_a_file_moved_when_one_name_keeps_most_lines_in_order() {
+    let tree = Tree::new();
+    let before = "a\nb\nc\nd\n";
+    let after = "a\nb\nc\ny\n";
+    tree.write("left/old/note.txt", before);
+    tree.write("right/new/note.txt", after);
+    tree.write("edited/old/note.txt", before);
+
+    let document = tree.compare("left", "right");
+
+    let changes = document.split_once("changes:\n").expect("changes list").1;
+    assert_eq!(
+        changes,
+        "  - scope: \".\"\n    type: file-moved\n    details:\n      from: \"old/note.txt\"\n      to: \"new/note.txt\"\n      old: \"cf2c7f63055d2e84af6e3f01ac1bb7fce598d20cf213fab2b56b8e8047b46ced\"\n      new: \"db9c74e32785df4e1904ce1dc35bbc5e18d3c8375e95fc8185e9e6d497c618c3\"\n      contents: \"a\\nb\\nc\\ny\\n\"\n  - scope: \".\"\n    type: directory-deleted\n    details:\n      path: \"old\"\n"
+    );
+
+    tree.apply("edited", &document).unwrap();
+    assert!(!tree.exists("edited/old"));
+    assert_eq!(tree.read("edited/new/note.txt"), after.as_bytes());
+}
+
+#[test]
+fn an_unchanged_file_with_the_same_name_stays_a_rename() {
+    let tree = Tree::new();
+    let note = "a\nb\nc\nd\n";
+    tree.write("left/old/note.txt", note);
+    tree.write("right/new/note.txt", note);
+
+    let document = tree.compare("left", "right");
+
+    assert!(document.contains("type: file-renamed\n"), "{document}");
+    assert!(!document.contains("file-moved"), "{document}");
+}
+
+#[test]
+fn half_the_lines_or_a_reordering_stays_a_deletion_and_an_addition() {
+    let half = Tree::new();
+    half.write("left/old/note.txt", "a\nb\nc\nd\n");
+    half.write("right/new/note.txt", "a\nb\nx\ny\n");
+    let half_document = half.compare("left", "right");
+    assert!(
+        half_document.contains("type: file-deleted\n"),
+        "{half_document}"
+    );
+    assert!(
+        half_document.contains("type: file-added\n"),
+        "{half_document}"
+    );
+    assert!(!half_document.contains("file-moved"), "{half_document}");
+
+    let reversed = Tree::new();
+    reversed.write("left/old/note.txt", "a\nb\nc\nd\n");
+    reversed.write("right/new/note.txt", "d\nc\nb\na\n");
+    let reversed_document = reversed.compare("left", "right");
+    assert!(
+        reversed_document.contains("type: file-deleted\n"),
+        "{reversed_document}"
+    );
+    assert!(
+        reversed_document.contains("type: file-added\n"),
+        "{reversed_document}"
+    );
+    assert!(
+        !reversed_document.contains("file-moved"),
+        "{reversed_document}"
+    );
+}
+
+#[test]
+fn several_files_with_one_name_or_a_different_name_are_not_a_move() {
+    let many = Tree::new();
+    let note = "a\nb\nc\nd\n";
+    let edited = "a\nb\nc\ny\n";
+    many.write("left/one/note.txt", note);
+    many.write("left/two/note.txt", note);
+    many.write("right/three/note.txt", edited);
+    let many_document = many.compare("left", "right");
+    assert!(
+        many_document.contains("path: \"one/note.txt\""),
+        "{many_document}"
+    );
+    assert!(
+        many_document.contains("path: \"two/note.txt\""),
+        "{many_document}"
+    );
+    assert!(
+        many_document.contains("path: \"three/note.txt\""),
+        "{many_document}"
+    );
+    assert!(!many_document.contains("file-moved"), "{many_document}");
+
+    let renamed = Tree::new();
+    renamed.write("left/old/note.txt", note);
+    renamed.write("right/new/other.txt", edited);
+    let renamed_document = renamed.compare("left", "right");
+    assert!(
+        renamed_document.contains("path: \"old/note.txt\""),
+        "{renamed_document}"
+    );
+    assert!(
+        renamed_document.contains("path: \"new/other.txt\""),
+        "{renamed_document}"
+    );
+    assert!(
+        !renamed_document.contains("file-moved"),
+        "{renamed_document}"
+    );
+}
+
+#[test]
+fn a_binary_file_with_the_same_name_is_not_a_move() {
+    let tree = Tree::new();
+    tree.write("left/old/data.bin", b"\x00\x01\x02\xff");
+    tree.write("right/new/data.bin", b"\x00\x01\x02\xfe");
+
+    let document = tree.compare("left", "right");
+
+    assert!(document.contains("type: file-deleted\n"), "{document}");
+    assert!(document.contains("type: file-added\n"), "{document}");
+    assert!(document.contains("encoding: \"base64\""), "{document}");
+    assert!(!document.contains("file-moved"), "{document}");
+}
+
+#[test]
+fn rejects_a_move_whose_old_hash_does_not_match() {
+    let tree = Tree::new();
+    tree.write("source/old/note.txt", "a\nb\nc\nd\n");
+    let message = tree
+        .apply(
+            "source",
+            "\
+header:
+  semdiff: \"0.1.0\"
+  timestamp: \"2020-01-01T00:00:00Z\"
+changes:
+  - scope: \".\"
+    type: file-moved
+    details:
+      from: \"old/note.txt\"
+      to: \"new/note.txt\"
+      old: \"0000000000000000000000000000000000000000000000000000000000000000\"
+      new: \"db9c74e32785df4e1904ce1dc35bbc5e18d3c8375e95fc8185e9e6d497c618c3\"
+      contents: \"a\\nb\\nc\\ny\\n\"
+",
+        )
+        .unwrap_err();
+
+    assert!(message.contains("do not match the hash"), "{message}");
+    assert_eq!(tree.read("source/old/note.txt"), b"a\nb\nc\nd\n");
+    assert!(!tree.exists("source/new/note.txt"));
+}
+
+#[test]
+fn rejects_a_move_whose_new_hash_does_not_match() {
+    let tree = Tree::new();
+    tree.write("source/old/note.txt", "a\nb\nc\nd\n");
+    let message = tree
+        .apply(
+            "source",
+            "\
+header:
+  semdiff: \"0.1.0\"
+  timestamp: \"2020-01-01T00:00:00Z\"
+changes:
+  - scope: \".\"
+    type: file-moved
+    details:
+      from: \"old/note.txt\"
+      to: \"new/note.txt\"
+      old: \"cf2c7f63055d2e84af6e3f01ac1bb7fce598d20cf213fab2b56b8e8047b46ced\"
+      new: \"0000000000000000000000000000000000000000000000000000000000000000\"
+      contents: \"a\\nb\\nc\\ny\\n\"
+",
+        )
+        .unwrap_err();
+
+    assert!(message.contains("do not match the hash"), "{message}");
+    assert_eq!(tree.read("source/old/note.txt"), b"a\nb\nc\nd\n");
+    assert!(!tree.exists("source/new/note.txt"));
+}
+
+#[test]
+fn rejects_a_move_that_omits_its_old_hash() {
+    let tree = Tree::new();
+    tree.write("source/old/note.txt", "a\nb\nc\nd\n");
+    let message = tree
+        .apply(
+            "source",
+            "\
+header:
+  semdiff: \"0.1.0\"
+  timestamp: \"2020-01-01T00:00:00Z\"
+changes:
+  - scope: \".\"
+    type: file-moved
+    details:
+      from: \"old/note.txt\"
+      to: \"new/note.txt\"
+      new: \"db9c74e32785df4e1904ce1dc35bbc5e18d3c8375e95fc8185e9e6d497c618c3\"
+      contents: \"a\\nb\\nc\\ny\\n\"
+",
+        )
+        .unwrap_err();
+
+    assert_eq!(message, "file-moved is missing old");
+    assert_eq!(tree.read("source/old/note.txt"), b"a\nb\nc\nd\n");
+    assert!(!tree.exists("source/new/note.txt"));
+}

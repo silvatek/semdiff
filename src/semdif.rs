@@ -259,6 +259,7 @@ impl PartialChange {
         }
         let parsers: &[(&str, Parser)] = &[
             ("file-renamed", parse_file_renamed),
+            ("file-moved", parse_file_moved),
             ("file-deleted", parse_file_deleted),
             ("file-added", parse_file_added),
             ("file-changed", file_changed),
@@ -290,6 +291,20 @@ fn parse_file_renamed(
         from: required(&fields, "from", "file-renamed")?,
         to: required(&fields, "to", "file-renamed")?,
         hash: required_hash(&fields, "hash", "file-renamed")?,
+    }))
+}
+
+fn parse_file_moved(
+    scope: String,
+    fields: BTreeMap<String, String>,
+) -> Result<Box<dyn Change>, String> {
+    Ok(Box::new(crate::change::FileMoved {
+        scope,
+        from: required(&fields, "from", "file-moved")?,
+        to: required(&fields, "to", "file-moved")?,
+        old: required_hash(&fields, "old", "file-moved")?,
+        new: required_hash(&fields, "new", "file-moved")?,
+        contents: stored_bytes(&fields, "file-moved")?,
     }))
 }
 

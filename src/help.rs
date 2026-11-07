@@ -76,8 +76,8 @@ Arguments
       collects. A change that names a path is still applied.
 
   --ignore-hash
-      Applies a file-added, file-deleted, or file-renamed change when its
-      recorded SHA-256 does not match. The flag is valid only with --apply,
+      Applies a file-added, file-deleted, file-renamed, or file-moved change
+      when its recorded SHA-256 does not match. The flag is valid only with --apply,
       and it may appear anywhere among those arguments. A second copy is a
       usage error. A file-changed record still checks its old and new hashes.
       A missing hash is still rejected, as \"file-deleted is missing hash\"
@@ -137,8 +137,13 @@ What a comparison records
 
   A file only on the left is file-deleted. A file only on the right is
   file-added, and the semdif keeps its bytes. One unpaired file on each side
-  with the same SHA-256 is file-renamed. Each of those records includes the
-  hash of the bytes. An empty directory that appears or disappears is
+  with the same SHA-256 is file-renamed. One deleted file and one added file
+  that share a filename are file-moved when more than half the lines of the
+  longer copy stay in order. The filename is the final path component. The
+  record names both paths and keeps the new bytes. Several files with that
+  name, a file that is not text, or a copy that shares half or fewer of those
+  lines stay file-deleted and file-added. Each record includes the SHA-256 of
+  the bytes it removes or writes. An empty directory that appears or disappears is
   directory-added or directory-deleted, including a directory left empty
   because its files moved. Nested removals come before their parents, and
   additions come parents first.
@@ -171,9 +176,10 @@ What apply checks
 
   A file-deleted or file-renamed change checks the hash of the file in the
   tree. A file-added change checks the hash of the bytes about to be written.
+  A file-moved change checks the file it removes and the bytes it writes.
   A mismatch is reported as \"cannot apply PATH: contents do not match the
-  hash\" and leaves the tree unchanged. --ignore-hash applies those three
-  changes anyway.
+  hash\" and leaves the tree unchanged. --ignore-hash applies those changes
+  anyway.
 
 Limitations
 
@@ -181,8 +187,8 @@ Limitations
   link, a dangling symlink, and a special file such as a fifo stay
   unrecorded. Apply writes a regular file.
 
-  A renamed file whose bytes also changed is file-deleted plus file-added.
-  The addition carries the new bytes.
+  A renamed file whose name changed and whose bytes also changed is
+  file-deleted plus file-added. The addition carries the new bytes.
 
   A rename is recorded when exactly one unpaired file on each side shares a
   hash. When two or more unpaired files share a hash, the left-hand paths are
