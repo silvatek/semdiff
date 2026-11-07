@@ -72,28 +72,54 @@ pub(crate) fn find_differences(
     let changes = directory_changes::place_replacement_files(changes);
     let changes = crate::change::merge_adjacent(changes);
     let right_root = fs.source_base(Path::new(&sources.right));
-    let right_texts = source_texts(
-        fs,
-        right_root,
-        &paired_files,
-        &changes,
-        file_change::ComparedSide::Right,
-    )?;
+    let right_texts = source_texts(fs, right_root, &paired_files, &changes, ComparedSide::Right)?;
     let left_root = fs.source_base(Path::new(&sources.left));
     let old_paths = old_text_paths(&left_files, &changes);
-    let texts = source_texts(
-        fs,
-        left_root,
-        &old_paths,
-        &changes,
-        file_change::ComparedSide::Left,
-    )?;
+    let texts = source_texts(fs, left_root, &old_paths, &changes, ComparedSide::Left)?;
     let changes = crate::change::promote_named_blocks(&right_texts, &texts, changes);
     let changes = crate::change::merge_identifier_files(&texts, changes);
     Ok(Differences {
         paths: paired_files,
         changes,
     })
+}
+
+/// Which tree a paired path is read from.
+#[derive(Clone, Copy)]
+enum ComparedSide {
+    /// The bytes before the change. A moved file is read at its old path.
+    Left,
+    /// The bytes after the change, at the paired path.
+    Right,
+}
+
+/// The bytes at a paired path.
+///
+/// `path` is the scope of the content records. On the right, those bytes are
+/// the file at that path. On the left, a file-moved record whose new path is
+/// this one means the old bytes are still at `from`. Any comparison pass can
+/// read through this, so locating a moved file stays out of the code that
+/// classifies the edit.
+fn read_compared(
+    fs: &dyn FileSystem,
+    root: &Path,
+    path: &str,
+    changes: &[Box<dyn Change>],
+    side: ComparedSide,
+) -> Result<Vec<u8>, String> {
+    let relative = match side {
+        ComparedSide::Right => path,
+        ComparedSide::Left => changes
+            .iter()
+            .find_map(|change| {
+                let (from, to) = change.file_move()?;
+                (to == path).then_some(from)
+            })
+            .unwrap_or(path),
+    };
+    let full = root.join(relative);
+    fs.read(&full)
+        .map_err(|error| format!("cannot read {}: {error}", full.display()))
 }
 
 /// The old text of each file, so a rename can see every occurrence of a name.
@@ -106,11 +132,11 @@ fn source_texts(
     root: &Path,
     files: &[String],
     changes: &[Box<dyn Change>],
-    side: file_change::ComparedSide,
+    side: ComparedSide,
 ) -> Result<Vec<crate::change::SourceText>, String> {
     let mut texts = Vec::new();
     for path in files {
-        let bytes = file_change::read_compared(fs, root, path, changes, side)?;
+        let bytes = read_compared(fs, root, path, changes, side)?;
         let lines = match std::str::from_utf8(&bytes) {
             Ok(text) => line_changes::split_text(text).lines,
             Err(_) => Vec::new(),

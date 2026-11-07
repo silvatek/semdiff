@@ -154,8 +154,8 @@ fn paired_change(
     path: &str,
     recorded: &[Box<dyn Change>],
 ) -> Result<Vec<Box<dyn Change>>, String> {
-    let before = read_compared(fs, left_root, path, recorded, ComparedSide::Left)?;
-    let after = read_compared(fs, right_root, path, recorded, ComparedSide::Right)?;
+    let before = super::read_compared(fs, left_root, path, recorded, super::ComparedSide::Left)?;
+    let after = super::read_compared(fs, right_root, path, recorded, super::ComparedSide::Right)?;
     if before == after {
         return Ok(Vec::new());
     }
@@ -191,40 +191,6 @@ fn file_name(path: &str) -> &str {
 /// keep, so it is not a move.
 fn keeps_enough_lines(left: &[u8], right: &[u8]) -> bool {
     common_line_proportion(left, right).is_some_and(|proportion| proportion > 0.5)
-}
-
-/// Which tree a paired path is read from.
-#[derive(Clone, Copy)]
-pub(super) enum ComparedSide {
-    /// The bytes before the change. A moved file is read at its old path.
-    Left,
-    /// The bytes after the change, at the paired path.
-    Right,
-}
-
-/// The bytes compared at a paired path.
-///
-/// `path` is the scope of the content records. On the right, those bytes are
-/// the file at that path. On the left, a file-moved record whose new path is
-/// this one means the old bytes are still at `from`.
-pub(super) fn read_compared(
-    fs: &dyn FileSystem,
-    root: &Path,
-    path: &str,
-    changes: &[Box<dyn Change>],
-    side: ComparedSide,
-) -> Result<Vec<u8>, String> {
-    let relative = match side {
-        ComparedSide::Right => path,
-        ComparedSide::Left => changes
-            .iter()
-            .find_map(|change| {
-                let (from, to) = change.file_move()?;
-                (to == path).then_some(from)
-            })
-            .unwrap_or(path),
-    };
-    read_file(fs, root, relative)
 }
 
 fn read_file(fs: &dyn FileSystem, root: &Path, relative: &str) -> Result<Vec<u8>, String> {
