@@ -427,8 +427,8 @@ impl ChangeList {
         Self { records }
     }
 
-    /// Adds the records from a later stage of the comparison.
-    pub(crate) fn extend(&mut self, more: Vec<Box<dyn Change>>) {
+    /// Appends the records from a later stage of the comparison.
+    pub(crate) fn append(&mut self, more: Vec<Box<dyn Change>>) {
         self.records.extend(more);
     }
 

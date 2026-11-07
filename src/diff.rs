@@ -68,8 +68,8 @@ pub(crate) fn find_differences(
     paired_files.extend(changes.moved_destinations());
     paired_files.sort();
     let content = file_change::paired_changes(fs, sources, &paired_files, &changes)?;
-    changes.extend(content);
-    changes.extend(directory_changes::directory_changes(
+    changes.append(content);
+    changes.append(directory_changes::directory_changes(
         &left_dirs,
         &right_dirs,
         &right_files,
