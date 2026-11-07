@@ -1,11 +1,11 @@
-//! The reader for brace-delimited languages.
+//! How a brace-delimited language opens, closes, and indents a named block.
 //!
 //! C, C++, Rust, Java, and JavaScript share this reader. A dialect supplies
 //! the comment mark, the identifier characters, the keywords that open a
 //! named block, and whether a c-style function needs a type before its name.
 //! Braces mark a block, so a change of indentation is formatting.
 
-use crate::classify::NamedBlock;
+use super::NamedBlock;
 use crate::dialect::{BlockCategory, BlockEdge, Dialect, IdentifierCharacters, NamedBlockKeyword};
 
 /// Whether the edit is only an insignificant margin.
@@ -13,7 +13,7 @@ use crate::dialect::{BlockCategory, BlockEdge, Dialect, IdentifierCharacters, Na
 /// Braces mark the block, so indentation is formatting. Trailing spaces and
 /// tabs are formatting too. The lines have to match once those are removed.
 /// A carriage return stays part of the line.
-pub(super) fn margin_whitespace(old_line: &str, new_line: &str) -> bool {
+pub(crate) fn margin_whitespace(old_line: &str, new_line: &str) -> bool {
     strip_ascii_blank(old_line) == strip_ascii_blank(new_line)
 }
 

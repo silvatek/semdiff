@@ -1,8 +1,10 @@
-use super::run;
+//! Tests that compare a sample and then replay that semdif onto a copy of the old tree.
 
-use std::collections::BTreeSet;
+use crate::main::run;
 
 use semdiff::FileSystem;
+
+use std::collections::BTreeSet;
 use std::fs;
 use std::path::Path;
 

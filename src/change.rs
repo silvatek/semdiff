@@ -1,4 +1,5 @@
-//! One change in a semdif file.
+//! The shared shape of every change record, including how apply rebuilds a file
+//! from one.
 //!
 //! Each kind of change is its own type and implements [`Change`]. That trait is
 //! what every kind has: its semdif type, how widely it applies, the details it

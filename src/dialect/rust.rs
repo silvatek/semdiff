@@ -1,4 +1,4 @@
-//! The Rust dialect.
+//! Rust's extensions, comments, strings, names, keywords, and boolean spellings.
 
 use super::{BlockCategory, Dialect, NamedBlockKeyword};
 

@@ -1,4 +1,6 @@
-use super::tree::Tree;
+//! Tests of replaying a semdif onto one tree.
+
+use crate::filesystem::Tree;
 
 #[test]
 fn applies_a_rename_inside_a_directory() {

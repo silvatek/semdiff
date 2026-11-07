@@ -1,4 +1,6 @@
-use super::tree::Tree;
+//! Tests of identifying and classifying changes at the directory level.
+
+use crate::filesystem::Tree;
 
 #[test]
 fn records_empty_directories_added_and_removed() {

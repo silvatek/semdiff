@@ -1,5 +1,6 @@
-use super::run;
+//! Tests of interpreting argv, including a new flag.
 
+use crate::main::run;
 use std::fs;
 
 #[test]

@@ -1,4 +1,4 @@
-//! The text printed for `--help`, and the short usage printed for bad arguments.
+//! The --help text and the usage line for bad arguments.
 //!
 //! The full help begins with [`USAGE`], so the two messages stay the same text.
 //! The rest of the help is chosen from [`details_by_language`] by language code.

@@ -1,3 +1,6 @@
+//! Code that reads or writes semdif files, including serialising and deserialising
+//! change records.
+
 use std::collections::BTreeMap;
 use std::io::{self, Write};
 use std::path::Path;
@@ -24,7 +27,7 @@ pub(crate) fn write_output(
     fs: &dyn FileSystem,
     output: &str,
     sources: &crate::Sources,
-    differences: &crate::Differences,
+    differences: &crate::diff::Differences,
 ) -> ExitCode {
     let document = document(&differences.changes);
     if output == crate::args::STANDARD_STREAM {
@@ -54,7 +57,7 @@ pub(crate) fn write_output(
 fn report_comparison(
     out: &mut dyn Write,
     sources: &crate::Sources,
-    differences: &crate::Differences,
+    differences: &crate::diff::Differences,
 ) {
     let _ = writeln!(out, "Semdiff {}", env!("CARGO_PKG_VERSION"));
     let _ = writeln!(out, "Comparing {} and {}", sources.left, sources.right);
@@ -458,15 +461,19 @@ fn parse_constant_changed(
 
 /// Whether both values are integers, or both are boolean spellings for `path`.
 fn constant_pair(path: &str, old_value: &str, new_value: &str) -> bool {
-    if crate::constant::is_integer(old_value) && crate::constant::is_integer(new_value) {
+    if crate::diff::span_changes::constant::is_integer(old_value)
+        && crate::diff::span_changes::constant::is_integer(new_value)
+    {
         return true;
     }
-    crate::constant::is_boolean(path, old_value) && crate::constant::is_boolean(path, new_value)
+    crate::diff::span_changes::constant::is_boolean(path, old_value)
+        && crate::diff::span_changes::constant::is_boolean(path, new_value)
 }
 
 /// Whether `text` is an integer or a boolean spelling for `path`.
 fn constant_value(path: &str, text: &str) -> bool {
-    crate::constant::is_integer(text) || crate::constant::is_boolean(path, text)
+    crate::diff::span_changes::constant::is_integer(text)
+        || crate::diff::span_changes::constant::is_boolean(path, text)
 }
 
 fn parse_directory_added(

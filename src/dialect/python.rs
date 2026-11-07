@@ -1,4 +1,4 @@
-//! The Python dialect.
+//! Python's extensions, comments, strings, names, keywords, and boolean spellings.
 
 use super::{BlockCategory, BlockEdge, Dialect, Family, NamedBlockKeyword, StringDelimiter};
 

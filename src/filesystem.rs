@@ -1,4 +1,5 @@
-//! The files and directories a comparison or apply reads and writes.
+//! Interacting with the filesystem (real or mocked), including walking directory
+//! trees.
 //!
 //! The command uses [`StdFileSystem`]. A test that only cares which bytes are
 //! at which path uses [`MemoryFileSystem`] and never touches the disk. The

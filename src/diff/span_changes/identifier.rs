@@ -1,4 +1,4 @@
-//! A line edit that only renames one identifier.
+//! Identifying and classifying a renamed name.
 //!
 //! The two lines are split into names and the text between them. The edit is
 //! a rename when those pieces have the same shape, exactly one name differs,
@@ -21,13 +21,11 @@ pub(crate) struct Rename {
 /// once: `foo(foo)` changing to `foo(bar)` is not a rename.
 #[cfg_attr(not(test), allow(dead_code))]
 pub(crate) fn identifier_rename(path: &str, old_line: &str, new_line: &str) -> Option<Rename> {
-    let found = crate::span::find_spans(path, old_line, new_line);
+    let found = super::find_spans(path, old_line, new_line);
     let [span] = found.as_slice() else {
         return None;
     };
-    let crate::span::Classification::Rename { oldname, newname } =
-        crate::span::classify(path, span)?
-    else {
+    let super::Classification::Rename { oldname, newname } = super::classify(path, span)? else {
         return None;
     };
     Some(Rename { oldname, newname })

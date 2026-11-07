@@ -1,4 +1,4 @@
-//! The JavaScript dialect.
+//! JavaScript's extensions, comments, strings, names, keywords, and boolean spellings.
 
 use super::{BlockCategory, Dialect, IdentifierCharacters, NamedBlockKeyword, StringDelimiter};
 

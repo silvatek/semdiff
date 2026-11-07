@@ -1,4 +1,5 @@
-//! Line additions, removals, and modifications.
+//! The record of a line-level change, including how such records combine and how
+//! apply carries one out.
 //!
 //! A line change's scope is the file. A method's scope also names the enclosing
 //! block, as `src/main.rs[Count]`. Apply still edits the file. A span change
@@ -258,7 +259,7 @@ fn followed_by_more_of_the_block(changes: &[Box<dyn super::Change>], index: usiz
             cursor += 1;
             continue;
         }
-        return crate::classify::block_resumes(current.scope(), text, next_text);
+        return crate::family::block_resumes(current.scope(), text, next_text);
     }
     false
 }
@@ -277,7 +278,7 @@ fn named_block_from_addition(
     let text = line.text()?;
     let (old, new) = line.position();
     let before = lines_before(sources, change.scope(), new);
-    let block = crate::classify::named_block_in(change.scope(), text, &before)?;
+    let block = crate::family::named_block_in(change.scope(), text, &before)?;
     Some(NamedBlockAdded::new(
         block_scope(change.scope(), block.enclosing.as_deref()),
         old,
@@ -302,7 +303,7 @@ fn named_block_from_removal(
     let text = line.text()?;
     let (old, new) = line.position();
     let before = lines_before(sources, change.scope(), old);
-    let block = crate::classify::named_block_in(change.scope(), text, &before)?;
+    let block = crate::family::named_block_in(change.scope(), text, &before)?;
     Some(NamedBlockRemoved::new(
         block_scope(change.scope(), block.enclosing.as_deref()),
         old,

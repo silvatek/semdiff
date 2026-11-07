@@ -1,4 +1,4 @@
-//! An empty directory added to or removed from the tree.
+//! The record of a directory-level change, including how apply carries it out.
 
 use std::path::Path;
 

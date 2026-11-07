@@ -1,4 +1,5 @@
-//! A change to a portion of one line.
+//! The record of a span-level change, including how such records combine and how
+//! apply carries one out. A span is a changed sequence within a line.
 //!
 //! Directory, file, and line changes each have their own scope rules. A span
 //! change names one old line, written `path:line`, or a run of old lines,
@@ -328,7 +329,7 @@ impl IdentifierRenamed {
         }
         for line_no in 1..=source_lines.len() {
             let current = &source_lines[line_no - 1];
-            let replaced = match crate::identifier::replace_every(
+            let replaced = match crate::diff::span_changes::identifier::replace_every(
                 &path,
                 current,
                 &self.oldname,
@@ -368,7 +369,7 @@ impl IdentifierRenamed {
             ));
         }
         if span.is_single() {
-            let replaced = match crate::identifier::replace_name(
+            let replaced = match crate::diff::span_changes::identifier::replace_name(
                 span.file(),
                 &source_lines[start - 1],
                 &self.oldname,
@@ -388,7 +389,7 @@ impl IdentifierRenamed {
         let mut found = false;
         for line_no in start..=end {
             let current = &source_lines[line_no - 1];
-            let replaced = match crate::identifier::replace_every(
+            let replaced = match crate::diff::span_changes::identifier::replace_every(
                 span.file(),
                 current,
                 &self.oldname,
@@ -513,8 +514,8 @@ impl LineEdit for ConstantChanged {
                 source_lines.len()
             ));
         }
-        let replaced = if crate::constant::is_integer(&self.old_value) {
-            crate::constant::replace_integer(
+        let replaced = if crate::diff::span_changes::constant::is_integer(&self.old_value) {
+            crate::diff::span_changes::constant::replace_integer(
                 self.span.file(),
                 &source_lines[line_no - 1],
                 &self.old_value,
@@ -522,7 +523,7 @@ impl LineEdit for ConstantChanged {
                 self.occurrence,
             )
         } else {
-            crate::constant::replace_boolean(
+            crate::diff::span_changes::constant::replace_boolean(
                 self.span.file(),
                 &source_lines[line_no - 1],
                 &self.old_value,
@@ -533,7 +534,7 @@ impl LineEdit for ConstantChanged {
         let replaced = match replaced {
             Ok(text) => text,
             Err(message) => {
-                let kind = if crate::constant::is_integer(&self.old_value) {
+                let kind = if crate::diff::span_changes::constant::is_integer(&self.old_value) {
                     "integer"
                 } else {
                     "boolean"
@@ -679,9 +680,11 @@ fn occurrences_covered(
         return false;
     }
     for line_no in start..=end {
-        let Some(count) =
-            crate::identifier::occurrence_count(path, &old_lines[line_no - 1], oldname)
-        else {
+        let Some(count) = crate::diff::span_changes::identifier::occurrence_count(
+            path,
+            &old_lines[line_no - 1],
+            oldname,
+        ) else {
             return false;
         };
         if count == 0 {
@@ -871,8 +874,11 @@ fn directory_occurrences_covered(
         }
         for (index, line) in source.lines.iter().enumerate() {
             let line_no = index + 1;
-            let Some(count) = crate::identifier::occurrence_count(&source.path, line, oldname)
-            else {
+            let Some(count) = crate::diff::span_changes::identifier::occurrence_count(
+                &source.path,
+                line,
+                oldname,
+            ) else {
                 continue;
             };
             if count == 0 {

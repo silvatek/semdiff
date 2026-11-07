@@ -1,3 +1,5 @@
+//! Interpreting argv, including a new flag.
+
 use std::env;
 use std::path::Path;
 

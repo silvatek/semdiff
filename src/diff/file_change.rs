@@ -1,3 +1,5 @@
+//! Identifying and classifying changes at the file level.
+
 use std::collections::{HashMap, HashSet};
 use std::path::Path;
 
@@ -6,7 +8,8 @@ use sha2::{Digest, Sha256};
 use crate::change::Change;
 use crate::filesystem::FileSystem;
 
-/// Renames, deletions, and additions among the files that exist on only one side.
+/// Renames, deletions, and additions among the files that exist on only one side,
+/// and content changes for a path that exists on both sides.
 ///
 /// A hash identifies the content. One file on the left and one file on the right with
 /// the same hash are a rename, so identical copies are not paired by guesswork. A file
@@ -74,6 +77,54 @@ pub(crate) fn file_changes(
         }
     }
     changes.sort_by(|left, right| left.sort_key().cmp(&right.sort_key()));
+    Ok(changes)
+}
+
+/// Changes for files present at the same path on both sides.
+///
+/// Matching copies are left out. A file whose bytes differ records both
+/// SHA-256s. When both copies are text and a line differs, the line records
+/// follow. Otherwise the new bytes are one whole-file change. That includes a
+/// file that is not text, and a text file whose only difference is the final
+/// newline.
+pub(crate) fn paired_changes(
+    fs: &dyn FileSystem,
+    sources: &crate::Sources,
+    paired_files: &[String],
+) -> Result<Vec<Box<dyn Change>>, String> {
+    let left_root = fs.source_base(Path::new(&sources.left));
+    let right_root = fs.source_base(Path::new(&sources.right));
+    let mut changes = Vec::new();
+    for path in paired_files {
+        changes.extend(paired_change(fs, left_root, right_root, path)?);
+    }
+    Ok(changes)
+}
+
+/// The records for one paired path, when its two copies differ.
+fn paired_change(
+    fs: &dyn FileSystem,
+    left_root: &Path,
+    right_root: &Path,
+    path: &str,
+) -> Result<Vec<Box<dyn Change>>, String> {
+    let before = read_file(fs, left_root, path)?;
+    let after = read_file(fs, right_root, path)?;
+    if before == after {
+        return Ok(Vec::new());
+    }
+    let mut changes = vec![Box::new(crate::change::FileChanged::hashes(
+        path.to_string(),
+        sha256_hex(&before),
+        sha256_hex(&after),
+    )) as Box<dyn Change>];
+    match super::line_changes::text_line_changes(path, &before, &after) {
+        Some(line_edits) if !line_edits.is_empty() => changes.extend(line_edits),
+        _ => changes.push(Box::new(crate::change::FileChanged::contents(
+            path.to_string(),
+            after,
+        ))),
+    }
     Ok(changes)
 }
 

@@ -1,23 +1,16 @@
-mod apply;
-mod args;
-mod content_changes;
-mod directory_changes;
-mod file_change;
-mod round_trip;
-mod semdif;
-mod tree;
+//! Tests of the process entry, including the helper that runs semdiff.
 
 use std::fs;
 use std::process::Command;
 
-fn run(args: &[&str]) -> std::process::Output {
+pub(crate) fn run(args: &[&str]) -> std::process::Output {
     Command::new(env!("CARGO_BIN_EXE_semdiff"))
         .args(args)
         .output()
         .expect("failed to run semdiff")
 }
 
-fn run_with_stdin(args: &[&str], stdin: &[u8]) -> std::process::Output {
+pub(crate) fn run_with_stdin(args: &[&str], stdin: &[u8]) -> std::process::Output {
     let mut child = Command::new(env!("CARGO_BIN_EXE_semdiff"))
         .args(args)
         .stdin(std::process::Stdio::piped())

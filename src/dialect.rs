@@ -1,4 +1,4 @@
-//! Languages semdiff can read.
+//! What every language supplies, and which dialect a path selects.
 //!
 //! A dialect is configuration. It names the files it covers, how comments and
 //! blocks are written, which characters form a name, and which keywords open

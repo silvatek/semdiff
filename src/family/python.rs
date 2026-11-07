@@ -1,10 +1,10 @@
-//! The reader for Python.
+//! How Python opens, closes, and indents a named block.
 //!
 //! Python blocks are indentation, not braces. A dialect supplies the comment
 //! mark, the identifier characters, and the keywords that open a named block.
 //! A leading indent change is a block boundary. Trailing space is formatting.
 
-use crate::classify::NamedBlock;
+use super::NamedBlock;
 use crate::dialect::{BlockCategory, BlockEdge, Dialect, IdentifierCharacters, NamedBlockKeyword};
 
 /// Whether the edit is only an insignificant margin.
@@ -13,7 +13,7 @@ use crate::dialect::{BlockCategory, BlockEdge, Dialect, IdentifierCharacters, Na
 /// ends. A leading change is a block boundary, unless both lines are blank or
 /// both are full-line comments. Trailing space is insignificant. A carriage
 /// return stays part of the line.
-pub(super) fn margin_whitespace(dialect: &Dialect, old_line: &str, new_line: &str) -> bool {
+pub(crate) fn margin_whitespace(dialect: &Dialect, old_line: &str, new_line: &str) -> bool {
     if strip_ascii_blank(old_line) != strip_ascii_blank(new_line) {
         return false;
     }

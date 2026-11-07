@@ -1,3 +1,5 @@
+//! The in-memory tree an integration test builds.
+
 use std::path::Path;
 
 use semdiff::{apply_document, compare_sources, FileSystem, MemoryFileSystem, NodeKind};

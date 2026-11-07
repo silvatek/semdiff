@@ -1,3 +1,5 @@
+//! Identifying and classifying changes at the directory level.
+
 use std::collections::BTreeSet;
 
 use crate::change::Change;
