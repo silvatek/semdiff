@@ -5,7 +5,7 @@ use std::path::Path;
 
 use sha2::{Digest, Sha256};
 
-use crate::change::Change;
+use crate::change::{Change, ChangeList};
 use crate::filesystem::FileSystem;
 
 /// Renames, moves, deletions, and additions among the files that exist on only
@@ -136,40 +136,39 @@ pub(crate) fn paired_changes(
     sources: &crate::Sources,
     paired_files: &[String],
     recorded: &crate::change::ChangeList,
-) -> Result<Vec<Box<dyn Change>>, String> {
+) -> Result<ChangeList, String> {
     let left_root = fs.source_base(Path::new(&sources.left));
     let right_root = fs.source_base(Path::new(&sources.right));
-    let mut changes = Vec::new();
+    let mut changes = ChangeList::of(Vec::new());
     for path in paired_files {
-        changes.extend(paired_change(fs, left_root, right_root, path, recorded)?);
+        changes.append(paired_change(fs, left_root, right_root, path, recorded)?);
     }
     Ok(changes)
 }
 
-/// The records for one paired path, when its two copies differ.
+/// The changes for one paired path, when its two copies differ.
 fn paired_change(
     fs: &dyn FileSystem,
     left_root: &Path,
     right_root: &Path,
     path: &str,
     recorded: &crate::change::ChangeList,
-) -> Result<Vec<Box<dyn Change>>, String> {
+) -> Result<ChangeList, String> {
     let before = super::read_content(path, super::ComparedSide::Left, left_root, fs, recorded)?;
     let after = super::read_content(path, super::ComparedSide::Right, right_root, fs, recorded)?;
     if before == after {
-        return Ok(Vec::new());
+        return Ok(ChangeList::of(Vec::new()));
     }
-    let mut changes = vec![Box::new(crate::change::FileChanged::hashes(
+    let mut changes = ChangeList::of(vec![Box::new(crate::change::FileChanged::hashes(
         path.to_string(),
         sha256_hex(&before),
         sha256_hex(&after),
-    )) as Box<dyn Change>];
+    )) as Box<dyn Change>]);
     match super::line_changes::text_line_changes(path, &before, &after) {
-        Some(line_edits) if !line_edits.is_empty() => changes.extend(line_edits),
-        _ => changes.push(Box::new(crate::change::FileChanged::contents(
-            path.to_string(),
-            after,
-        ))),
+        Some(line_edits) if !line_edits.is_empty() => changes.append(line_edits),
+        _ => changes.append(ChangeList::of(vec![Box::new(
+            crate::change::FileChanged::contents(path.to_string(), after),
+        )])),
     }
     Ok(changes)
 }

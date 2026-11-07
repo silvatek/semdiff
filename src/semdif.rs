@@ -8,13 +8,13 @@ use std::process::ExitCode;
 
 use crate::filesystem::FileSystem;
 
-use crate::change::Change;
+use crate::change::{Change, ChangeList};
 
 use base64::engine::general_purpose::STANDARD;
 use base64::Engine;
 
 /// The semdif text for these changes, including the header.
-pub(crate) fn document(changes: &[Box<dyn Change>]) -> String {
+pub(crate) fn document(changes: &ChangeList) -> String {
     semdif_document(env!("CARGO_PKG_VERSION"), &utc_timestamp(), changes)
 }
 
@@ -70,14 +70,14 @@ fn report_comparison(
 ///
 /// The header is always present. Changes are included only when some were found, so an
 /// unchanged pair does not gain an empty change list.
-fn semdif_document(version: &str, timestamp: &str, changes: &[Box<dyn Change>]) -> String {
+fn semdif_document(version: &str, timestamp: &str, changes: &ChangeList) -> String {
     let mut document = header_document(version, timestamp);
     if changes.is_empty() {
         return document;
     }
     document.push_str("changes:\n");
-    for change in changes {
-        write_change(&mut document, change.as_ref());
+    for index in 0..changes.len() {
+        write_change(&mut document, &changes[index]);
     }
     document
 }
