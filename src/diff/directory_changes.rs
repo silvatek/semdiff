@@ -81,7 +81,7 @@ pub(crate) fn place_replacement_files(changes: &mut ChangeList) {
         let from = index - nth;
         let to = changes.len() - 1;
         if from != to {
-            changes.r#move(from, to);
+            changes.move_change(from, to);
         }
     }
 }

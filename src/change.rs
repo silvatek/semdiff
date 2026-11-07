@@ -466,7 +466,7 @@ impl ChangeList {
     ///
     /// That change keeps its contents. The changes between the two indexes
     /// shift to close the gap.
-    pub(crate) fn r#move(&mut self, from: usize, to: usize) {
+    pub(crate) fn move_change(&mut self, from: usize, to: usize) {
         if from == to {
             return;
         }
