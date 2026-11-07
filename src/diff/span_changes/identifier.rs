@@ -21,7 +21,7 @@ pub(crate) struct Rename {
 /// once: `foo(foo)` changing to `foo(bar)` is not a rename.
 #[cfg_attr(not(test), allow(dead_code))]
 pub(crate) fn identifier_rename(path: &str, old_line: &str, new_line: &str) -> Option<Rename> {
-    let found = crate::diff::span::find_spans(path, old_line, new_line);
+    let found = super::find_spans(path, old_line, new_line);
     let [span] = found.as_slice() else {
         return None;
     };

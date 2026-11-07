@@ -13,7 +13,6 @@
 mod directory_changes;
 mod file_change;
 mod line_changes;
-pub(crate) mod span;
 pub(crate) mod span_changes;
 
 pub(crate) use file_change::sha256_hex;

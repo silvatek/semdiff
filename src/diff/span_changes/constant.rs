@@ -49,7 +49,7 @@ pub(crate) fn integer_constant(
     old_line: &str,
     new_line: &str,
 ) -> Option<IntegerConstant> {
-    let found = crate::diff::span::find_spans(path, old_line, new_line);
+    let found = super::find_spans(path, old_line, new_line);
     let [span] = found.as_slice() else {
         return None;
     };
@@ -142,7 +142,7 @@ pub(crate) fn boolean_constant(
     old_line: &str,
     new_line: &str,
 ) -> Option<BooleanConstant> {
-    let found = crate::diff::span::find_spans(path, old_line, new_line);
+    let found = super::find_spans(path, old_line, new_line);
     let [span] = found.as_slice() else {
         return None;
     };

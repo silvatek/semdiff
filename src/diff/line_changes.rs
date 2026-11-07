@@ -288,7 +288,7 @@ fn modified_line(
     old_text: &str,
     new_text: &str,
 ) -> Box<dyn Change> {
-    let found = super::span::find_spans(path, old_text, new_text);
+    let found = super::span_changes::find_spans(path, old_text, new_text);
     if let [span] = found.as_slice() {
         if let Some(change) = super::span_changes::record(path, old, new, span) {
             return change;
