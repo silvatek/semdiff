@@ -3,10 +3,10 @@
 mod apply;
 mod args;
 mod change;
-mod classify;
 mod constant;
 mod dialect;
 mod diff;
+mod family;
 mod filesystem;
 mod help;
 mod identifier;

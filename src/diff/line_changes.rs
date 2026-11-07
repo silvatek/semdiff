@@ -366,10 +366,10 @@ fn margin_whitespace(path: &str, old_line: &str, new_line: &str) -> bool {
     };
     match dialect.family {
         crate::dialect::Family::CFamily => {
-            crate::classify::c_family::margin_whitespace(old_line, new_line)
+            crate::family::c_family::margin_whitespace(old_line, new_line)
         }
         crate::dialect::Family::Python => {
-            crate::classify::python::margin_whitespace(dialect, old_line, new_line)
+            crate::family::python::margin_whitespace(dialect, old_line, new_line)
         }
     }
 }

@@ -5,7 +5,7 @@
 //! named block, and whether a c-style function needs a type before its name.
 //! Braces mark a block, so a change of indentation is formatting.
 
-use crate::classify::NamedBlock;
+use super::NamedBlock;
 use crate::dialect::{BlockCategory, BlockEdge, Dialect, IdentifierCharacters, NamedBlockKeyword};
 
 /// Whether the edit is only an insignificant margin.

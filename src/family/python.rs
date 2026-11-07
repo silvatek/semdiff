@@ -4,7 +4,7 @@
 //! mark, the identifier characters, and the keywords that open a named block.
 //! A leading indent change is a block boundary. Trailing space is formatting.
 
-use crate::classify::NamedBlock;
+use super::NamedBlock;
 use crate::dialect::{BlockCategory, BlockEdge, Dialect, IdentifierCharacters, NamedBlockKeyword};
 
 /// Whether the edit is only an insignificant margin.
