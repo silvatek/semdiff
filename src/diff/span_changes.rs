@@ -13,7 +13,7 @@ pub(crate) mod constant;
 pub(crate) mod identifier;
 
 use crate::change::{ChangeList, ConstantChanged, IdentifierRenamed, SpanScope};
-use crate::dialect::{for_path, Dialect, StringDelimiter};
+use crate::dialect::{dialect_for_path, Dialect, StringDelimiter};
 use constant::IntegerToken;
 
 /// The record for one classified span.
@@ -34,7 +34,7 @@ pub(crate) enum Classification {
 /// outside a string and a comment is a constant. One identifier whose old name
 /// occurs once on the span's line is a rename. Anything else is `None`.
 pub(crate) fn classify(path: &str, span: &Span<'_>) -> Option<Classification> {
-    let dialect = for_path(path)?;
+    let dialect = dialect_for_path(path)?;
     let shielded = span.in_string || span.in_comment;
     if !shielded
         && constant::is_boolean(path, span.old_text)
@@ -315,7 +315,7 @@ pub(crate) struct Span<'a> {
 ///
 /// A file with no dialect has no spans.
 pub(crate) fn find_spans<'a>(path: &str, old_line: &'a str, new_line: &'a str) -> Vec<Span<'a>> {
-    let Some(dialect) = for_path(path) else {
+    let Some(dialect) = dialect_for_path(path) else {
         return Vec::new();
     };
     let old_atoms = atoms(dialect, old_line);

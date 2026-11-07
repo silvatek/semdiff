@@ -13,7 +13,7 @@ use std::path::Path;
 
 use super::{applied_with_its_file, Change, Content, IdentifierRename, LineEdit, LinePlan};
 
-use crate::dialect::for_path;
+use crate::dialect::dialect_for_path;
 use crate::diff::span_changes::constant::{is_integer, replace_boolean, replace_integer};
 use crate::diff::span_changes::identifier::{occurrence_count, replace_every, replace_name};
 use crate::filesystem::FileSystem;
@@ -328,7 +328,7 @@ impl IdentifierRenamed {
         plan: &mut LinePlan,
     ) -> Result<(), String> {
         let path = file.to_string_lossy();
-        if for_path(&path).is_none() {
+        if dialect_for_path(&path).is_none() {
             return Ok(());
         }
         for line_no in 1..=source_lines.len() {

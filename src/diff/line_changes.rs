@@ -2,7 +2,7 @@
 
 use super::span_changes::{find_spans, record};
 use crate::change::{merge_identifier_spans, ChangeList, LineAdded, LineModified, LineRemoved};
-use crate::dialect::{for_path, Dialect, Family};
+use crate::dialect::{dialect_for_path, Dialect, Family};
 
 /// Line records for two copies of one file, when both copies are text.
 ///
@@ -327,7 +327,7 @@ fn introduces_line_comment(dialect: &Dialect, line: &str) -> bool {
 /// Every line has to introduce the dialect's line comment. A file with no
 /// dialect is not a comment. An empty line is not one either.
 fn full_line_comment(path: &str, text: &str) -> bool {
-    let Some(dialect) = for_path(path) else {
+    let Some(dialect) = dialect_for_path(path) else {
         return false;
     };
     if text.is_empty() {
@@ -344,7 +344,7 @@ fn full_line_comment(path: &str, text: &str) -> bool {
 /// no dialect is not blank for this purpose. A comment, a carriage return, or
 /// any other character keeps the line unflagged.
 fn blank_line(path: &str, text: &str) -> bool {
-    if for_path(path).is_none() {
+    if dialect_for_path(path).is_none() {
         return false;
     }
     text.split('\n').all(only_ascii_blank)
@@ -363,7 +363,7 @@ fn only_ascii_blank(line: &str) -> bool {
 /// boundary. Trailing space is insignificant in either reader. A file with no
 /// dialect is not whitespace. A carriage return stays part of the line.
 fn margin_whitespace(path: &str, old_line: &str, new_line: &str) -> bool {
-    let Some(dialect) = for_path(path) else {
+    let Some(dialect) = dialect_for_path(path) else {
         return false;
     };
     match dialect.family {

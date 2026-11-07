@@ -5,6 +5,7 @@ use std::path::Path;
 use super::{Change, RemovedDirectory};
 
 use crate::filesystem::FileSystem;
+use crate::semdif::write_detail;
 
 pub(crate) struct DirectoryAdded {
     pub(crate) scope: String,
@@ -25,7 +26,7 @@ impl Change for DirectoryAdded {
     }
 
     fn write_details(&self, document: &mut String) {
-        crate::semdif::write_detail(document, "path", &self.path);
+        write_detail(document, "path", &self.path);
     }
 
     fn apply(&self, fs: &dyn FileSystem, source: &Path) -> Result<(), String> {
@@ -56,7 +57,7 @@ impl Change for DirectoryDeleted {
     }
 
     fn write_details(&self, document: &mut String) {
-        crate::semdif::write_detail(document, "path", &self.path);
+        write_detail(document, "path", &self.path);
     }
 
     fn apply(&self, fs: &dyn FileSystem, source: &Path) -> Result<(), String> {

@@ -16,7 +16,7 @@
 //! stays an identifier rename. ANSI C lists none. `span_changes` makes that
 //! decision from the one changed span.
 
-use crate::dialect::Dialect;
+use crate::dialect::{dialect_for_path, Dialect, IdentifierCharacters};
 
 /// The old integer, the new integer, and which digit sequence on the old line changed.
 ///
@@ -84,7 +84,7 @@ pub(crate) fn replace_integer(
     new_value: &str,
     occurrence: usize,
 ) -> Result<String, String> {
-    let Some(dialect) = crate::dialect::for_path(path) else {
+    let Some(dialect) = dialect_for_path(path) else {
         return Err(format!("{path} has no dialect"));
     };
     let Some((digits, end)) = digit_runs(line).get(occurrence.wrapping_sub(1)).copied() else {
@@ -176,7 +176,7 @@ pub(crate) fn replace_boolean(
     new_value: &str,
     occurrence: usize,
 ) -> Result<String, String> {
-    let Some(dialect) = crate::dialect::for_path(path) else {
+    let Some(dialect) = dialect_for_path(path) else {
         return Err(format!("{path} has no dialect"));
     };
     let Some((start, end)) = boolean_tokens(dialect, line)
@@ -200,7 +200,7 @@ pub(crate) fn replace_boolean(
 /// The dialect lists the spellings. A file with no dialect, and a dialect
 /// that lists none, has no boolean constants.
 pub(crate) fn is_boolean(path: &str, text: &str) -> bool {
-    let Some(dialect) = crate::dialect::for_path(path) else {
+    let Some(dialect) = dialect_for_path(path) else {
         return false;
     };
     dialect
@@ -242,7 +242,7 @@ fn boolean_tokens(dialect: &Dialect, line: &str) -> Vec<(usize, usize)> {
 
 /// The byte index just after the identifier that starts before `index`.
 fn end_of_name(
-    characters: &crate::dialect::IdentifierCharacters,
+    characters: &IdentifierCharacters,
     line: &str,
     mut index: usize,
 ) -> usize {
