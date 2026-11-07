@@ -6,9 +6,16 @@ use std::io::{self, Write};
 use std::path::Path;
 use std::process::ExitCode;
 
+use crate::change::{
+    parse_rename_scope, parse_span_scope, Change, ChangeList, ConstantChanged, DirectoryAdded,
+    DirectoryDeleted, FileAdded, FileChanged, FileDeleted, FileMoved, FileRenamed,
+    IdentifierRenamed, LineAdded, LineModified, LineRemoved, NamedBlockAdded, NamedBlockRemoved,
+    RenameScope,
+};
+use crate::dialect::BlockCategory;
+use crate::diff::span_changes::constant::{is_boolean, is_integer};
+use crate::diff::Differences;
 use crate::filesystem::FileSystem;
-
-use crate::change::{Change, ChangeList};
 
 use base64::engine::general_purpose::STANDARD;
 use base64::Engine;
@@ -27,7 +34,7 @@ pub(crate) fn write_output(
     fs: &dyn FileSystem,
     output: &str,
     sources: &crate::Sources,
-    differences: &crate::diff::Differences,
+    differences: &Differences,
 ) -> ExitCode {
     let document = document(&differences.changes);
     if output == crate::args::STANDARD_STREAM {
@@ -57,7 +64,7 @@ pub(crate) fn write_output(
 fn report_comparison(
     out: &mut dyn Write,
     sources: &crate::Sources,
-    differences: &crate::diff::Differences,
+    differences: &Differences,
 ) {
     let _ = writeln!(out, "Semdiff {}", env!("CARGO_PKG_VERSION"));
     let _ = writeln!(out, "Comparing {} and {}", sources.left, sources.right);
@@ -194,7 +201,7 @@ pub(crate) fn parse_changes(document: &str) -> Result<ChangeList, String> {
     if lines.find(|line| line.trim() == "changes:").is_none() {
         return Ok(ChangeList::new());
     }
-    let mut found = Vec::new();
+    let mut found = ChangeList::new();
     let mut record: Option<PartialChange> = None;
     for line in lines {
         let trimmed = line.trim();
@@ -203,7 +210,7 @@ pub(crate) fn parse_changes(document: &str) -> Result<ChangeList, String> {
         }
         if let Some(rest) = trimmed.strip_prefix("- ") {
             if let Some(done) = record.take() {
-                found.push(done.finish()?);
+                done.finish(&mut found)?;
             }
             record = Some(PartialChange::start(rest)?);
             continue;
@@ -214,9 +221,9 @@ pub(crate) fn parse_changes(document: &str) -> Result<ChangeList, String> {
         record.read(trimmed)?;
     }
     if let Some(done) = record {
-        found.push(done.finish()?);
+        done.finish(&mut found)?;
     }
-    Ok(ChangeList::of(found))
+    Ok(found)
 }
 
 /// Fields of one change record, gathered before its kind is known.
@@ -250,7 +257,7 @@ impl PartialChange {
         Ok(())
     }
 
-    fn finish(self) -> Result<Box<dyn Change>, String> {
+    fn finish(self, changes: &mut ChangeList) -> Result<(), String> {
         if self.scope.is_empty() {
             return Err("change is missing a scope".to_string());
         }
@@ -274,108 +281,122 @@ impl PartialChange {
             ("directory-deleted", parse_directory_deleted),
         ];
         match parsers.iter().find(|(kind, _)| *kind == self.kind) {
-            Some((_, parse)) => parse(self.scope, self.fields),
+            Some((_, parse)) => parse(changes, self.scope, self.fields),
             None => Err(format!("unknown change type {}", self.kind)),
         }
     }
 }
 
-type Parser = fn(String, BTreeMap<String, String>) -> Result<Box<dyn Change>, String>;
+type Parser = fn(&mut ChangeList, String, BTreeMap<String, String>) -> Result<(), String>;
 
 fn parse_file_renamed(
+    changes: &mut ChangeList,
     scope: String,
     fields: BTreeMap<String, String>,
-) -> Result<Box<dyn Change>, String> {
-    Ok(Box::new(crate::change::FileRenamed {
+) -> Result<(), String> {
+    changes.add(FileRenamed {
         scope,
         from: required(&fields, "from", "file-renamed")?,
         to: required(&fields, "to", "file-renamed")?,
         hash: required_hash(&fields, "hash", "file-renamed")?,
-    }))
+    });
+    Ok(())
 }
 
 fn parse_file_moved(
+    changes: &mut ChangeList,
     scope: String,
     fields: BTreeMap<String, String>,
-) -> Result<Box<dyn Change>, String> {
-    Ok(Box::new(crate::change::FileMoved {
+) -> Result<(), String> {
+    changes.add(FileMoved {
         scope,
         from: required(&fields, "from", "file-moved")?,
         to: required(&fields, "to", "file-moved")?,
         hash: required_hash(&fields, "hash", "file-moved")?,
-    }))
+    });
+    Ok(())
 }
 
 fn parse_file_deleted(
+    changes: &mut ChangeList,
     scope: String,
     fields: BTreeMap<String, String>,
-) -> Result<Box<dyn Change>, String> {
-    Ok(Box::new(crate::change::FileDeleted {
+) -> Result<(), String> {
+    changes.add(FileDeleted {
         scope,
         path: required(&fields, "path", "file-deleted")?,
         hash: required_hash(&fields, "hash", "file-deleted")?,
-    }))
+    });
+    Ok(())
 }
 
 fn parse_file_added(
+    changes: &mut ChangeList,
     scope: String,
     fields: BTreeMap<String, String>,
-) -> Result<Box<dyn Change>, String> {
-    Ok(Box::new(crate::change::FileAdded {
+) -> Result<(), String> {
+    changes.add(FileAdded {
         scope,
         path: required(&fields, "path", "file-added")?,
         hash: required_hash(&fields, "hash", "file-added")?,
         contents: stored_bytes(&fields, "file-added")?,
-    }))
+    });
+    Ok(())
 }
 
 fn parse_line_added(
+    changes: &mut ChangeList,
     scope: String,
     fields: BTreeMap<String, String>,
-) -> Result<Box<dyn Change>, String> {
+) -> Result<(), String> {
     let text = required(&fields, "text", "line-added")?;
     expect_added_lines(&fields, &text, "line-added")?;
-    Ok(Box::new(crate::change::LineAdded::new(
+    changes.add(LineAdded::new(
         scope,
         required_line(&fields, "old", "line-added")?,
         required_line(&fields, "new", "line-added")?,
         text,
         comment_flag(&fields, "line-added")?,
         whitespace_flag(&fields, "line-added")?,
-    )))
+    ));
+    Ok(())
 }
 
 fn parse_named_block_added(
+    changes: &mut ChangeList,
     scope: String,
     fields: BTreeMap<String, String>,
-) -> Result<Box<dyn Change>, String> {
+) -> Result<(), String> {
     let text = required(&fields, "text", "named-block-added")?;
     expect_added_lines(&fields, &text, "named-block-added")?;
-    Ok(Box::new(crate::change::NamedBlockAdded::new(
+    changes.add(NamedBlockAdded::new(
         scope,
         required_line(&fields, "old", "named-block-added")?,
         required_line(&fields, "new", "named-block-added")?,
         text,
         required_category(&fields, "named-block-added")?,
         required_name(&fields, "named-block-added")?,
-    )))
+    ));
+    Ok(())
 }
 
 fn parse_named_block_removed(
+    changes: &mut ChangeList,
     scope: String,
     fields: BTreeMap<String, String>,
-) -> Result<Box<dyn Change>, String> {
+) -> Result<(), String> {
     let old = required_line(&fields, "old", "named-block-removed")?;
     let text = required(&fields, "text", "named-block-removed")?;
     expect_removed_lines(&fields, old, &text, "named-block-removed")?;
-    Ok(Box::new(crate::change::NamedBlockRemoved::new(
+    changes.add(NamedBlockRemoved::new(
         scope,
         old,
         required_line(&fields, "new", "named-block-removed")?,
         text,
         required_category(&fields, "named-block-removed")?,
         required_name(&fields, "named-block-removed")?,
-    )))
+    ));
+    Ok(())
 }
 
 /// The shared category recorded on a named-block addition.
@@ -385,73 +406,82 @@ fn parse_named_block_removed(
 fn required_category(
     fields: &BTreeMap<String, String>,
     kind: &str,
-) -> Result<crate::dialect::BlockCategory, String> {
+) -> Result<BlockCategory, String> {
     let text = required(fields, "category", kind)?;
-    crate::dialect::BlockCategory::parse(&text)
+    BlockCategory::parse(&text)
         .ok_or_else(|| format!("{kind} has invalid category {text}"))
 }
 
 fn parse_line_removed(
+    changes: &mut ChangeList,
     scope: String,
     fields: BTreeMap<String, String>,
-) -> Result<Box<dyn Change>, String> {
+) -> Result<(), String> {
     let old = required_line(&fields, "old", "line-removed")?;
     let text = required(&fields, "text", "line-removed")?;
     expect_removed_lines(&fields, old, &text, "line-removed")?;
-    Ok(Box::new(crate::change::LineRemoved::new(
+    changes.add(LineRemoved::new(
         scope,
         old,
         required_line(&fields, "new", "line-removed")?,
         text,
         comment_flag(&fields, "line-removed")?,
         whitespace_flag(&fields, "line-removed")?,
-    )))
+    ));
+    Ok(())
 }
 
 fn parse_line_modified(
+    changes: &mut ChangeList,
     scope: String,
     fields: BTreeMap<String, String>,
-) -> Result<Box<dyn Change>, String> {
+) -> Result<(), String> {
     let text = required(&fields, "text", "line-modified")?;
     expect_modified_lines(&fields)?;
-    Ok(Box::new(crate::change::LineModified::new(
+    changes.add(LineModified::new(
         scope,
         required_line(&fields, "old", "line-modified")?,
         required_line(&fields, "new", "line-modified")?,
         text,
         comment_flag(&fields, "line-modified")?,
         whitespace_flag(&fields, "line-modified")?,
-    )))
+    ));
+    Ok(())
 }
 
 fn parse_identifier_renamed(
+    changes: &mut ChangeList,
     scope: String,
     fields: BTreeMap<String, String>,
-) -> Result<Box<dyn Change>, String> {
+) -> Result<(), String> {
     let oldname = required(&fields, "oldname", "identifier-renamed")?;
     let newname = required(&fields, "newname", "identifier-renamed")?;
-    match crate::change::parse_rename_scope(&scope)? {
-        crate::change::RenameScope::Lines(span) => {
+    match parse_rename_scope(&scope)? {
+        RenameScope::Lines(span) => {
             let new = if span.is_single() {
                 Some(required_line(&fields, "new", "identifier-renamed")?)
             } else {
                 None
             };
-            Ok(Box::new(crate::change::IdentifierRenamed::recorded(
+            changes.add(IdentifierRenamed::recorded(
                 span, new, oldname, newname,
-            )))
+            ));
         }
-        crate::change::RenameScope::Directory(scope) => Ok(Box::new(
-            crate::change::IdentifierRenamed::directory(scope, oldname, newname),
-        )),
+        RenameScope::Directory(scope) => {
+            changes.add(IdentifierRenamed::directory(
+                scope, oldname, newname,
+            ));
+        }
     }
+    Ok(())
 }
 
 fn parse_constant_changed(
+    changes: &mut ChangeList,
     scope: String,
     fields: BTreeMap<String, String>,
-) -> Result<Box<dyn Change>, String> {
-    let span = crate::change::parse_span_scope(&scope)?;
+) -> Result<(), String> {
+    let span = parse_span_scope(&scope)?;
     if !span.is_single() {
         return Err(format!("constant-changed covers one line, not {scope}"));
     }
@@ -463,50 +493,55 @@ fn parse_constant_changed(
         }
         return Err(format!("constant-changed has invalid newvalue {new_value}"));
     }
-    Ok(Box::new(crate::change::ConstantChanged::new(
+    changes.add(ConstantChanged::new(
         span,
         required_line(&fields, "new", "constant-changed")?,
         old_value,
         new_value,
         required_line(&fields, "occurrence", "constant-changed")?,
-    )))
+    ));
+    Ok(())
 }
 
 /// Whether both values are integers, or both are boolean spellings for `path`.
 fn constant_pair(path: &str, old_value: &str, new_value: &str) -> bool {
-    if crate::diff::span_changes::constant::is_integer(old_value)
-        && crate::diff::span_changes::constant::is_integer(new_value)
+    if is_integer(old_value)
+        && is_integer(new_value)
     {
         return true;
     }
-    crate::diff::span_changes::constant::is_boolean(path, old_value)
-        && crate::diff::span_changes::constant::is_boolean(path, new_value)
+    is_boolean(path, old_value)
+        && is_boolean(path, new_value)
 }
 
 /// Whether `text` is an integer or a boolean spelling for `path`.
 fn constant_value(path: &str, text: &str) -> bool {
-    crate::diff::span_changes::constant::is_integer(text)
-        || crate::diff::span_changes::constant::is_boolean(path, text)
+    is_integer(text)
+        || is_boolean(path, text)
 }
 
 fn parse_directory_added(
+    changes: &mut ChangeList,
     scope: String,
     fields: BTreeMap<String, String>,
-) -> Result<Box<dyn Change>, String> {
-    Ok(Box::new(crate::change::DirectoryAdded {
+) -> Result<(), String> {
+    changes.add(DirectoryAdded {
         scope,
         path: required(&fields, "path", "directory-added")?,
-    }))
+    });
+    Ok(())
 }
 
 fn parse_directory_deleted(
+    changes: &mut ChangeList,
     scope: String,
     fields: BTreeMap<String, String>,
-) -> Result<Box<dyn Change>, String> {
-    Ok(Box::new(crate::change::DirectoryDeleted {
+) -> Result<(), String> {
+    changes.add(DirectoryDeleted {
         scope,
         path: required(&fields, "path", "directory-deleted")?,
-    }))
+    });
+    Ok(())
 }
 
 /// A `file-changed` change: the old and new hashes, or bytes that replace the file.
@@ -514,20 +549,23 @@ fn parse_directory_deleted(
 /// The file path is the change's scope. Hashes are `old` and `new`. A
 /// replacement has `contents` instead. Both are the same change type.
 fn file_changed(
+    changes: &mut ChangeList,
     scope: String,
     fields: BTreeMap<String, String>,
-) -> Result<Box<dyn Change>, String> {
+) -> Result<(), String> {
     if fields.contains_key("contents") {
-        return Ok(Box::new(crate::change::FileChanged::contents(
+        changes.add(FileChanged::contents(
             scope,
             stored_bytes(&fields, "file-changed")?,
-        )));
+        ));
+        return Ok(());
     }
-    Ok(Box::new(crate::change::FileChanged::hashes(
+    changes.add(FileChanged::hashes(
         scope,
         required_hash(&fields, "old", "file-changed")?,
         required_hash(&fields, "new", "file-changed")?,
-    )))
+    ));
+    Ok(())
 }
 
 /// A SHA-256 hex digest recorded on a change.

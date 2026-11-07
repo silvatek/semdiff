@@ -12,8 +12,8 @@
 pub(crate) mod constant;
 pub(crate) mod identifier;
 
-use crate::change::Change;
-use crate::dialect::{Dialect, StringDelimiter};
+use crate::change::{ChangeList, ConstantChanged, IdentifierRenamed, SpanScope};
+use crate::dialect::{for_path, Dialect, StringDelimiter};
 use constant::IntegerToken;
 
 /// The record for one classified span.
@@ -34,7 +34,7 @@ pub(crate) enum Classification {
 /// outside a string and a comment is a constant. One identifier whose old name
 /// occurs once on the span's line is a rename. Anything else is `None`.
 pub(crate) fn classify(path: &str, span: &Span<'_>) -> Option<Classification> {
-    let dialect = crate::dialect::for_path(path)?;
+    let dialect = for_path(path)?;
     let shielded = span.in_string || span.in_comment;
     if !shielded
         && constant::is_boolean(path, span.old_text)
@@ -68,36 +68,42 @@ pub(crate) fn classify(path: &str, span: &Span<'_>) -> Option<Classification> {
     None
 }
 
-/// The semdif record for `span` on line `old` of `path`.
+/// Records `span` on line `old` of `path` when it classifies.
 ///
-/// `None` means the span does not classify, so the caller records a line
+/// `false` means the span does not classify, so the caller records a line
 /// modification instead. `old` and `new` are the line numbers from the line diff.
 pub(crate) fn record(
+    changes: &mut ChangeList,
     path: &str,
     old: usize,
     new: usize,
     span: &Span<'_>,
-) -> Option<Box<dyn Change>> {
-    match classify(path, span)? {
-        Classification::Constant {
+) -> bool {
+    match classify(path, span) {
+        Some(Classification::Constant {
             old_value,
             new_value,
             occurrence,
-        } => Some(Box::new(crate::change::ConstantChanged::new(
-            crate::change::SpanScope::new(path, old),
-            new,
-            old_value,
-            new_value,
-            occurrence,
-        ))),
-        Classification::Rename { oldname, newname } => {
-            Some(Box::new(crate::change::IdentifierRenamed::new(
-                crate::change::SpanScope::new(path, old),
+        }) => {
+            changes.add(ConstantChanged::new(
+                SpanScope::new(path, old),
+                new,
+                old_value,
+                new_value,
+                occurrence,
+            ));
+            true
+        }
+        Some(Classification::Rename { oldname, newname }) => {
+            changes.add(IdentifierRenamed::new(
+                SpanScope::new(path, old),
                 new,
                 oldname,
                 newname,
-            )))
+            ));
+            true
         }
+        None => false,
     }
 }
 
@@ -309,7 +315,7 @@ pub(crate) struct Span<'a> {
 ///
 /// A file with no dialect has no spans.
 pub(crate) fn find_spans<'a>(path: &str, old_line: &'a str, new_line: &'a str) -> Vec<Span<'a>> {
-    let Some(dialect) = crate::dialect::for_path(path) else {
+    let Some(dialect) = for_path(path) else {
         return Vec::new();
     };
     let old_atoms = atoms(dialect, old_line);

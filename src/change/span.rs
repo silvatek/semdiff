@@ -13,7 +13,11 @@ use std::path::Path;
 
 use super::{applied_with_its_file, Change, Content, IdentifierRename, LineEdit, LinePlan};
 
+use crate::dialect::for_path;
+use crate::diff::span_changes::constant::{is_integer, replace_boolean, replace_integer};
+use crate::diff::span_changes::identifier::{occurrence_count, replace_every, replace_name};
 use crate::filesystem::FileSystem;
+use crate::semdif::{write_detail, write_plain};
 
 /// The old lines a span change names.
 ///
@@ -244,10 +248,10 @@ impl Change for IdentifierRenamed {
 
     fn write_details(&self, document: &mut String) {
         if let Extent::Lines { new: Some(new), .. } = &self.extent {
-            crate::semdif::write_plain(document, "new", &new.to_string());
+            write_plain(document, "new", &new.to_string());
         }
-        crate::semdif::write_detail(document, "oldname", &self.oldname);
-        crate::semdif::write_detail(document, "newname", &self.newname);
+        write_detail(document, "oldname", &self.oldname);
+        write_detail(document, "newname", &self.newname);
     }
 
     fn apply(&self, _fs: &dyn FileSystem, _source: &Path) -> Result<(), String> {
@@ -324,12 +328,12 @@ impl IdentifierRenamed {
         plan: &mut LinePlan,
     ) -> Result<(), String> {
         let path = file.to_string_lossy();
-        if crate::dialect::for_path(&path).is_none() {
+        if for_path(&path).is_none() {
             return Ok(());
         }
         for line_no in 1..=source_lines.len() {
             let current = &source_lines[line_no - 1];
-            let replaced = match crate::diff::span_changes::identifier::replace_every(
+            let replaced = match replace_every(
                 &path,
                 current,
                 &self.oldname,
@@ -369,7 +373,7 @@ impl IdentifierRenamed {
             ));
         }
         if span.is_single() {
-            let replaced = match crate::diff::span_changes::identifier::replace_name(
+            let replaced = match replace_name(
                 span.file(),
                 &source_lines[start - 1],
                 &self.oldname,
@@ -389,7 +393,7 @@ impl IdentifierRenamed {
         let mut found = false;
         for line_no in start..=end {
             let current = &source_lines[line_no - 1];
-            let replaced = match crate::diff::span_changes::identifier::replace_every(
+            let replaced = match replace_every(
                 span.file(),
                 current,
                 &self.oldname,
@@ -474,10 +478,10 @@ impl Change for ConstantChanged {
     }
 
     fn write_details(&self, document: &mut String) {
-        crate::semdif::write_plain(document, "new", &self.new_line.to_string());
-        crate::semdif::write_detail(document, "oldvalue", &self.old_value);
-        crate::semdif::write_detail(document, "newvalue", &self.new_value);
-        crate::semdif::write_plain(document, "occurrence", &self.occurrence.to_string());
+        write_plain(document, "new", &self.new_line.to_string());
+        write_detail(document, "oldvalue", &self.old_value);
+        write_detail(document, "newvalue", &self.new_value);
+        write_plain(document, "occurrence", &self.occurrence.to_string());
     }
 
     fn apply(&self, _fs: &dyn FileSystem, _source: &Path) -> Result<(), String> {
@@ -514,8 +518,8 @@ impl LineEdit for ConstantChanged {
                 source_lines.len()
             ));
         }
-        let replaced = if crate::diff::span_changes::constant::is_integer(&self.old_value) {
-            crate::diff::span_changes::constant::replace_integer(
+        let replaced = if is_integer(&self.old_value) {
+            replace_integer(
                 self.span.file(),
                 &source_lines[line_no - 1],
                 &self.old_value,
@@ -523,7 +527,7 @@ impl LineEdit for ConstantChanged {
                 self.occurrence,
             )
         } else {
-            crate::diff::span_changes::constant::replace_boolean(
+            replace_boolean(
                 self.span.file(),
                 &source_lines[line_no - 1],
                 &self.old_value,
@@ -534,7 +538,7 @@ impl LineEdit for ConstantChanged {
         let replaced = match replaced {
             Ok(text) => text,
             Err(message) => {
-                let kind = if crate::diff::span_changes::constant::is_integer(&self.old_value) {
+                let kind = if is_integer(&self.old_value) {
                     "integer"
                 } else {
                     "boolean"
@@ -664,7 +668,7 @@ fn occurrences_covered(
         return false;
     }
     for line_no in start..=end {
-        let Some(count) = crate::diff::span_changes::identifier::occurrence_count(
+        let Some(count) = occurrence_count(
             path,
             &old_lines[line_no - 1],
             oldname,
@@ -868,7 +872,7 @@ fn directory_occurrences_covered(
         }
         for (index, line) in source.lines.iter().enumerate() {
             let line_no = index + 1;
-            let Some(count) = crate::diff::span_changes::identifier::occurrence_count(
+            let Some(count) = occurrence_count(
                 &source.path,
                 line,
                 oldname,
@@ -892,7 +896,7 @@ mod tests {
         merge_identifier_files, merge_identifier_spans, parse_rename_scope, parse_span_scope,
         IdentifierRenamed, RenameScope, SourceText, SpanScope,
     };
-    use crate::change::{Change, ChangeList};
+    use crate::change::ChangeList;
 
     /// The list after renames in one file have been merged.
     fn spans(path: &str, lines: &[String], mut changes: ChangeList) -> ChangeList {
@@ -906,17 +910,26 @@ mod tests {
         changes
     }
 
-    fn rename(line: usize, oldname: &str, newname: &str) -> Box<dyn Change> {
+    fn rename(line: usize, oldname: &str, newname: &str) -> IdentifierRenamed {
         rename_at("src/main.rs", line, oldname, newname)
     }
 
-    fn rename_at(path: &str, line: usize, oldname: &str, newname: &str) -> Box<dyn Change> {
-        Box::new(IdentifierRenamed::new(
+    fn rename_at(path: &str, line: usize, oldname: &str, newname: &str) -> IdentifierRenamed {
+        IdentifierRenamed::new(
             SpanScope::new(path, line),
             line,
             oldname.to_string(),
             newname.to_string(),
-        ))
+        )
+    }
+
+    /// A change list holding these renames, in order.
+    fn listed(items: impl IntoIterator<Item = IdentifierRenamed>) -> ChangeList {
+        let mut changes = ChangeList::new();
+        for item in items {
+            changes.add(item);
+        }
+        changes
     }
 
     fn source(path: &str, text: &str) -> SourceText {
@@ -963,7 +976,7 @@ mod tests {
             "keep".to_string(),
             "foo".to_string(),
         ];
-        let changes = ChangeList::of(vec![
+        let changes = listed([
             rename(1, "foo", "bar"),
             rename(3, "foo", "bar"),
             rename(5, "foo", "bar"),
@@ -987,7 +1000,7 @@ mod tests {
             "foo".to_string(),
             "baz".to_string(),
         ];
-        let changes = ChangeList::of(vec![
+        let changes = listed([
             rename(1, "foo", "bar"),
             rename(2, "old", "new"),
             rename(3, "old", "new"),
@@ -1005,7 +1018,7 @@ mod tests {
     #[test]
     fn an_uncovered_name_between_renames_keeps_them_apart() {
         let lines = vec!["foo".to_string(), "foo".to_string(), "foo".to_string()];
-        let changes = ChangeList::of(vec![rename(1, "foo", "bar"), rename(3, "foo", "bar")]);
+        let changes = listed([rename(1, "foo", "bar"), rename(3, "foo", "bar")]);
         let merged = spans("src/main.rs", &lines, changes);
         assert_eq!(merged.len(), 2);
         assert_eq!(merged[0].scope(), "src/main.rs:1");
@@ -1015,7 +1028,7 @@ mod tests {
     #[test]
     fn a_different_new_name_stays_apart() {
         let lines = vec!["foo".to_string(), "foo".to_string()];
-        let changes = ChangeList::of(vec![rename(1, "foo", "bar"), rename(2, "foo", "baz")]);
+        let changes = listed([rename(1, "foo", "bar"), rename(2, "foo", "baz")]);
         let merged = spans("src/main.rs", &lines, changes);
         assert_eq!(merged.len(), 2);
         assert_eq!(merged[0].scope(), "src/main.rs:1");
@@ -1046,7 +1059,7 @@ mod tests {
             source("src/b.rs", "foo\n"),
             source("tests/c.rs", "foo\n"),
         ];
-        let changes = ChangeList::of(vec![
+        let changes = listed([
             rename_at("src/a.rs", 1, "foo", "bar"),
             rename_at("src/b.rs", 1, "foo", "bar"),
         ]);
@@ -1062,7 +1075,7 @@ mod tests {
             source("src/b.rs", "foo\n"),
             source("src/c.rs", "foo\n"),
         ];
-        let changes = ChangeList::of(vec![
+        let changes = listed([
             rename_at("src/a.rs", 1, "foo", "bar"),
             rename_at("src/b.rs", 1, "foo", "bar"),
         ]);
@@ -1080,7 +1093,7 @@ mod tests {
             source("src/a.rs", "foo\n"),
             source("src/b.rs", "foo\n"),
         ];
-        let changes = ChangeList::of(vec![
+        let changes = listed([
             rename_at("other/c.rs", 1, "foo", "bar"),
             rename_at("src/a.rs", 1, "foo", "bar"),
             rename_at("src/b.rs", 1, "foo", "bar"),

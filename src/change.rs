@@ -453,6 +453,19 @@ impl ChangeList {
             .sort_by(|left, right| left.sort_key().cmp(&right.sort_key()));
     }
 
+    /// Orders the changes by old line, then new line.
+    ///
+    /// A change with no line edit sorts as line 0. A directory-scoped rename
+    /// reports that same pair.
+    pub(crate) fn sort_by_line(&mut self) {
+        self.changes.sort_by_key(|change| {
+            change
+                .line_edit()
+                .map(|line| line.position())
+                .unwrap_or((0, 0))
+        });
+    }
+
     /// How many changes this list holds.
     pub(crate) fn len(&self) -> usize {
         self.changes.len()

@@ -1,6 +1,8 @@
 //! Identifying and classifying changes at the line level.
 
-use crate::change::{Change, ChangeList};
+use super::span_changes::{find_spans, record};
+use crate::change::{merge_identifier_spans, ChangeList, LineAdded, LineModified, LineRemoved};
+use crate::dialect::{for_path, Dialect, Family};
 
 /// Line records for two copies of one file, when both copies are text.
 ///
@@ -51,13 +53,12 @@ pub(crate) fn line_changes(path: &str, before: &str, after: &str) -> ChangeList 
     let old_lines = split_text(before);
     let new_lines = split_text(after);
     let matches = longest_common_subsequence(&old_lines.lines, &new_lines.lines);
-    let mut changes: Vec<Box<dyn Change>> = Vec::new();
+    let mut changes = ChangeList::new();
     for hunk in hunks(&old_lines.lines, &new_lines.lines, &matches) {
-        changes.extend(changes_in_hunk(path, &hunk));
+        changes.append(changes_in_hunk(path, &hunk));
     }
-    changes.sort_by_key(|change| line_position(change.as_ref()));
-    let mut changes = ChangeList::of(changes);
-    crate::change::merge_identifier_spans(path, &old_lines.lines, &mut changes);
+    changes.sort_by_line();
+    merge_identifier_spans(path, &old_lines.lines, &mut changes);
     changes
 }
 
@@ -246,37 +247,38 @@ fn indexed(lines: &[String], from: usize, to: usize) -> Vec<IndexedLine> {
 /// removed. A line left over on the new side was added. A blank line, empty
 /// or holding only ASCII spaces and tabs, is whitespace when the file has a
 /// dialect.
-fn changes_in_hunk(path: &str, hunk: &Hunk) -> Vec<Box<dyn Change>> {
+fn changes_in_hunk(path: &str, hunk: &Hunk) -> ChangeList {
     let paired = hunk.old_lines.len().min(hunk.new_lines.len());
-    let mut changes: Vec<Box<dyn Change>> = Vec::new();
+    let mut changes = ChangeList::new();
     for offset in 0..paired {
-        changes.push(modified_line(
+        modified_line(
+            &mut changes,
             path,
             hunk.old_lines[offset].index + 1,
             hunk.new_lines[offset].index + 1,
             &hunk.old_lines[offset].text,
             &hunk.new_lines[offset].text,
-        ));
+        );
     }
     for line in &hunk.old_lines[paired..] {
-        changes.push(Box::new(crate::change::LineRemoved::new(
+        changes.add(LineRemoved::new(
             path.to_string(),
             line.index + 1,
             hunk.next_new_line,
             line.text.clone(),
             full_line_comment(path, &line.text),
             blank_line(path, &line.text),
-        )));
+        ));
     }
     for line in &hunk.new_lines[paired..] {
-        changes.push(Box::new(crate::change::LineAdded::new(
+        changes.add(LineAdded::new(
             path.to_string(),
             hunk.next_old_line,
             line.index + 1,
             line.text.clone(),
             full_line_comment(path, &line.text),
             blank_line(path, &line.text),
-        )));
+        ));
     }
     changes
 }
@@ -289,41 +291,34 @@ fn changes_in_hunk(path: &str, hunk: &Hunk) -> Vec<Box<dyn Change>> {
 /// dialect's line comment. It is whitespace when the edit is a blank line or
 /// only an insignificant margin.
 fn modified_line(
+    changes: &mut ChangeList,
     path: &str,
     old: usize,
     new: usize,
     old_text: &str,
     new_text: &str,
-) -> Box<dyn Change> {
-    let found = super::span_changes::find_spans(path, old_text, new_text);
+) {
+    let found = find_spans(path, old_text, new_text);
     if let [span] = found.as_slice() {
-        if let Some(change) = super::span_changes::record(path, old, new, span) {
-            return change;
+        if record(changes, path, old, new, span) {
+            return;
         }
     }
-    Box::new(crate::change::LineModified::new(
+    changes.add(LineModified::new(
         path.to_string(),
         old,
         new,
         new_text.to_string(),
         full_line_comment(path, old_text) && full_line_comment(path, new_text),
         margin_whitespace(path, old_text, new_text),
-    ))
-}
-
-/// `old`, then `new`, so the records walk the file from the top.
-fn line_position(change: &dyn Change) -> (usize, usize) {
-    change
-        .line_edit()
-        .map(|line| line.position())
-        .unwrap_or((0, 0))
+    ));
 }
 
 /// Whether `line` introduces this dialect's line comment before any other text.
 ///
 /// Leading whitespace is skipped. The line-comment marker then has to be the
 /// next characters. A block comment is not recognized here.
-fn introduces_line_comment(dialect: &crate::dialect::Dialect, line: &str) -> bool {
+fn introduces_line_comment(dialect: &Dialect, line: &str) -> bool {
     line.trim_start().starts_with(dialect.line_comment)
 }
 
@@ -332,7 +327,7 @@ fn introduces_line_comment(dialect: &crate::dialect::Dialect, line: &str) -> boo
 /// Every line has to introduce the dialect's line comment. A file with no
 /// dialect is not a comment. An empty line is not one either.
 fn full_line_comment(path: &str, text: &str) -> bool {
-    let Some(dialect) = crate::dialect::for_path(path) else {
+    let Some(dialect) = for_path(path) else {
         return false;
     };
     if text.is_empty() {
@@ -349,7 +344,7 @@ fn full_line_comment(path: &str, text: &str) -> bool {
 /// no dialect is not blank for this purpose. A comment, a carriage return, or
 /// any other character keeps the line unflagged.
 fn blank_line(path: &str, text: &str) -> bool {
-    if crate::dialect::for_path(path).is_none() {
+    if for_path(path).is_none() {
         return false;
     }
     text.split('\n').all(only_ascii_blank)
@@ -368,14 +363,14 @@ fn only_ascii_blank(line: &str) -> bool {
 /// boundary. Trailing space is insignificant in either reader. A file with no
 /// dialect is not whitespace. A carriage return stays part of the line.
 fn margin_whitespace(path: &str, old_line: &str, new_line: &str) -> bool {
-    let Some(dialect) = crate::dialect::for_path(path) else {
+    let Some(dialect) = for_path(path) else {
         return false;
     };
     match dialect.family {
-        crate::dialect::Family::CFamily => {
+        Family::CFamily => {
             crate::family::c_family::margin_whitespace(old_line, new_line)
         }
-        crate::dialect::Family::Python => {
+        Family::Python => {
             crate::family::python::margin_whitespace(dialect, old_line, new_line)
         }
     }
