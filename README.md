@@ -12,7 +12,17 @@ An "apply" feature is provided which applies the changes described in a semdif f
 
 Note: "semdiff" is the tool, "semdif" is the file format used by the tool.
 
+For information about using the tool, see `help.rs`
+
 SemDiff is built in Rust.
+
+## Scopes
+
+Each change has a "scope" which defines how widely the change applies. Changes generally use the narrowest scope that contains all the changes while excluding anything that might be unintentionally changed. No changes should be applied outside of a change's scope.
+
+For changes to a single item, the scope is simply the parent of the item being changed: a line's parent is the file it is in, a file's parent is the directory it is in.
+
+Other changes, such as renaming identifiers, apply to all occurrences in the defined scope.
 
 ## Dialects
 
@@ -25,6 +35,12 @@ A dialect describes one language: which files belong to it, how comments are wri
 - A change that touches only comments is flagged as a comment. Rust, JavaScript, and ANSI C comments start with `//`, or run from `/*` to `*/`. The `//` form in ANSI C is a C99 feature. Python comments start with `#` and end at the end of the line. A triple-quoted string is a string, so editing one is a string edit.
 - Adjacent edits are merged while they stay inside one block. A block edge stops the merge: `{` and `}` in Rust, JavaScript, and ANSI C, and an indent change in Python. An edit that spans two functions stays two changes.
 - An added run of lines is `named-block-added` when its first line opens a named block and the run is that one complete block, using the dialect's block edge. A header without its body stays `line-added`, and so does a run of two blocks. A following line that is still inside the block keeps the run a line addition. The record has `category` and `name`. Every dialect uses the same categories: procedure, function, method, structure, class, enumeration, union, interface, and implementation. A dialect maps only the categories it has. Rust maps `fn` to function, `struct` to structure, `enum` to enumeration, `union` to union, `trait` to interface, and `impl` to implementation, with a listed qualifier in front, such as `pub`, `pub(crate)`, `async`, `unsafe`, or `const`. Python maps `def` to function and `class` to class. JavaScript maps `function` to function and `class` to class, with a listed qualifier in front, such as `export`, `default`, `async`, or `static`. A `fn` inside `impl` or `trait` is a method, a `def` inside `class` is a method, and a JavaScript `function` inside `class` is a method. A JavaScript method written as `step() {` is a c-style function with no type before the name: inside `class` it is a method, and outside `class` it is a function. ANSI C requires the type, so `int step(int n) {` is a function and `step() {` stays a line edit. `static` or `extern` may precede that type. `if`, `while`, `for`, and `switch` stay line edits in both, and so does JavaScript `catch`. A method's scope names the file and the enclosing block, as in `src/main.rs[Count]`. A callable inside another callable stays a function. A removed run is `named-block-removed` on the same terms, read from the old file, and apply deletes those lines.
+
+## TestCode
+
+The TestCode directory contains code used for testing the semantic diff utility, and is not part of the implementation of that utility.
+
+There is a folder for each supported dialect.
 
 ## License
 
