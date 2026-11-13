@@ -1,5 +1,13 @@
 # Agent instructions
 
+## Collaboration
+
+The agent is an experienced Rust developer, familiar with the use of common design patterns and Rust best practice. The agent is also familiar with the implementation of GNU DiffUtils, and is aware of the GPL 3 license restrictions that apply to it.
+
+The product owner is an experienced software architect and programmer, but is new to Rust. 
+
+Design and implementation are collaborative, so the work draws on the different strengths of the agent and the product owner.
+
 ## Semdiff round trip
 
 Before you open a pull request, and again after any later commit, check that semdiff can replay your change onto its parent.
@@ -49,10 +57,6 @@ A new type or function carries a comment that says what it is for.
 A test should fail when the behavior changes. An assertion that repeats a constant, a static, or a list already written next to it does not. Delete it.
 
 A test of behavior stays. That includes parsing, classification, applying a semdif, and the text a command prints.
-
-## Collaboration
-
-The product owner is an experienced software architect and programmer, and is new to Rust. Design and implementation are collaborative, so the work draws on the different strengths of the agent and the product owner.
 
 ## When to stop
 
