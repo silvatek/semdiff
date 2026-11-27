@@ -253,6 +253,72 @@ fn is_block_whitespace(character: char) -> bool {
     character == ' ' || character == '\t' || character == '\n' || character == '\r'
 }
 
+/// Whether `addition` still has an open brace.
+///
+/// The lines already gathered run from the header through the last line that
+/// belongs to the block. A `{` that has not been closed means a following
+/// line is still inside. A block that has returned to depth zero does not
+/// resume, so the next block stays its own record. Comments are skipped.
+/// A quote is not special, so a brace written inside a string is counted.
+/// An unclosed block comment keeps the block open only when a brace is
+/// already open.
+pub(super) fn block_resumes(dialect: &Dialect, addition: &str) -> bool {
+    brace_still_open(dialect, addition)
+}
+
+/// Whether scanning `text` finishes with a brace still open.
+fn brace_still_open(dialect: &Dialect, text: &str) -> bool {
+    let (BlockEdge::Token(start), BlockEdge::Token(end)) = (dialect.block_start, dialect.block_end)
+    else {
+        return false;
+    };
+    if start.is_empty() || end.is_empty() {
+        return false;
+    }
+    let mut rest = text;
+    let mut depth = 0usize;
+    while !rest.is_empty() {
+        if !dialect.line_comment.is_empty() && rest.starts_with(dialect.line_comment) {
+            rest = match rest.find('\n') {
+                Some(index) => &rest[index + 1..],
+                None => "",
+            };
+            continue;
+        }
+        if let Some(comment) = dialect.block_comment {
+            if !comment.start.is_empty()
+                && !comment.end.is_empty()
+                && rest.starts_with(comment.start)
+            {
+                let after = &rest[comment.start.len()..];
+                let Some(end_at) = after.find(comment.end) else {
+                    return depth > 0;
+                };
+                rest = &after[end_at + comment.end.len()..];
+                continue;
+            }
+        }
+        if rest.starts_with(start) {
+            depth = depth.saturating_add(1);
+            rest = &rest[start.len()..];
+            continue;
+        }
+        if rest.starts_with(end) {
+            if depth == 0 {
+                return false;
+            }
+            depth -= 1;
+            rest = &rest[end.len()..];
+            continue;
+        }
+        let Some(character) = rest.chars().next() else {
+            break;
+        };
+        rest = &rest[character.len_utf8()..];
+    }
+    depth > 0
+}
+
 /// The method scope that `before` leaves open, when one is still open.
 ///
 /// Braces are counted from the top of `before`, skipping the dialect's

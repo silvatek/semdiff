@@ -64,7 +64,7 @@ fn records_named_blocks_in_the_samples() {
 }
 
 #[test]
-fn an_addition_that_is_not_one_block_stays_a_line_addition() {
+fn successive_functions_are_named_blocks_and_a_blank_inside_one_stays_inside() {
     let tree = Tree::new();
     tree.write("left/src/pair.rs", "fn kept() {}\n");
     tree.write(
@@ -86,21 +86,20 @@ fn an_addition_that_is_not_one_block_stays_a_line_addition() {
 
     assert!(
         document.contains(
-            "scope: \"src/pair.rs\"\n    type: line-added\n    details:\n      old: 2\n      lines: +2\n      new: 2\n      text: \"fn one() {}\\nfn two() {}\"\n"
+            "scope: \"src/pair.rs\"\n    type: named-block-added\n    details:\n      old: 2\n      lines: +1\n      new: 2\n      text: \"fn one() {}\"\n      category: \"function\"\n      name: \"one\"\n"
         ),
         "{document}"
     );
     assert!(
-        !document.contains("scope: \"src/pair.rs\"\n    type: named-block-added"),
-        "{document}"
-    );
-    assert!(!document.contains("name: \"added\""), "{document}");
-    assert!(
-        document.contains("scope: \"src/split.rs\"\n    type: line-added"),
+        document.contains(
+            "scope: \"src/pair.rs\"\n    type: named-block-added\n    details:\n      old: 2\n      lines: +1\n      new: 3\n      text: \"fn two() {}\"\n      category: \"function\"\n      name: \"two\"\n"
+        ),
         "{document}"
     );
     assert!(
-        !document.contains("scope: \"src/split.rs\"\n    type: named-block-added"),
+        document.contains(
+            "scope: \"src/split.rs\"\n    type: named-block-added\n    details:\n      old: 2\n      lines: +5\n      new: 2\n      text: \"fn added() {\\n    let value = 1;\\n\\n    let more = 2;\\n}\"\n      category: \"function\"\n      name: \"added\"\n"
+        ),
         "{document}"
     );
     assert!(

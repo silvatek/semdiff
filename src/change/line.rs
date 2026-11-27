@@ -165,18 +165,17 @@ pub(crate) fn merge_adjacent(changes: &mut super::ChangeList) {
 
 /// Records a line addition or removal as a named block when it is one complete block.
 ///
-/// Merging has already joined adjacent lines of one kind into one record. A
-/// blank line stays its own record, and so does a comment. This pass reads
-/// one addition or removal and, when its first line opens a function, method,
-/// or structure and the text is that one block, replaces it with
-/// [`NamedBlockAdded`] or [`NamedBlockRemoved`]. An indented block that
-/// continues on a later record of the same kind is that one block, and the
-/// blank lines between those records are part of it. A comment that is still
-/// inside the block leaves the records as line additions or removals. Apply
-/// inserts or deletes the same lines. A header without its body, a run of two
-/// blocks, and a brace block split by a blank line stay line additions or
-/// removals. `new_sources` is the new text of each file and `old_sources` is
-/// the old text, so a callable inside a type's block can be recorded as a
+/// This runs before adjacent line edits are merged, so each added or removed
+/// line is still its own record. A blank line stays its own record, and so
+/// does a comment. This pass reads one addition or removal and, when its
+/// first line opens a function, method, or structure, reads forward to the
+/// end of that block. The lines from the header through that end, including a
+/// blank line or a comment inside the block, are replaced with
+/// [`NamedBlockAdded`] or [`NamedBlockRemoved`]. A line before the header is
+/// left for the line merge. The next block is its own record. Apply inserts
+/// or deletes the same lines. A header without its body stays a line addition
+/// or removal. `new_sources` is the new text of each file and `old_sources`
+/// is the old text, so a callable inside a type's block can be recorded as a
 /// method.
 pub(crate) fn promote_named_blocks(
     new_sources: &[super::SourceText],
@@ -185,13 +184,7 @@ pub(crate) fn promote_named_blocks(
 ) {
     let mut index = 0;
     while index < changes.len() {
-        let last = match block_extent(changes, index) {
-            BlockExtent::Held => {
-                index += 1;
-                continue;
-            }
-            BlockExtent::Through(last) => last,
-        };
+        let last = block_extent(changes, index);
         let drop = (index + 1..=last).collect::<Vec<_>>();
         if let Some(promoted) = named_block_from_addition(new_sources, changes, index, last) {
             changes.merge(index, &drop, Box::new(promoted));
@@ -207,28 +200,12 @@ pub(crate) fn promote_named_blocks(
     }
 }
 
-/// How many records belong to the block that opens at `index`.
+/// The last record from `index` that belongs to the block opening there.
 ///
-/// `Through` names the last record to include. A block that does not continue
-/// names its own index. `Held` means a later comment is still inside the
-/// block, so the records stay line additions or removals.
-enum BlockExtent {
-    Through(usize),
-    Held,
-}
-
-/// The records from `index` that form one indented block.
-///
-/// A blank line does not end the block and does not answer whether it
-/// continues. The next line that is not blank does. A line the dialect still
-/// places inside the block is included, and so are the blank lines before it.
-/// A comment in that position holds the block: it is not joined, and the
-/// opening record is not promoted. A line outside the block stops the walk
-/// before any blank line that only separates the two. Braces do not continue
-/// here. An unclosed brace block is left as a line addition or removal.
-fn block_extent(changes: &super::ChangeList, index: usize) -> BlockExtent {
+/// A block that does not continue names its own index.
+fn block_extent(changes: &super::ChangeList, index: usize) -> usize {
     let Some(walk) = BlockWalk::start(changes, index) else {
-        return BlockExtent::Through(index);
+        return index;
     };
     walk.extent(changes)
 }
@@ -237,9 +214,9 @@ fn block_extent(changes: &super::ChangeList, index: usize) -> BlockExtent {
 struct BlockWalk {
     removal: bool,
     scope: String,
-    header: String,
     old_at: usize,
     new_at: usize,
+    start: usize,
     last: usize,
 }
 
@@ -261,14 +238,23 @@ impl BlockWalk {
         Some(Self {
             removal,
             scope: current.scope().to_string(),
-            header: text,
             old_at,
             new_at,
+            start: index,
             last: index,
         })
     }
 
-    fn extent(mut self, changes: &super::ChangeList) -> BlockExtent {
+    /// The last record of this block.
+    ///
+    /// A blank line does not end the block and does not answer whether it
+    /// continues. The next line that is not blank does. A line the dialect
+    /// still places inside the block is included, and so are the blank lines
+    /// before it. A comment in that position is part of the block. A line
+    /// outside the block stops the walk before any blank line that only
+    /// separates the two. An unclosed block is left as a line addition or
+    /// removal when the gathered text is not one complete block.
+    fn extent(mut self, changes: &super::ChangeList) -> usize {
         let mut cursor = self.last + 1;
         while cursor < changes.len() {
             let Some(text) = self.following_text(changes, cursor) else {
@@ -281,19 +267,16 @@ impl BlockWalk {
                 cursor += 1;
                 continue;
             }
-            if !crate::family::block_resumes(&self.scope, &self.header, &text) {
+            let Some(so_far) = joined_block_text(changes, self.start, self.last) else {
                 break;
-            }
-            if changes[cursor]
-                .line_edit()
-                .is_some_and(|line| line.is_comment())
-            {
-                return BlockExtent::Held;
+            };
+            if !crate::family::block_resumes(&self.scope, &so_far, &text) {
+                break;
             }
             self.last = cursor;
             cursor += 1;
         }
-        BlockExtent::Through(self.last)
+        self.last
     }
 
     /// The text of the next same-kind record, when it starts where this block left off.
@@ -1331,7 +1314,7 @@ mod tests {
     }
 
     #[test]
-    fn a_python_comment_inside_the_block_leaves_the_addition() {
+    fn a_python_comment_inside_the_block_is_part_of_the_addition() {
         let commented = promoted(
             &[],
             &[],
@@ -1354,8 +1337,137 @@ mod tests {
                 ),
             ]),
         );
-        assert_eq!(commented[0].kind(), "line-added");
-        assert_eq!(commented[1].kind(), "line-added");
+        assert_eq!(commented.len(), 1);
+        assert_eq!(commented[0].kind(), "named-block-added");
+        let mut details = String::new();
+        commented[0].write_details(&mut details);
+        assert!(
+            details.contains("text: \"def added():\\n    return 1\\n    # note\"\n"),
+            "{details}"
+        );
+        assert!(details.contains("name: \"added\"\n"), "{details}");
+    }
+
+    #[test]
+    fn a_rust_addition_split_by_a_blank_line_is_one_block() {
+        let continued = promoted(
+            &[],
+            &[],
+            listed([
+                added(1, "fn added() {", false, false),
+                added(2, "    let value = 1;", false, false),
+                added(3, "", false, true),
+                added(4, "    let more = 2;", false, false),
+                added(5, "}", false, false),
+            ]),
+        );
+        assert_eq!(continued.len(), 1);
+        assert_eq!(continued[0].kind(), "named-block-added");
+        let mut details = String::new();
+        continued[0].write_details(&mut details);
+        assert!(details.contains("lines: +5\n"), "{details}");
+        assert!(
+            details.contains(
+                "text: \"fn added() {\\n    let value = 1;\\n\\n    let more = 2;\\n}\"\n"
+            ),
+            "{details}"
+        );
+        assert!(details.contains("name: \"added\"\n"), "{details}");
+    }
+
+    #[test]
+    fn a_rust_removal_split_by_a_blank_line_is_one_block() {
+        let continued = promoted(
+            &[],
+            &[],
+            listed([
+                LineRemoved::new(
+                    "src/main.rs".to_string(),
+                    1,
+                    1,
+                    "fn dropped() {".to_string(),
+                    false,
+                    false,
+                ),
+                LineRemoved::new(
+                    "src/main.rs".to_string(),
+                    2,
+                    1,
+                    "    let value = 1;".to_string(),
+                    false,
+                    false,
+                ),
+                LineRemoved::new("src/main.rs".to_string(), 3, 1, "".to_string(), false, true),
+                LineRemoved::new(
+                    "src/main.rs".to_string(),
+                    4,
+                    1,
+                    "    let more = 2;".to_string(),
+                    false,
+                    false,
+                ),
+                LineRemoved::new(
+                    "src/main.rs".to_string(),
+                    5,
+                    1,
+                    "}".to_string(),
+                    false,
+                    false,
+                ),
+            ]),
+        );
+        assert_eq!(continued.len(), 1);
+        assert_eq!(continued[0].kind(), "named-block-removed");
+        let mut details = String::new();
+        continued[0].write_details(&mut details);
+        assert!(details.contains("lines: -5\n"), "{details}");
+        assert!(
+            details.contains(
+                "text: \"fn dropped() {\\n    let value = 1;\\n\\n    let more = 2;\\n}\"\n"
+            ),
+            "{details}"
+        );
+        assert!(details.contains("name: \"dropped\"\n"), "{details}");
+    }
+
+    #[test]
+    fn successive_rust_functions_are_separate_blocks() {
+        let pair = promoted(
+            &[],
+            &[],
+            listed([
+                added(1, "fn one() {}", false, false),
+                added(2, "fn two() {}", false, false),
+            ]),
+        );
+        assert_eq!(pair.len(), 2);
+        assert_eq!(pair[0].kind(), "named-block-added");
+        assert_eq!(pair[1].kind(), "named-block-added");
+        let mut first = String::new();
+        pair[0].write_details(&mut first);
+        assert!(first.contains("name: \"one\"\n"), "{first}");
+        let mut second = String::new();
+        pair[1].write_details(&mut second);
+        assert!(second.contains("name: \"two\"\n"), "{second}");
+    }
+
+    #[test]
+    fn an_attribute_line_stays_outside_the_following_function() {
+        let added_fn = promoted(
+            &[],
+            &[],
+            listed([
+                added(1, "#[test]", false, false),
+                added(2, "fn added() {}", false, false),
+            ]),
+        );
+        assert_eq!(added_fn.len(), 2);
+        assert_eq!(added_fn[0].kind(), "line-added");
+        assert_eq!(added_fn[1].kind(), "named-block-added");
+        let mut details = String::new();
+        added_fn[1].write_details(&mut details);
+        assert!(details.contains("text: \"fn added() {}\"\n"), "{details}");
+        assert!(details.contains("name: \"added\"\n"), "{details}");
     }
 
     #[test]
