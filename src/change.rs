@@ -157,6 +157,33 @@ pub(crate) trait Change {
     fn directory_scope(&self) -> Option<&str> {
         None
     }
+
+    /// The file this change counts in the summary, when it names one file.
+    ///
+    /// A content edit names its file. An added or deleted file names its path.
+    /// A rename or a move names the path the file has afterwards. A directory
+    /// change and a directory-scoped rename name no file.
+    fn changed_file(&self) -> Option<&str> {
+        self.content()
+            .map(|item| item.file())
+            .filter(|file| !file.is_empty())
+    }
+
+    /// Lines this change adds.
+    ///
+    /// A line addition and a named-block addition add the line count already
+    /// stored on the record. Every other kind adds none.
+    fn lines_added(&self) -> usize {
+        0
+    }
+
+    /// Lines this change removes.
+    ///
+    /// A line removal and a named-block removal remove the line count already
+    /// stored on the record. Every other kind removes none.
+    fn lines_removed(&self) -> usize {
+        0
+    }
 }
 
 /// The names and old lines of one identifier rename.

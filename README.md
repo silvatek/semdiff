@@ -4,7 +4,7 @@
 
 SemDiff, short for "Semantic Difference" is a tool for comparing two versions of a source code tree and collating a list of differences.
 
-The output is one "semdif" file containing all the changes for the entire source tree.
+The output is one "semdif" file containing all the changes for the entire source tree. A comparison that found changes writes a summary between the header and the changes. The summary counts the change records, the files those records name, and the lines those records add and remove.
 
 Where possible, the differences are captured as semantic changes such as "this identifier was renamed" or "a new function with this name was added". Where that is not possible the differences are described as inserts/deletions/modifications to individual directories/files/lines.
 

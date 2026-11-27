@@ -1,7 +1,7 @@
 //! Code that reads or writes semdif files, including serialising and deserialising
 //! change records.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::io::{self, Write};
 use std::path::Path;
 use std::process::ExitCode;
@@ -75,18 +75,61 @@ fn report_comparison(
 
 /// The semdif text for one comparison.
 ///
-/// The header is always present. Changes are included only when some were found, so an
-/// unchanged pair does not gain an empty change list.
+/// The header is always present. A comparison that found changes writes a
+/// summary of those changes, then the changes. An unchanged pair does not
+/// gain an empty change list.
 fn semdif_document(version: &str, timestamp: &str, changes: &ChangeList) -> String {
     let mut document = header_document(version, timestamp);
     if changes.is_empty() {
         return document;
     }
+    write_summary(&mut document, &summarize(changes));
     document.push_str("changes:\n");
     for change in changes {
         write_change(&mut document, change);
     }
     document
+}
+
+/// The counts written between the header and the changes.
+///
+/// `changes` is how many records the changes section holds. `files` is how
+/// many distinct files those records name. `lines_added` and `lines_removed`
+/// are the line counts those records already store.
+struct Summary {
+    changes: usize,
+    files: usize,
+    lines_added: usize,
+    lines_removed: usize,
+}
+
+/// Totals for the summary, taken from the change records.
+fn summarize(changes: &ChangeList) -> Summary {
+    let mut files = BTreeSet::new();
+    let mut lines_added = 0;
+    let mut lines_removed = 0;
+    for change in changes {
+        if let Some(file) = change.changed_file() {
+            files.insert(file);
+        }
+        lines_added += change.lines_added();
+        lines_removed += change.lines_removed();
+    }
+    Summary {
+        changes: changes.len(),
+        files: files.len(),
+        lines_added,
+        lines_removed,
+    }
+}
+
+/// Writes the summary section.
+fn write_summary(document: &mut String, summary: &Summary) {
+    document.push_str("summary:\n");
+    document.push_str(&format!("  changes: {}\n", summary.changes));
+    document.push_str(&format!("  files: {}\n", summary.files));
+    document.push_str(&format!("  lines-added: {}\n", summary.lines_added));
+    document.push_str(&format!("  lines-removed: {}\n", summary.lines_removed));
 }
 
 fn write_change(document: &mut String, change: &dyn Change) {
@@ -194,8 +237,8 @@ fn utc_timestamp() -> String {
 
 /// The changes recorded in a semdif file.
 ///
-/// The header is not needed to replay the edits. A change whose kind is not known
-/// is rejected so an unsupported edit is not skipped.
+/// The header and the summary are not needed to replay the edits. A change
+/// whose kind is not known is rejected so an unsupported edit is not skipped.
 pub(crate) fn parse_changes(document: &str) -> Result<ChangeList, String> {
     let mut lines = document.lines();
     if lines.find(|line| line.trim() == "changes:").is_none() {
