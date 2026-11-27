@@ -52,7 +52,8 @@ pub(crate) struct Differences {
 /// lines in one file become one record before the semdif file is written
 /// when every line in the run is a comment, or none of them is. An added or
 /// removed run that is one complete named block is then recorded as that
-/// block.
+/// block. An indented block that continues after a blank line includes that
+/// blank line.
 /// Identifier renames of one name then join across files when the directory
 /// that covers them has no other occurrence of that name. Import moves of one
 /// import join the same way, when every import of that name in the directory
