@@ -8,7 +8,7 @@ The output is one "semdif" file containing all the changes for the entire source
 
 Where possible, the differences are captured as semantic changes such as "this identifier was renamed" or "a new function with this name was added". Where that is not possible the differences are described as inserts/deletions/modifications to individual directories/files/lines.
 
-The guiding principle is to identify a change with more semantic information before writing a change record with less. Named blocks and identifier changes come before line changes, and line changes come before file changes.
+Each change is classified on its own. The more semantic record is tried first: a named block or an identifier change, then a line change, then a file change.
 
 An "apply" feature is provided which applies the changes described in a semdif file to the original revision, to produce another copy of the revised source.
 
