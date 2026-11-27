@@ -76,11 +76,6 @@ fn an_addition_that_is_not_one_block_stays_a_line_addition() {
         "right/src/split.rs",
         "fn kept() {}\nfn added() {\n    let value = 1;\n\n    let more = 2;\n}\n",
     );
-    tree.write("left/calc.py", "x = 0\n");
-    tree.write(
-        "right/calc.py",
-        "x = 0\ndef added():\n    return 1\n\n    return 2\n",
-    );
     tree.write("left/pair.py", "x = 0\n");
     tree.write(
         "right/pair.py",
@@ -106,14 +101,6 @@ fn an_addition_that_is_not_one_block_stays_a_line_addition() {
     );
     assert!(
         !document.contains("scope: \"src/split.rs\"\n    type: named-block-added"),
-        "{document}"
-    );
-    assert!(
-        document.contains("scope: \"calc.py\"\n    type: line-added"),
-        "{document}"
-    );
-    assert!(
-        !document.contains("scope: \"calc.py\"\n    type: named-block-added"),
         "{document}"
     );
     assert!(

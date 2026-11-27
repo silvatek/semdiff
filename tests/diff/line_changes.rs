@@ -389,6 +389,149 @@ fn flags_a_modification_when_both_lines_are_comments() {
     assert_eq!(tree.read("edited/src/edit.rs"), after.as_bytes());
 }
 
+#[test]
+fn a_new_method_keeps_its_own_closing_brace() {
+    let tree = Tree::new();
+    let before = "\
+impl FileRenamed {
+    fn apply(&self) -> Result<(), String> {
+        fs.rename_file()
+    }
+}
+";
+    let after = "\
+impl FileRenamed {
+    fn apply(&self) -> Result<(), String> {
+        fs.rename_file()
+    }
+
+    fn changed_file(&self) -> Option<&str> {
+        Some(&self.to)
+    }
+}
+";
+    tree.write("left/src/shared.rs", before);
+    tree.write("right/src/shared.rs", after);
+    tree.write("edited/src/shared.rs", before);
+
+    let document = tree.compare("left", "right");
+
+    assert!(document.contains(
+        "  - scope: \"src/shared.rs\"\n    type: line-added\n    details:\n      old: 5\n      lines: +1\n      new: 5\n      text: \"\"\n      isWhitespace: true\n"
+    ), "{document}");
+    assert!(document.contains(
+        "  - scope: \"src/shared.rs[FileRenamed]\"\n    type: named-block-added\n    details:\n      old: 5\n      lines: +3\n      new: 6\n      text: \"    fn changed_file(&self) -> Option<&str> {\\n        Some(&self.to)\\n    }\"\n      category: \"method\"\n      name: \"changed_file\"\n"
+    ), "{document}");
+    assert!(!document.contains(
+        "scope: \"src/shared.rs\"\n    type: line-added\n    details:\n      old: 5\n      lines: +1\n      new: 4\n      text: \"    }\""
+    ), "{document}");
+
+    tree.apply("edited", &document).unwrap();
+    assert_eq!(tree.read("edited/src/shared.rs"), after.as_bytes());
+}
+
+#[test]
+fn a_deleted_function_keeps_its_own_closing_brace() {
+    let tree = Tree::new();
+    let before = "\
+fn keep(&self) -> i32 {
+    1
+}
+
+fn dropped(&self) -> i32 {
+    2
+}
+";
+    let after = "\
+fn keep(&self) -> i32 {
+    1
+}
+";
+    tree.write("left/src/dropped.rs", before);
+    tree.write("right/src/dropped.rs", after);
+    tree.write("edited/src/dropped.rs", before);
+
+    let document = tree.compare("left", "right");
+
+    assert!(document.contains(
+        "  - scope: \"src/dropped.rs\"\n    type: line-removed\n    details:\n      old: 4\n      lines: -1\n      new: 4\n      text: \"\"\n      isWhitespace: true\n"
+    ), "{document}");
+    assert!(document.contains(
+        "  - scope: \"src/dropped.rs\"\n    type: named-block-removed\n    details:\n      old: 5\n      lines: -3\n      new: 4\n      text: \"fn dropped(&self) -> i32 {\\n    2\\n}\"\n      category: \"function\"\n      name: \"dropped\"\n"
+    ), "{document}");
+
+    tree.apply("edited", &document).unwrap();
+    assert_eq!(tree.read("edited/src/dropped.rs"), after.as_bytes());
+}
+
+#[test]
+fn an_edit_above_a_new_function_keeps_both() {
+    let tree = Tree::new();
+    let before = "\
+fn keep(&self) -> i32 {
+    1
+}
+";
+    let after = "\
+fn keep(&self) -> i32 {
+    3
+}
+
+fn added(&self) -> i32 {
+    2
+}
+";
+    tree.write("left/src/edited.rs", before);
+    tree.write("right/src/edited.rs", after);
+    tree.write("edited/src/edited.rs", before);
+
+    let document = tree.compare("left", "right");
+
+    assert!(document.contains(
+        "  - scope: \"src/edited.rs:2\"\n    type: constant-changed\n    details:\n      new: 2\n      oldvalue: \"1\"\n      newvalue: \"3\"\n      occurrence: 1\n"
+    ), "{document}");
+    assert!(document.contains(
+        "  - scope: \"src/edited.rs\"\n    type: line-added\n    details:\n      old: 4\n      lines: +1\n      new: 4\n      text: \"\"\n      isWhitespace: true\n"
+    ), "{document}");
+    assert!(document.contains(
+        "  - scope: \"src/edited.rs\"\n    type: named-block-added\n    details:\n      old: 4\n      lines: +3\n      new: 5\n      text: \"fn added(&self) -> i32 {\\n    2\\n}\"\n      category: \"function\"\n      name: \"added\"\n"
+    ), "{document}");
+
+    tree.apply("edited", &document).unwrap();
+    assert_eq!(tree.read("edited/src/edited.rs"), after.as_bytes());
+}
+
+#[test]
+fn an_attribute_stays_on_the_added_function() {
+    let tree = Tree::new();
+    let before = "fn keep() {}\n";
+    let after = "\
+fn keep() {}
+
+#[test]
+fn added() {}
+";
+    tree.write("left/src/attr.rs", before);
+    tree.write("right/src/attr.rs", after);
+    tree.write("edited/src/attr.rs", before);
+
+    let document = tree.compare("left", "right");
+
+    assert!(document.contains(
+        "  - scope: \"src/attr.rs\"\n    type: line-added\n    details:\n      old: 2\n      lines: +1\n      new: 2\n      text: \"\"\n      isWhitespace: true\n"
+    ), "{document}");
+    assert!(document.contains(
+        "  - scope: \"src/attr.rs\"\n    type: line-added\n    details:\n      old: 2\n      lines: +2\n      new: 3\n      text: \"#[test]\\nfn added() {}\"\n"
+    ), "{document}");
+    assert!(
+        !document.contains("scope: \"src/attr.rs\"\n    type: named-block-added"),
+        "{document}"
+    );
+
+    tree.apply("edited", &document).unwrap();
+    assert_eq!(tree.read("edited/src/attr.rs"), after.as_bytes());
+}
+
 /// Whether `record` is present and its next detail is `isWhitespace`.
 fn follows_with_whitespace(document: &str, record: &str) -> bool {
     let Some((_, rest)) = document.split_once(record) else {

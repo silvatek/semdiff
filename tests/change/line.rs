@@ -254,3 +254,28 @@ fn a_comment_does_not_merge_with_an_adjacent_code_edit() {
     tree.apply("edited", &document).unwrap();
     assert_eq!(tree.read("edited/src/merge.rs"), after.as_bytes());
 }
+
+#[test]
+fn a_blank_line_inside_a_python_function_joins_the_block() {
+    let tree = Tree::new();
+    let before = "x = 0\n";
+    let after = "\
+x = 0
+def added():
+    return 1
+
+    return 2
+";
+    tree.write("left/calc.py", before);
+    tree.write("right/calc.py", after);
+    tree.write("edited/calc.py", before);
+
+    let document = tree.compare("left", "right");
+
+    assert!(document.contains(
+        "  - scope: \"calc.py\"\n    type: named-block-added\n    details:\n      old: 2\n      lines: +4\n      new: 2\n      text: \"def added():\\n    return 1\\n\\n    return 2\"\n      category: \"function\"\n      name: \"added\"\n"
+    ), "{document}");
+
+    tree.apply("edited", &document).unwrap();
+    assert_eq!(tree.read("edited/calc.py"), after.as_bytes());
+}

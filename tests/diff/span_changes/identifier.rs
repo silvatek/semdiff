@@ -49,3 +49,34 @@ fn records_an_identifier_rename_when_one_name_changes() {
     assert_eq!(tree.read("edited/note.txt"), note_after.as_bytes());
     assert_eq!(tree.read("edited/calc.py"), python_after.as_bytes());
 }
+
+#[test]
+fn a_rename_inside_a_function_stays_a_rename() {
+    let tree = Tree::new();
+    let before = "\
+fn apply(&self) -> Result<(), String> {
+    fs.rename_file(source, &self.from, &self.to)
+}
+";
+    let after = "\
+fn apply(&self) -> Result<(), String> {
+    fs.rename_file(source, &self.from, &self.dest)
+}
+";
+    tree.write("left/src/rename.rs", before);
+    tree.write("right/src/rename.rs", after);
+    tree.write("edited/src/rename.rs", before);
+
+    let document = tree.compare("left", "right");
+
+    assert!(document.contains(
+        "  - scope: \"src/rename.rs:2\"\n    type: identifier-renamed\n    details:\n      new: 2\n      oldname: \"to\"\n      newname: \"dest\"\n"
+    ), "{document}");
+    assert!(
+        !document.contains("scope: \"src/rename.rs\"\n    type: named-block"),
+        "{document}"
+    );
+
+    tree.apply("edited", &document).unwrap();
+    assert_eq!(tree.read("edited/src/rename.rs"), after.as_bytes());
+}

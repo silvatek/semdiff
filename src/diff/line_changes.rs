@@ -119,7 +119,10 @@ struct CommonLine {
 /// When the current lines are equal, the list is one longer than the list for
 /// the prefixes that end just before them. Otherwise it is the longer of the
 /// two prefixes that drop one of the current lines. Walking back from the
-/// bottom-right cell recovers one such list.
+/// bottom-right cell recovers one such list. A line that occurs more than
+/// once is paired with the earliest copy that still leaves the list as long,
+/// so a later copy of a closing brace stays with the function that was added
+/// or removed.
 fn longest_common_subsequence(old_lines: &[String], new_lines: &[String]) -> Vec<CommonLine> {
     let lengths = common_lengths(old_lines, new_lines);
     recover_common_lines(old_lines, new_lines, &lengths)
@@ -147,6 +150,14 @@ pub(in crate::diff) fn common_lengths(
     lengths
 }
 
+/// One longest common subsequence, pairing a repeated line with its earliest copy.
+///
+/// The walk starts at the end of both files. When the current lines are equal
+/// and dropping the later copy still leaves a list of the same length, that
+/// later copy is left in the gap. The earlier copy is then the one that is
+/// matched. A closing brace added or removed with its function stays in that
+/// function's hunk instead of being paired with the brace that was already
+/// there.
 fn recover_common_lines(
     old_lines: &[String],
     new_lines: &[String],
@@ -156,7 +167,13 @@ fn recover_common_lines(
     let mut old_index = old_lines.len();
     let mut new_index = new_lines.len();
     while old_index > 0 && new_index > 0 {
-        if old_lines[old_index - 1] == new_lines[new_index - 1] {
+        let same = old_lines[old_index - 1] == new_lines[new_index - 1];
+        let length = lengths[old_index][new_index];
+        if same && lengths[old_index][new_index - 1] == length {
+            new_index -= 1;
+        } else if same && lengths[old_index - 1][new_index] == length {
+            old_index -= 1;
+        } else if same {
             matched.push(CommonLine {
                 old_index: old_index - 1,
                 new_index: new_index - 1,

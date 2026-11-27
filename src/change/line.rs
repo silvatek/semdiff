@@ -169,108 +169,182 @@ pub(crate) fn merge_adjacent(changes: &mut super::ChangeList) {
 /// blank line stays its own record, and so does a comment. This pass reads
 /// one addition or removal and, when its first line opens a function, method,
 /// or structure and the text is that one block, replaces it with
-/// [`NamedBlockAdded`] or [`NamedBlockRemoved`]. The line text is unchanged,
-/// so apply inserts or deletes the same lines. A header without its body, a
-/// run of two blocks, and a block that continues on a following record stay
-/// line additions or removals. `new_sources` is the new text of each file and
-/// `old_sources` is the old text, so a callable inside a type's block can be
-/// recorded as a method.
+/// [`NamedBlockAdded`] or [`NamedBlockRemoved`]. An indented block that
+/// continues on a later record of the same kind is that one block, and the
+/// blank lines between those records are part of it. A comment that is still
+/// inside the block leaves the records as line additions or removals. Apply
+/// inserts or deletes the same lines. A header without its body, a run of two
+/// blocks, and a brace block split by a blank line stay line additions or
+/// removals. `new_sources` is the new text of each file and `old_sources` is
+/// the old text, so a callable inside a type's block can be recorded as a
+/// method.
 pub(crate) fn promote_named_blocks(
     new_sources: &[super::SourceText],
     old_sources: &[super::SourceText],
     changes: &mut super::ChangeList,
 ) {
-    for index in 0..changes.len() {
-        if followed_by_more_of_the_block(changes, index) {
-            continue;
-        }
-        let added = named_block_from_addition(new_sources, &changes[index]);
-        if let Some(promoted) = added {
-            changes.replace(index, Box::new(promoted));
-            continue;
-        }
-        let removed = named_block_from_removal(old_sources, &changes[index]);
-        if let Some(promoted) = removed {
-            changes.replace(index, Box::new(promoted));
-        }
-    }
-}
-
-/// Whether a later record is still inside the block opened by `changes[index]`.
-///
-/// Blank lines between the two are skipped, because a blank line does not end
-/// an indented block and does not join the record. The next line that is not
-/// blank answers. An addition continues on the new side. A removal continues
-/// on the old side. Braces do not use this: an unclosed brace block is
-/// already left as a line addition or removal.
-fn followed_by_more_of_the_block(changes: &super::ChangeList, index: usize) -> bool {
-    let current = &changes[index];
-    let removal = match current.kind() {
-        "line-added" => false,
-        "line-removed" => true,
-        _ => return false,
-    };
-    let Some(line) = current.line_edit() else {
-        return false;
-    };
-    if line.is_whitespace() || line.is_comment() {
-        return false;
-    }
-    let Some(text) = line.text() else {
-        return false;
-    };
-    let (old, new) = line.position();
-    let (mut old_at, mut new_at) = if removal {
-        let Some(next_old) = old.checked_add(line_count(text)) else {
-            return false;
-        };
-        (next_old, new)
-    } else {
-        let Some(next_new) = new.checked_add(line_count(text)) else {
-            return false;
-        };
-        (old, next_new)
-    };
-    let mut cursor = index + 1;
-    while cursor < changes.len() {
-        let next = &changes[cursor];
-        if next.kind() != current.kind() || next.scope() != current.scope() {
-            return false;
-        }
-        let Some(next_line) = next.line_edit() else {
-            return false;
-        };
-        let (next_old, next_new) = next_line.position();
-        if next_old != old_at || next_new != new_at {
-            return false;
-        }
-        let Some(next_text) = next_line.text() else {
-            return false;
-        };
-        if next_line.is_whitespace() && !next_line.is_comment() {
-            if removal {
-                let Some(advanced) = old_at.checked_add(line_count(next_text)) else {
-                    return false;
-                };
-                old_at = advanced;
-            } else {
-                let Some(advanced) = new_at.checked_add(line_count(next_text)) else {
-                    return false;
-                };
-                new_at = advanced;
+    let mut index = 0;
+    while index < changes.len() {
+        let last = match block_extent(changes, index) {
+            BlockExtent::Held => {
+                index += 1;
+                continue;
             }
-            cursor += 1;
+            BlockExtent::Through(last) => last,
+        };
+        let drop = (index + 1..=last).collect::<Vec<_>>();
+        if let Some(promoted) = named_block_from_addition(new_sources, changes, index, last) {
+            changes.merge(index, &drop, Box::new(promoted));
+            index += 1;
             continue;
         }
-        return crate::family::block_resumes(current.scope(), text, next_text);
+        if let Some(promoted) = named_block_from_removal(old_sources, changes, index, last) {
+            changes.merge(index, &drop, Box::new(promoted));
+            index += 1;
+            continue;
+        }
+        index += 1;
     }
-    false
 }
 
+/// How many records belong to the block that opens at `index`.
+///
+/// `Through` names the last record to include. A block that does not continue
+/// names its own index. `Held` means a later comment is still inside the
+/// block, so the records stay line additions or removals.
+enum BlockExtent {
+    Through(usize),
+    Held,
+}
+
+/// The records from `index` that form one indented block.
+///
+/// A blank line does not end the block and does not answer whether it
+/// continues. The next line that is not blank does. A line the dialect still
+/// places inside the block is included, and so are the blank lines before it.
+/// A comment in that position holds the block: it is not joined, and the
+/// opening record is not promoted. A line outside the block stops the walk
+/// before any blank line that only separates the two. Braces do not continue
+/// here. An unclosed brace block is left as a line addition or removal.
+fn block_extent(changes: &super::ChangeList, index: usize) -> BlockExtent {
+    let Some(walk) = BlockWalk::start(changes, index) else {
+        return BlockExtent::Through(index);
+    };
+    walk.extent(changes)
+}
+
+/// The position and header of one addition or removal while later records are considered.
+struct BlockWalk {
+    removal: bool,
+    scope: String,
+    header: String,
+    old_at: usize,
+    new_at: usize,
+    last: usize,
+}
+
+impl BlockWalk {
+    fn start(changes: &super::ChangeList, index: usize) -> Option<Self> {
+        let current = &changes[index];
+        let removal = match current.kind() {
+            "line-added" => false,
+            "line-removed" => true,
+            _ => return None,
+        };
+        let line = current.line_edit()?;
+        if line.is_whitespace() || line.is_comment() {
+            return None;
+        }
+        let text = line.text()?.to_string();
+        let (old, new) = line.position();
+        let (old_at, new_at) = next_position(removal, old, new, &text)?;
+        Some(Self {
+            removal,
+            scope: current.scope().to_string(),
+            header: text,
+            old_at,
+            new_at,
+            last: index,
+        })
+    }
+
+    fn extent(mut self, changes: &super::ChangeList) -> BlockExtent {
+        let mut cursor = self.last + 1;
+        while cursor < changes.len() {
+            let Some(text) = self.following_text(changes, cursor) else {
+                break;
+            };
+            if changes[cursor]
+                .line_edit()
+                .is_some_and(|line| line.is_whitespace() && !line.is_comment())
+            {
+                cursor += 1;
+                continue;
+            }
+            if !crate::family::block_resumes(&self.scope, &self.header, &text) {
+                break;
+            }
+            if changes[cursor]
+                .line_edit()
+                .is_some_and(|line| line.is_comment())
+            {
+                return BlockExtent::Held;
+            }
+            self.last = cursor;
+            cursor += 1;
+        }
+        BlockExtent::Through(self.last)
+    }
+
+    /// The text of the next same-kind record, when it starts where this block left off.
+    fn following_text(&mut self, changes: &super::ChangeList, cursor: usize) -> Option<String> {
+        let next = &changes[cursor];
+        if next.kind() != kind_name(self.removal) || next.scope() != self.scope {
+            return None;
+        }
+        let line = next.line_edit()?;
+        let (next_old, next_new) = line.position();
+        if next_old != self.old_at || next_new != self.new_at {
+            return None;
+        }
+        let text = line.text()?.to_string();
+        (self.old_at, self.new_at) = next_position(self.removal, self.old_at, self.new_at, &text)?;
+        Some(text)
+    }
+}
+
+fn kind_name(removal: bool) -> &'static str {
+    if removal {
+        "line-removed"
+    } else {
+        "line-added"
+    }
+}
+
+/// The line position just after a record with this text.
+///
+/// A removal continues down the old file and keeps its new line. An addition
+/// continues down the new file and keeps its old line.
+fn next_position(removal: bool, old: usize, new: usize, text: &str) -> Option<(usize, usize)> {
+    let count = line_count(text);
+    if removal {
+        Some((old.checked_add(count)?, new))
+    } else {
+        Some((old, new.checked_add(count)?))
+    }
+}
+
+/// The named block in records `index` through `last`, when they are one addition.
+///
+/// `last` includes a continued indented body and the blank lines inside it.
+/// The first record supplies the line numbers. The joined text is the block.
 fn named_block_from_addition(
     sources: &[super::SourceText],
-    change: &dyn super::Change,
+    changes: &super::ChangeList,
+    index: usize,
+    last: usize,
 ) -> Option<NamedBlockAdded> {
+    let change = &changes[index];
     if change.kind() != "line-added" {
         return None;
     }
@@ -278,24 +352,32 @@ fn named_block_from_addition(
     if line.is_comment() || line.is_whitespace() {
         return None;
     }
-    let text = line.text()?;
+    let text = joined_block_text(changes, index, last)?;
     let (old, new) = line.position();
     let before = lines_before(sources, change.scope(), new);
-    let block = crate::family::named_block_in(change.scope(), text, &before)?;
+    let block = crate::family::named_block_in(change.scope(), &text, &before)?;
     Some(NamedBlockAdded::new(
         block_scope(change.scope(), block.enclosing.as_deref()),
         old,
         new,
-        text.to_string(),
+        text,
         block.category,
         block.name,
     ))
 }
 
+/// The named block in records `index` through `last`, when they are one removal.
+///
+/// `last` includes a continued indented body and the blank lines inside it.
+/// The first record supplies the line numbers. The joined text is the block,
+/// read against the old file above it.
 fn named_block_from_removal(
     sources: &[super::SourceText],
-    change: &dyn super::Change,
+    changes: &super::ChangeList,
+    index: usize,
+    last: usize,
 ) -> Option<NamedBlockRemoved> {
+    let change = &changes[index];
     if change.kind() != "line-removed" {
         return None;
     }
@@ -303,18 +385,28 @@ fn named_block_from_removal(
     if line.is_comment() || line.is_whitespace() {
         return None;
     }
-    let text = line.text()?;
+    let text = joined_block_text(changes, index, last)?;
     let (old, new) = line.position();
     let before = lines_before(sources, change.scope(), old);
-    let block = crate::family::named_block_in(change.scope(), text, &before)?;
+    let block = crate::family::named_block_in(change.scope(), &text, &before)?;
     Some(NamedBlockRemoved::new(
         block_scope(change.scope(), block.enclosing.as_deref()),
         old,
         new,
-        text.to_string(),
+        text,
         block.category,
         block.name,
     ))
+}
+
+/// The text of records `index` through `last`, joined as lines of one block.
+fn joined_block_text(changes: &super::ChangeList, index: usize, last: usize) -> Option<String> {
+    let mut text = changes[index].line_edit()?.text()?.to_string();
+    for cursor in index + 1..=last {
+        text.push('\n');
+        text.push_str(changes[cursor].line_edit()?.text()?);
+    }
+    Some(text)
 }
 
 /// The scope written for a named block.
@@ -928,9 +1020,7 @@ mod tests {
     use super::{merge_adjacent, promote_named_blocks, LineAdded, LineRemoved};
 
     /// A change list holding these changes, in order.
-    fn listed<T: super::Change + 'static>(
-        items: impl IntoIterator<Item = T>,
-    ) -> ChangeList {
+    fn listed<T: super::Change + 'static>(items: impl IntoIterator<Item = T>) -> ChangeList {
         let mut changes = ChangeList::new();
         for item in items {
             changes.add(item);
@@ -1144,18 +1234,13 @@ mod tests {
         let pair = promoted(
             &[],
             &[],
-            listed([removed(
-                2,
-                "fn one() {}\nfn two() {}",
-                false,
-                false,
-            )]),
+            listed([removed(2, "fn one() {}\nfn two() {}", false, false)]),
         );
         assert_eq!(pair[0].kind(), "line-removed");
     }
 
     #[test]
-    fn a_python_block_that_continues_after_the_removal_stays_a_line_removal() {
+    fn a_python_removal_split_by_a_blank_line_is_one_block() {
         let continued = promoted(
             &[],
             &[],
@@ -1168,14 +1253,7 @@ mod tests {
                     false,
                     false,
                 ),
-                LineRemoved::new(
-                    "calc.py".to_string(),
-                    3,
-                    1,
-                    "".to_string(),
-                    false,
-                    true,
-                ),
+                LineRemoved::new("calc.py".to_string(), 3, 1, "".to_string(), false, true),
                 LineRemoved::new(
                     "calc.py".to_string(),
                     4,
@@ -1186,9 +1264,16 @@ mod tests {
                 ),
             ]),
         );
-        assert_eq!(continued[0].kind(), "line-removed");
-        assert!(continued[1].line_edit().expect("blank").is_whitespace());
-        assert_eq!(continued[2].kind(), "line-removed");
+        assert_eq!(continued.len(), 1);
+        assert_eq!(continued[0].kind(), "named-block-removed");
+        let mut details = String::new();
+        continued[0].write_details(&mut details);
+        assert!(details.contains("lines: -4\n"), "{details}");
+        assert!(
+            details.contains("text: \"def dropped():\\n    return 1\\n\\n    return 2\"\n"),
+            "{details}"
+        );
+        assert!(details.contains("name: \"dropped\"\n"), "{details}");
     }
 
     #[test]
@@ -1196,12 +1281,7 @@ mod tests {
         let unclosed = promoted(
             &[],
             &[],
-            listed([added(
-                2,
-                "fn added() {\n    let value = 1;",
-                false,
-                false,
-            )]),
+            listed([added(2, "fn added() {\n    let value = 1;", false, false)]),
         );
         assert_eq!(unclosed[0].kind(), "line-added");
 
@@ -1214,7 +1294,7 @@ mod tests {
     }
 
     #[test]
-    fn a_python_block_that_continues_after_the_addition_stays_a_line_addition() {
+    fn a_python_addition_split_by_a_blank_line_is_one_block() {
         let continued = promoted(
             &[],
             &[],
@@ -1227,14 +1307,7 @@ mod tests {
                     false,
                     false,
                 ),
-                LineAdded::new(
-                    "calc.py".to_string(),
-                    1,
-                    3,
-                    "".to_string(),
-                    false,
-                    true,
-                ),
+                LineAdded::new("calc.py".to_string(), 1, 3, "".to_string(), false, true),
                 LineAdded::new(
                     "calc.py".to_string(),
                     1,
@@ -1245,10 +1318,20 @@ mod tests {
                 ),
             ]),
         );
-        assert_eq!(continued[0].kind(), "line-added");
-        assert!(continued[1].line_edit().expect("blank").is_whitespace());
-        assert_eq!(continued[2].kind(), "line-added");
+        assert_eq!(continued.len(), 1);
+        assert_eq!(continued[0].kind(), "named-block-added");
+        let mut details = String::new();
+        continued[0].write_details(&mut details);
+        assert!(details.contains("lines: +4\n"), "{details}");
+        assert!(
+            details.contains("text: \"def added():\\n    return 1\\n\\n    return 2\"\n"),
+            "{details}"
+        );
+        assert!(details.contains("name: \"added\"\n"), "{details}");
+    }
 
+    #[test]
+    fn a_python_comment_inside_the_block_leaves_the_addition() {
         let commented = promoted(
             &[],
             &[],
@@ -1289,14 +1372,7 @@ mod tests {
                     false,
                     false,
                 ),
-                LineAdded::new(
-                    "calc.py".to_string(),
-                    1,
-                    3,
-                    "".to_string(),
-                    false,
-                    true,
-                ),
+                LineAdded::new("calc.py".to_string(), 1, 3, "".to_string(), false, true),
                 LineAdded::new(
                     "calc.py".to_string(),
                     1,
