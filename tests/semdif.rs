@@ -273,3 +273,151 @@ changes:
     assert!(message.contains("invalid isWhitespace yes"), "{message}");
     assert_eq!(tree.read("edited/src/main.rs"), b"fn main() {}\n");
 }
+
+/// The summary section, which sits between the header and the changes.
+fn summary_of(document: &str) -> &str {
+    let after_header = document
+        .split_once("binary-encoding: \"base64\"\n")
+        .expect("header")
+        .1;
+    after_header
+        .split_once("changes:\n")
+        .expect("changes")
+        .0
+}
+
+#[test]
+fn writes_a_summary_between_the_header_and_the_changes() {
+    let tree = Tree::new();
+    let before = "old line\n";
+    let after = "He said \"hello\"\nNext line\n";
+    tree.write("left/same.txt", "unchanged\n");
+    tree.write("right/same.txt", "unchanged\n");
+    tree.write("left/note.txt", before);
+    tree.write("right/note.txt", after);
+    tree.write("edited/note.txt", before);
+    tree.write("left/drop.txt", "keep\ngone\n");
+    tree.write("right/drop.txt", "keep\n");
+    tree.write("edited/drop.txt", "keep\ngone\n");
+    tree.write("left/data.bin", b"old");
+    tree.write("right/data.bin", b"\x00\xff");
+    tree.write("edited/data.bin", b"old");
+
+    let document = tree.compare("left", "right");
+
+    assert!(document.contains("type: line-added\n"), "{document}");
+    assert!(document.contains("lines: +1\n"), "{document}");
+    assert!(document.contains("type: line-removed\n"), "{document}");
+    assert!(document.contains("lines: -1\n"), "{document}");
+    assert!(document.contains("type: line-modified\n"), "{document}");
+    assert!(document.contains("scope: \"data.bin\""), "{document}");
+    assert!(!document.contains("same.txt"), "{document}");
+    assert_eq!(
+        summary_of(&document),
+        "\
+summary:
+  changes: 7
+  files: 3
+  lines-added: 1
+  lines-removed: 1
+"
+    );
+
+    tree.apply("edited", &document).unwrap();
+    assert_eq!(tree.read("edited/note.txt"), after.as_bytes());
+    assert_eq!(tree.read("edited/drop.txt"), b"keep\n");
+    assert_eq!(tree.read("edited/data.bin"), b"\x00\xff");
+}
+
+#[test]
+fn counts_each_changed_file_and_leaves_a_directory_out() {
+    let tree = Tree::new();
+    let quote = "Brevity is the soul of wit.\n";
+    tree.write("left/quote.txt", quote);
+    tree.write("right/quotation.txt", quote);
+    tree.write("left/notes.txt", "left only\n");
+    tree.write("right/other.txt", "right only\n");
+    tree.dir("right/vacant");
+
+    let document = tree.compare("left", "right");
+
+    assert!(document.contains("type: file-renamed\n"), "{document}");
+    assert!(document.contains("type: file-added\n"), "{document}");
+    assert!(document.contains("type: file-deleted\n"), "{document}");
+    assert!(document.contains("type: directory-added\n"), "{document}");
+    assert_eq!(
+        summary_of(&document),
+        "\
+summary:
+  changes: 4
+  files: 3
+  lines-added: 0
+  lines-removed: 0
+"
+    );
+}
+
+#[test]
+fn counts_a_moved_file_once_when_its_line_is_modified() {
+    let tree = Tree::new();
+    tree.write("left/old/note.txt", "a\nb\nc\nd\n");
+    tree.write("right/new/note.txt", "a\nb\nc\ny\n");
+
+    let document = tree.compare("left", "right");
+
+    assert!(document.contains("type: file-moved\n"), "{document}");
+    assert!(document.contains("type: line-modified\n"), "{document}");
+    assert!(document.contains("type: directory-deleted\n"), "{document}");
+    assert_eq!(
+        summary_of(&document),
+        "\
+summary:
+  changes: 4
+  files: 1
+  lines-added: 0
+  lines-removed: 0
+"
+    );
+}
+
+#[test]
+fn sums_the_lines_a_named_block_record_stores() {
+    let tree = Tree::new();
+    tree.write("left/src/types.rs", "impl Foo {\n}\n");
+    tree.write(
+        "right/src/types.rs",
+        "impl Foo {\n    fn added() {}\n}\n",
+    );
+    tree.write("left/types.py", "class Foo:\n    x = 1\n");
+    tree.write(
+        "right/types.py",
+        "class Foo:\n    x = 1\n    def added(self):\n        return 1\n",
+    );
+    tree.write("left/pair.py", "x = 0\ndef one():\n    return 1\n");
+    tree.write("right/pair.py", "x = 0\n");
+
+    let document = tree.compare("left", "right");
+
+    assert!(
+        document.contains("scope: \"src/types.rs[Foo]\"\n    type: named-block-added\n"),
+        "{document}"
+    );
+    assert!(
+        document.contains("scope: \"types.py[Foo]\"\n    type: named-block-added\n"),
+        "{document}"
+    );
+    assert!(
+        document.contains("type: named-block-removed\n"),
+        "{document}"
+    );
+    assert_eq!(
+        summary_of(&document),
+        "\
+summary:
+  changes: 6
+  files: 3
+  lines-added: 3
+  lines-removed: 2
+"
+    );
+}

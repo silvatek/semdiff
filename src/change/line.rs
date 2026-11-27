@@ -414,6 +414,10 @@ impl Change for LineAdded {
     fn apply(&self, _fs: &dyn FileSystem, _source: &Path) -> Result<(), String> {
         applied_with_its_file(self.kind())
     }
+
+    fn lines_added(&self) -> usize {
+        line_count(&self.body.text)
+    }
 }
 
 impl Content for LineAdded {
@@ -531,6 +535,10 @@ impl Change for NamedBlockAdded {
     fn apply(&self, _fs: &dyn FileSystem, _source: &Path) -> Result<(), String> {
         applied_with_its_file(self.kind())
     }
+
+    fn lines_added(&self) -> usize {
+        line_count(&self.body.text)
+    }
 }
 
 impl Content for NamedBlockAdded {
@@ -639,6 +647,10 @@ impl Change for NamedBlockRemoved {
     fn apply(&self, _fs: &dyn FileSystem, _source: &Path) -> Result<(), String> {
         applied_with_its_file(self.kind())
     }
+
+    fn lines_removed(&self) -> usize {
+        line_count(&self.body.text)
+    }
 }
 
 impl Content for NamedBlockRemoved {
@@ -739,6 +751,10 @@ impl Change for LineRemoved {
 
     fn apply(&self, _fs: &dyn FileSystem, _source: &Path) -> Result<(), String> {
         applied_with_its_file(self.kind())
+    }
+
+    fn lines_removed(&self) -> usize {
+        line_count(&self.body.text)
     }
 }
 

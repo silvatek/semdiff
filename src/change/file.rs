@@ -49,6 +49,10 @@ impl Change for FileRenamed {
     fn apply(&self, fs: &dyn FileSystem, source: &Path) -> Result<(), String> {
         fs.rename_file(source, &self.from, &self.to)
     }
+
+    fn changed_file(&self) -> Option<&str> {
+        Some(&self.to)
+    }
 }
 
 /// A file moved to a new path, with its contents compared afterwards.
@@ -98,6 +102,10 @@ impl Change for FileMoved {
     fn apply(&self, fs: &dyn FileSystem, source: &Path) -> Result<(), String> {
         fs.rename_file(source, &self.from, &self.to)
     }
+
+    fn changed_file(&self) -> Option<&str> {
+        Some(&self.to)
+    }
 }
 
 /// A file removed from the tree.
@@ -138,6 +146,10 @@ impl Change for FileDeleted {
 
     fn apply(&self, fs: &dyn FileSystem, source: &Path) -> Result<(), String> {
         fs.delete_file(source, &self.path)
+    }
+
+    fn changed_file(&self) -> Option<&str> {
+        Some(&self.path)
     }
 }
 
@@ -182,6 +194,10 @@ impl Change for FileAdded {
 
     fn apply(&self, fs: &dyn FileSystem, source: &Path) -> Result<(), String> {
         fs.write_file(source, &self.path, &self.contents)
+    }
+
+    fn changed_file(&self) -> Option<&str> {
+        Some(&self.path)
     }
 }
 

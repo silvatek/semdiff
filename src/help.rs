@@ -94,6 +94,29 @@ Exit status
      check failed.
   2  The arguments are wrong. The short usage is written to standard error.
 
+Summary
+
+  A comparison that found changes writes a summary between the header and
+  the changes. An unchanged comparison stays a header only. Apply ignores
+  the summary.
+
+  changes
+      How many records the changes section holds.
+
+  files
+      How many distinct files those records name. A rename or a move is one
+      file, the file at its new path. A directory is not a file.
+
+  lines-added
+      How many lines the records add, summed across every file. The count is
+      the lines value already stored on a line addition or a named-block
+      addition.
+
+  lines-removed
+      How many lines the records remove, summed across every file. The count
+      is the lines value already stored on a line removal or a named-block
+      removal.
+
 Supported change types
 
   - Directory added
