@@ -63,4 +63,20 @@ fn classifies_the_javascript_sample() {
     assert!(javascript.contains(
         "  - scope: \"src/main.js[Total]\"\n    type: named-block-removed\n    details:\n      old: 89\n      lines: -3\n      new: 93\n      text: \"    undo() {\\n        return this.left;\\n    }\"\n      category: \"method\"\n      name: \"undo\"\n"
     ), "{javascript}");
+    assert!(javascript.contains(
+        "  - scope: \"src/main.js\"\n    type: named-block-added\n    details:\n      old: 98\n      lines: +5\n      new: 99\n      text: \"function spaced(n) {\\n    const value = n;\\n\\n    return value + 1;\\n}\"\n      category: \"function\"\n      name: \"spaced\"\n"
+    ), "{javascript}");
+    assert!(javascript.contains(
+        "  - scope: \"src/main.js\"\n    type: named-block-added\n    details:\n      old: 99\n      lines: +5\n      new: 105\n      text: \"function noted(n) {\\n    const value = n;\\n    // note\\n    return value + 1;\\n}\"\n      category: \"function\"\n      name: \"noted\"\n"
+    ), "{javascript}");
+    assert!(javascript.contains(
+        "  - scope: \"src/main.js\"\n    type: named-block-added\n    details:\n      old: 100\n      lines: +6\n      new: 111\n      text: \"function outer() {\\n    function inner() {\\n        return 1;\\n    }\\n    return 0;\\n}\"\n      category: \"function\"\n      name: \"outer\"\n"
+    ), "{javascript}");
+    assert!(javascript.contains(
+        "  - scope: \"src/main.js\"\n    type: named-block-added\n    details:\n      old: 101\n      lines: +1\n      new: 118\n      text: \"function one() { return 1; }\"\n      category: \"function\"\n      name: \"one\"\n  - scope: \"src/main.js\"\n    type: line-added\n    details:\n      old: 101\n      lines: +1\n      new: 119\n      text: \"\"\n      isWhitespace: true\n  - scope: \"src/main.js\"\n    type: named-block-added\n    details:\n      old: 101\n      lines: +1\n      new: 120\n      text: \"function two() { return 2; }\"\n      category: \"function\"\n      name: \"two\"\n"
+    ), "{javascript}");
+    assert!(javascript.contains(
+        "  - scope: \"src/main.js\"\n    type: named-block-removed\n    details:\n      old: 102\n      lines: -5\n      new: 122\n      text: \"function gapped(n) {\\n    const value = n;\\n\\n    return value - 1;\\n}\"\n      category: \"function\"\n      name: \"gapped\"\n"
+    ), "{javascript}");
+    assert!(!javascript.contains("name: \"inner\""), "{javascript}");
 }

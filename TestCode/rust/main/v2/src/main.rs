@@ -105,3 +105,28 @@ impl Total {
 
 // An integer changes in v2.
 const LIMIT: usize = 20;
+
+// A function with a blank line inside is added below in v2.
+fn spaced(n: u32) -> u64 {
+    let value = n;
+
+    value + 1
+}
+// A function with a comment inside is added below in v2.
+fn noted(n: u32) -> u64 {
+    let value = n;
+    // note
+    value + 1
+}
+// A function containing another function is added below in v2.
+fn outer() {
+    fn inner() {}
+}
+// Two functions, with a blank line between them, are added below in v2.
+fn one() {}
+
+fn two() {}
+// An attribute and a function are added below in v2.
+#[test]
+fn checked() {}
+// A function with a blank line inside is removed in v2.

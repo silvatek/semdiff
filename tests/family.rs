@@ -61,6 +61,41 @@ fn records_named_blocks_in_the_samples() {
     assert!(python.contains(
         "  - scope: \"src/main.py[Total]\"\n    type: named-block-removed\n    details:\n      old: 89\n      lines: -2\n      new: 92\n      text: \"    def undo(self):\\n        return self.left\"\n      category: \"method\"\n      name: \"undo\"\n"
     ), "{python}");
+    assert!(rust.contains(
+        "  - scope: \"src/main.rs\"\n    type: named-block-added\n    details:\n      old: 109\n      lines: +5\n      new: 110\n      text: \"fn spaced(n: u32) -> u64 {\\n    let value = n;\\n\\n    value + 1\\n}\"\n      category: \"function\"\n      name: \"spaced\"\n"
+    ), "{rust}");
+    assert!(rust.contains(
+        "  - scope: \"src/main.rs\"\n    type: named-block-added\n    details:\n      old: 110\n      lines: +5\n      new: 116\n      text: \"fn noted(n: u32) -> u64 {\\n    let value = n;\\n    // note\\n    value + 1\\n}\"\n      category: \"function\"\n      name: \"noted\"\n"
+    ), "{rust}");
+    assert!(rust.contains(
+        "  - scope: \"src/main.rs\"\n    type: named-block-added\n    details:\n      old: 111\n      lines: +3\n      new: 122\n      text: \"fn outer() {\\n    fn inner() {}\\n}\"\n      category: \"function\"\n      name: \"outer\"\n"
+    ), "{rust}");
+    assert!(rust.contains(
+        "  - scope: \"src/main.rs\"\n    type: named-block-added\n    details:\n      old: 112\n      lines: +1\n      new: 126\n      text: \"fn one() {}\"\n      category: \"function\"\n      name: \"one\"\n  - scope: \"src/main.rs\"\n    type: line-added\n    details:\n      old: 112\n      lines: +1\n      new: 127\n      text: \"\"\n      isWhitespace: true\n  - scope: \"src/main.rs\"\n    type: named-block-added\n    details:\n      old: 112\n      lines: +1\n      new: 128\n      text: \"fn two() {}\"\n      category: \"function\"\n      name: \"two\"\n"
+    ), "{rust}");
+    assert!(rust.contains(
+        "  - scope: \"src/main.rs\"\n    type: line-added\n    details:\n      old: 113\n      lines: +1\n      new: 130\n      text: \"#[test]\"\n  - scope: \"src/main.rs\"\n    type: named-block-added\n    details:\n      old: 113\n      lines: +1\n      new: 131\n      text: \"fn checked() {}\"\n      category: \"function\"\n      name: \"checked\"\n"
+    ), "{rust}");
+    assert!(rust.contains(
+        "  - scope: \"src/main.rs\"\n    type: named-block-removed\n    details:\n      old: 114\n      lines: -5\n      new: 133\n      text: \"fn gapped(n: u32) -> u64 {\\n    let value = n;\\n\\n    value - 1\\n}\"\n      category: \"function\"\n      name: \"gapped\"\n"
+    ), "{rust}");
+    assert!(!rust.contains("name: \"inner\""), "{rust}");
+    assert!(python.contains(
+        "  - scope: \"src/main.py\"\n    type: named-block-added\n    details:\n      old: 96\n      lines: +4\n      new: 97\n      text: \"def spaced(n):\\n    value = n\\n\\n    return value + 1\"\n      category: \"function\"\n      name: \"spaced\"\n"
+    ), "{python}");
+    assert!(python.contains(
+        "  - scope: \"src/main.py\"\n    type: named-block-added\n    details:\n      old: 97\n      lines: +4\n      new: 102\n      text: \"def noted(n):\\n    value = n\\n    # note\\n    return value + 1\"\n      category: \"function\"\n      name: \"noted\"\n"
+    ), "{python}");
+    assert!(python.contains(
+        "  - scope: \"src/main.py\"\n    type: named-block-added\n    details:\n      old: 98\n      lines: +4\n      new: 107\n      text: \"def outer():\\n    def inner():\\n        return 1\\n    return 0\"\n      category: \"function\"\n      name: \"outer\"\n"
+    ), "{python}");
+    assert!(python.contains(
+        "  - scope: \"src/main.py\"\n    type: named-block-added\n    details:\n      old: 99\n      lines: +2\n      new: 112\n      text: \"def one():\\n    return 1\"\n      category: \"function\"\n      name: \"one\"\n  - scope: \"src/main.py\"\n    type: line-added\n    details:\n      old: 99\n      lines: +1\n      new: 114\n      text: \"\"\n      isWhitespace: true\n  - scope: \"src/main.py\"\n    type: named-block-added\n    details:\n      old: 99\n      lines: +2\n      new: 115\n      text: \"def two():\\n    return 2\"\n      category: \"function\"\n      name: \"two\"\n"
+    ), "{python}");
+    assert!(python.contains(
+        "  - scope: \"src/main.py\"\n    type: named-block-removed\n    details:\n      old: 100\n      lines: -4\n      new: 118\n      text: \"def gapped(n):\\n    value = n\\n\\n    return value - 1\"\n      category: \"function\"\n      name: \"gapped\"\n"
+    ), "{python}");
+    assert!(!python.contains("name: \"inner\""), "{python}");
 }
 
 #[test]

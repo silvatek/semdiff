@@ -94,3 +94,28 @@ class Total {
 
 // An integer changes in v2.
 const LIMIT = 20;
+
+// A function with a blank line inside is added below in v2.
+function spaced(n) {
+    const value = n;
+
+    return value + 1;
+}
+// A function with a comment inside is added below in v2.
+function noted(n) {
+    const value = n;
+    // note
+    return value + 1;
+}
+// A function containing another function is added below in v2.
+function outer() {
+    function inner() {
+        return 1;
+    }
+    return 0;
+}
+// Two functions, with a blank line between them, are added below in v2.
+function one() { return 1; }
+
+function two() { return 2; }
+// A function with a blank line inside is removed in v2.

@@ -89,3 +89,13 @@ struct Gone {
 
 // An integer changes in v2.
 int limit = 10;
+
+// A function with a blank line inside is added below in v2.
+// A function with a comment inside is added below in v2.
+// Two functions, with a blank line between them, are added below in v2.
+// A function with a blank line inside is removed in v2.
+int gapped(int n) {
+    int value = n;
+
+    return value - 1;
+}
