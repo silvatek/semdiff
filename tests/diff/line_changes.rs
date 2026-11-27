@@ -502,7 +502,7 @@ fn added(&self) -> i32 {
 }
 
 #[test]
-fn an_attribute_stays_on_the_added_function() {
+fn an_attribute_stays_a_line_addition_before_the_added_function() {
     let tree = Tree::new();
     let before = "fn keep() {}\n";
     let after = "\
@@ -521,12 +521,11 @@ fn added() {}
         "  - scope: \"src/attr.rs\"\n    type: line-added\n    details:\n      old: 2\n      lines: +1\n      new: 2\n      text: \"\"\n      isWhitespace: true\n"
     ), "{document}");
     assert!(document.contains(
-        "  - scope: \"src/attr.rs\"\n    type: line-added\n    details:\n      old: 2\n      lines: +2\n      new: 3\n      text: \"#[test]\\nfn added() {}\"\n"
+        "  - scope: \"src/attr.rs\"\n    type: line-added\n    details:\n      old: 2\n      lines: +1\n      new: 3\n      text: \"#[test]\"\n"
     ), "{document}");
-    assert!(
-        !document.contains("scope: \"src/attr.rs\"\n    type: named-block-added"),
-        "{document}"
-    );
+    assert!(document.contains(
+        "  - scope: \"src/attr.rs\"\n    type: named-block-added\n    details:\n      old: 2\n      lines: +1\n      new: 4\n      text: \"fn added() {}\"\n      category: \"function\"\n      name: \"added\"\n"
+    ), "{document}");
 
     tree.apply("edited", &document).unwrap();
     assert_eq!(tree.read("edited/src/attr.rs"), after.as_bytes());

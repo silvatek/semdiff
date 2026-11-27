@@ -2,9 +2,9 @@
 //! combine records.
 //!
 //! One pass collects the files and directories, splits the paths, and records
-//! file, content, and directory changes. Later passes merge adjacent lines,
-//! name a complete block, and join identifier renames and import moves that
-//! cover one directory.
+//! file, content, and directory changes. Later passes name a complete block
+//! from the individual lines, merge the line changes that remain, and join
+//! identifier renames and import moves that cover one directory.
 //!
 //! A file that exists on only one side, a paired file, an empty directory, and
 //! the lines of a text file each live in their own module. A paired file whose
@@ -48,12 +48,13 @@ pub(crate) struct Differences {
 /// files before their contents are compared.
 /// Files that exist on both sides are paired and compared in place.
 /// Empty directories that appear or disappear are recorded too, including one
-/// left empty because its files moved. Adjacent removed, added, or modified
-/// lines in one file become one record before the semdif file is written
-/// when every line in the run is a comment, or none of them is. An added or
-/// removed run that is one complete named block is then recorded as that
-/// block. An indented block that continues after a blank line includes that
-/// blank line.
+/// left empty because its files moved. An added or removed run that is one
+/// complete named block is recorded from those lines, before adjacent line
+/// edits are merged. The block runs from its header through its end. A blank
+/// line or a comment inside it is part of the block. A header without its
+/// body stays a line change.
+/// Adjacent removed, added, or modified lines that remain then become one
+/// record when every line in the run is a comment, or none of them is.
 /// Identifier renames of one name then join across files when the directory
 /// that covers them has no other occurrence of that name. Import moves of one
 /// import join the same way, when every import of that name in the directory
@@ -78,13 +79,13 @@ pub(crate) fn find_differences(
         &right_files,
     ));
     directory_changes::place_replacement_files(&mut changes);
-    merge_adjacent(&mut changes);
     let right_root = fs.source_base(Path::new(&sources.right));
     let right_texts = source_texts(fs, right_root, &paired_files, &changes, ComparedSide::Right)?;
     let left_root = fs.source_base(Path::new(&sources.left));
     let old_paths = changes.old_text_paths(&left_files);
     let texts = source_texts(fs, left_root, &old_paths, &changes, ComparedSide::Left)?;
     promote_named_blocks(&right_texts, &texts, &mut changes);
+    merge_adjacent(&mut changes);
     merge_identifier_files(&texts, &mut changes);
     merge_import_files(&texts, &mut changes);
     Ok(Differences {

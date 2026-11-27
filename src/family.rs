@@ -67,16 +67,17 @@ pub(super) fn matching_qualifier<'a>(
 
 /// Whether `following` is still inside the block opened by `addition`.
 ///
-/// Blank lines are not an answer: the caller skips them and asks about the
-/// next line. The C-family reader has nothing to add here, because an unclosed
-/// brace block is already not a named block. Python uses indentation, so a
-/// further-indented line is still in the block.
+/// `addition` is the text already included, from the header through the last
+/// line that belongs to the block. Blank lines are not an answer: the caller
+/// skips them and asks about the next line. A brace block resumes while a
+/// `{` is still open. Python uses indentation, so a further-indented line is
+/// still in the block.
 pub(crate) fn block_resumes(path: &str, addition: &str, following: &str) -> bool {
     let Some(dialect) = dialect_for_path(path) else {
         return false;
     };
     match dialect.family {
-        Family::CFamily => false,
+        Family::CFamily => c_family::block_resumes(dialect, addition),
         Family::Python => python::block_resumes(addition, following),
     }
 }
