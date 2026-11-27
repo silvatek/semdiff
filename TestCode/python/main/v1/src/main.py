@@ -91,3 +91,13 @@ class Total:
 
 # An integer changes in v2.
 LIMIT = 10
+
+# A function with a blank line inside is added below in v2.
+# A function with a comment inside is added below in v2.
+# A function containing another function is added below in v2.
+# Two functions, with a blank line between them, are added below in v2.
+# A function with a blank line inside is removed in v2.
+def gapped(n):
+    value = n
+
+    return value - 1

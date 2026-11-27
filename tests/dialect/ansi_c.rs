@@ -53,4 +53,16 @@ fn classifies_the_c_sample() {
     ), "{c}");
     assert!(!c.contains("name: \"Step\""), "{c}");
     assert!(!c.contains("name: \"Gone\""), "{c}");
+    assert!(c.contains(
+        "  - scope: \"src/main.c\"\n    type: named-block-added\n    details:\n      old: 94\n      lines: +5\n      new: 95\n      text: \"int spaced(int n) {\\n    int value = n;\\n\\n    return value + 1;\\n}\"\n      category: \"function\"\n      name: \"spaced\"\n"
+    ), "{c}");
+    assert!(c.contains(
+        "  - scope: \"src/main.c\"\n    type: named-block-added\n    details:\n      old: 95\n      lines: +5\n      new: 101\n      text: \"int noted(int n) {\\n    int value = n;\\n    // note\\n    return value + 1;\\n}\"\n      category: \"function\"\n      name: \"noted\"\n"
+    ), "{c}");
+    assert!(c.contains(
+        "  - scope: \"src/main.c\"\n    type: named-block-added\n    details:\n      old: 96\n      lines: +1\n      new: 107\n      text: \"int one(void) { return 1; }\"\n      category: \"function\"\n      name: \"one\"\n  - scope: \"src/main.c\"\n    type: line-added\n    details:\n      old: 96\n      lines: +1\n      new: 108\n      text: \"\"\n      isWhitespace: true\n  - scope: \"src/main.c\"\n    type: named-block-added\n    details:\n      old: 96\n      lines: +1\n      new: 109\n      text: \"int two(void) { return 2; }\"\n      category: \"function\"\n      name: \"two\"\n"
+    ), "{c}");
+    assert!(c.contains(
+        "  - scope: \"src/main.c\"\n    type: named-block-removed\n    details:\n      old: 97\n      lines: -5\n      new: 111\n      text: \"int gapped(int n) {\\n    int value = n;\\n\\n    return value - 1;\\n}\"\n      category: \"function\"\n      name: \"gapped\"\n"
+    ), "{c}");
 }

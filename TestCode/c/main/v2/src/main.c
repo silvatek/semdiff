@@ -90,3 +90,21 @@ struct Step {
 
 // An integer changes in v2.
 int limit = 20;
+
+// A function with a blank line inside is added below in v2.
+int spaced(int n) {
+    int value = n;
+
+    return value + 1;
+}
+// A function with a comment inside is added below in v2.
+int noted(int n) {
+    int value = n;
+    // note
+    return value + 1;
+}
+// Two functions, with a blank line between them, are added below in v2.
+int one(void) { return 1; }
+
+int two(void) { return 2; }
+// A function with a blank line inside is removed in v2.
